@@ -9,12 +9,14 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-
+import environ
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+env = environ.Env()
+environ.Env.read_env(BASE_DIR / ".env")
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -37,6 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'mozilla_django_oidc',  # Keep this!
+    'apps.core',            # Your local app
 ]
 
 MIDDLEWARE = [
@@ -54,7 +58,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -120,3 +124,37 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+# Standard User Model
+AUTH_USER_MODEL = 'auth.User'
+
+# AUTHENTICATION CONFIGURATION
+# ------------------------------------------------------------------------------
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'mozilla_django_oidc.auth.OIDCAuthenticationBackend',
+]
+
+# Project Alpha doesn't need a fancy custom user model yet,
+# it can use standard Django users where the 'username' is the DID.
+# AUTH_USER_MODEL = 'auth.User' (Standard default)
+
+# OIDC CLIENT (RELYING PARTY) SETTINGS
+# ------------------------------------------------------------------------------
+# These tell Alpha how to talk to the IdP on port 8000
+OIDC_RP_SIGN_ALGO = 'RS256'
+OIDC_RP_CLIENT_ID = env('OIDC_RP_CLIENT_ID')
+OIDC_RP_CLIENT_SECRET = env('OIDC_RP_CLIENT_SECRET')
+
+OIDC_OP_AUTHORIZATION_ENDPOINT = 'http://localhost:8000/openid/authorize/'
+OIDC_OP_TOKEN_ENDPOINT = 'http://localhost:8000/openid/token/'
+OIDC_OP_USER_ENDPOINT = 'http://localhost:8000/openid/userinfo/'
+OIDC_OP_JWKS_ENDPOINT = 'http://localhost:8000/openid/jwks/'
+
+# Redirects
+LOGIN_REDIRECT_URL = '/'
+LOGOUT_REDIRECT_URL = '/'
+LOGIN_URL = 'oidc_authentication_init'
+
+# This ensures the 'sub' (the DID) from the IdP is used as the local username
+OIDC_USERNAME_ALGO = lambda claims: claims.get('sub')

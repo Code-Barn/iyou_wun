@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="bg-white p-8 rounded-lg shadow-md text-center">
+        <h1 class="text-2xl font-bold mb-4">Welcome to your Dashboard</h1>
+        {% if user.is_authenticated %}
+            <div class="mb-6">
+                <p class="text-gray-700">Your Decentralized Identifier (DID):</p>
+                <p class="text-xl font-semibold text-indigo-600">{{ user.username }}</p>
+            </div>
+            <a href="{% url 'oidc_logout' %}" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">
+                Logout
+            </a>
+        {% else %}
+            <p class="text-red-500">You are not authenticated.</p>
+            <a href="{% url 'home' %}" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
+                Go to Home
+            </a>
+        {% endif %}
+    </div>
+</body>
+</html>
