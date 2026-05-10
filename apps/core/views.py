@@ -7,3 +7,7 @@ def home(request):
 @login_required
 def dashboard(request):
     return render(request, 'dashboard.html')
+
+@login_required
+def feed(request):
+    return render(request, 'feed.html')

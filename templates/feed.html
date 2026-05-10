@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Feed - iyou_wun</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
+            <div class="flex items-center gap-4">
+                <a href="{% url 'dashboard' %}" class="text-sm text-gray-600 hover:text-indigo-600">Dashboard</a>
+                <a href="{% url 'oidc_logout' %}" class="text-sm text-red-500 hover:text-red-700">Logout</a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-4xl mx-auto px-4 py-10">
+        <div class="bg-white rounded-lg shadow-md p-8 text-center">
+            <h1 class="text-2xl font-bold mb-2">Omni-Social Feed</h1>
+            <p class="text-gray-500">Your sovereign social layer is being woven.</p>
+            <div class="mt-8 py-12 text-gray-400">
+                <p class="text-lg">Nostr + IPFS / Blossom integration incoming.</p>
+                <p class="text-sm mt-2">This space will soon surface your decentralized feed.</p>
+            </div>
+        </div>
+    </main>
+</body>
+</html>

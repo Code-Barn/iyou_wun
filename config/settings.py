@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-c+jdu#o4x)!=3((fc4$&2b&94%xsbs6izh=p^2q-s4)qfuz-nd
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['100.64.0.4']
 
 
 # Application definition
@@ -132,24 +132,22 @@ AUTH_USER_MODEL = 'auth.User'
 # ------------------------------------------------------------------------------
 AUTHENTICATION_BACKENDS = [
     'django.contrib.auth.backends.ModelBackend',
-    'mozilla_django_oidc.auth.OIDCAuthenticationBackend',
+    'apps.core.auth.MyOIDCAuthenticationBackend',
 ]
 
-# Project Alpha doesn't need a fancy custom user model yet,
-# it can use standard Django users where the 'username' is the DID.
+# iyou_wun uses standard Django users where the 'username' is the DID.
 # AUTH_USER_MODEL = 'auth.User' (Standard default)
 
 # OIDC CLIENT (RELYING PARTY) SETTINGS
 # ------------------------------------------------------------------------------
-# These tell Alpha how to talk to the IdP on port 8000
 OIDC_RP_SIGN_ALGO = 'RS256'
 OIDC_RP_CLIENT_ID = env('OIDC_RP_CLIENT_ID')
 OIDC_RP_CLIENT_SECRET = env('OIDC_RP_CLIENT_SECRET')
 
-OIDC_OP_AUTHORIZATION_ENDPOINT = 'http://localhost:8000/openid/authorize/'
-OIDC_OP_TOKEN_ENDPOINT = 'http://localhost:8000/openid/token/'
-OIDC_OP_USER_ENDPOINT = 'http://localhost:8000/openid/userinfo/'
-OIDC_OP_JWKS_ENDPOINT = 'http://localhost:8000/openid/jwks/'
+OIDC_OP_AUTHORIZATION_ENDPOINT = env('OIDC_OP_AUTHORIZATION_ENDPOINT')
+OIDC_OP_TOKEN_ENDPOINT = env('OIDC_OP_TOKEN_ENDPOINT')
+OIDC_OP_USER_ENDPOINT = env('OIDC_OP_USER_ENDPOINT')
+OIDC_OP_JWKS_ENDPOINT = env('OIDC_OP_JWKS_ENDPOINT', default='http://100.64.0.4:8000/openid/jwks/')
 
 # Redirects
 LOGIN_REDIRECT_URL = '/'
