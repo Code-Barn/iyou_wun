@@ -27,7 +27,7 @@ SECRET_KEY = 'django-insecure-c+jdu#o4x)!=3((fc4$&2b&94%xsbs6izh=p^2q-s4)qfuz-nd
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 # Cookie settings for localhost development (no HTTPS)
 SESSION_COOKIE_SECURE = False
@@ -167,13 +167,13 @@ AUTHENTICATION_BACKENDS = [
 # OIDC CLIENT (RELYING PARTY) SETTINGS
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
-OIDC_RP_CLIENT_ID = env('OIDC_RP_CLIENT_ID')
-OIDC_RP_CLIENT_SECRET = env('OIDC_RP_CLIENT_SECRET')
+OIDC_RP_CLIENT_ID = env.str('OIDC_RP_CLIENT_ID', 'wun-client')
+OIDC_RP_CLIENT_SECRET = env.str('OIDC_RP_CLIENT_SECRET', 'wun-secret')
 
-OIDC_OP_AUTHORIZATION_ENDPOINT = env('OIDC_OP_AUTHORIZATION_ENDPOINT')
-OIDC_OP_TOKEN_ENDPOINT = env('OIDC_OP_TOKEN_ENDPOINT')
-OIDC_OP_USER_ENDPOINT = env('OIDC_OP_USER_ENDPOINT')
-OIDC_OP_JWKS_ENDPOINT = env('OIDC_OP_JWKS_ENDPOINT')
+OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT', 'http://localhost:8000/authorize')
+OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT', 'http://localhost:8000/token')
+OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT', 'http://localhost:8000/userinfo')
+OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT', 'http://localhost:8000/jwks')
 
 # Redirects
 LOGIN_REDIRECT_URL = '/'
