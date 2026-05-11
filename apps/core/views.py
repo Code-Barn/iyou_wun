@@ -1,13 +1,86 @@
 from django.shortcuts import render
 from django.contrib.auth.decorators import login_required
+from django.contrib.auth.mixins import LoginRequiredMixin
+from django.views.generic import TemplateView
+import json
+import ssl
+import threading
+import time
+from datetime import datetime
+from websocket import WebSocketApp
+
 
 def home(request):
     return render(request, 'home.html')
+
 
 @login_required
 def dashboard(request):
     return render(request, 'dashboard.html')
 
-@login_required
-def feed(request):
-    return render(request, 'feed.html')
+
+class FeedView(LoginRequiredMixin, TemplateView):
+    template_name = 'feed.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+
+        # Fetch Kind 1 events from Nostr relay
+        notes = fetch_nostr_notes()
+        context['notes'] = notes
+
+        return context
+
+
+def fetch_nostr_notes(limit=20):
+    """Fetch the last N Kind 1 (Short Text Note) events from a public relay."""
+    relay_url = 'wss://nos.lol'
+    notes = []
+    done = threading.Event()
+
+    def on_open(ws):
+        req = json.dumps(['REQ', 'wun_feed', {'kinds': [1], 'limit': limit}])
+        ws.send(req)
+
+    def on_message(ws, raw):
+        try:
+            msg = json.loads(raw)
+            if msg[0] == 'EVENT' and msg[1] == 'wun_feed':
+                e = msg[2]
+                notes.append({
+                    'pubkey': e.get('pubkey', ''),
+                    'content': e.get('content', ''),
+                    'created_at': datetime.fromtimestamp(e.get('created_at', 0)),
+                })
+            elif msg[0] == 'EOSE':
+                done.set()
+        except Exception:
+            pass
+
+    def on_error(ws, err):
+        done.set()
+
+    def on_close(ws, status, msg):
+        done.set()
+
+    ws = WebSocketApp(
+        relay_url,
+        on_open=on_open,
+        on_message=on_message,
+        on_error=on_error,
+        on_close=on_close,
+    )
+
+    try:
+        t = threading.Thread(
+            target=ws.run_forever,
+            kwargs={'sslopt': {'cert_reqs': ssl.CERT_NONE}},
+            daemon=True,
+        )
+        t.start()
+        done.wait(timeout=10)
+        ws.close()
+    except Exception as e:
+        print(f"Error fetching Nostr notes: {e}")
+
+    return notes[:limit]

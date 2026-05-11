@@ -16,13 +16,37 @@
     </nav>
 
     <main class="max-w-4xl mx-auto px-4 py-10">
-        <div class="bg-white rounded-lg shadow-md p-8 text-center">
+        <div class="bg-white rounded-lg shadow-md p-8">
             <h1 class="text-2xl font-bold mb-2">Omni-Social Feed</h1>
-            <p class="text-gray-500">Your sovereign social layer is being woven.</p>
-            <div class="mt-8 py-12 text-gray-400">
-                <p class="text-lg">Nostr + IPFS / Blossom integration incoming.</p>
-                <p class="text-sm mt-2">This space will soon surface your decentralized feed.</p>
-            </div>
+            <p class="text-gray-500 mb-8">Global notes from the Nostr network (Kind 1).</p>
+
+            {% if notes %}
+                <div class="space-y-6">
+                    {% for note in notes %}
+                        <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
+                            <div class="flex items-start gap-4">
+                                <div class="flex-shrink-0">
+                                    <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                        <span class="text-indigo-600 font-mono text-sm">NPUB</span>
+                                    </div>
+                                </div>
+                                <div class="flex-1 min-w-0">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="font-semibold text-gray-900">{{ note.pubkey|truncatechars:12 }}</span>
+                                        <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
+                                    </div>
+                                    <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaks }}</p>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="text-center py-12">
+                    <p class="text-gray-500 mb-4">Loading notes from Nostr network...</p>
+                    <p class="text-sm text-gray-400">Connecting to wss://nos.lol</p>
+                </div>
+            {% endif %}
         </div>
     </main>
 </body>
