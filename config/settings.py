@@ -170,10 +170,10 @@ OIDC_RP_SIGN_ALGO = 'RS256'
 OIDC_RP_CLIENT_ID = env.str('OIDC_RP_CLIENT_ID', 'wun-client')
 OIDC_RP_CLIENT_SECRET = env.str('OIDC_RP_CLIENT_SECRET', 'wun-secret')
 
-OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT', 'http://localhost:8000/authorize')
-OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT', 'http://localhost:8000/token')
-OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT', 'http://localhost:8000/userinfo')
-OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT', 'http://localhost:8000/jwks')
+OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT')
+OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT')
+OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT')
+OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT')
 
 # Redirects
 LOGIN_REDIRECT_URL = '/'
@@ -182,3 +182,9 @@ LOGIN_URL = 'oidc_authentication_init'
 
 # This ensures the 'sub' (the DID) from the IdP is used as the local username
 OIDC_USERNAME_ALGO = lambda claims: claims.get('sub')
+
+# Debug print to verify environment loading
+print(f"DEBUG: Auth Endpoint is {OIDC_OP_AUTHORIZATION_ENDPOINT}")
+print(f"DEBUG: Token Endpoint is {OIDC_OP_TOKEN_ENDPOINT}")
+print(f"DEBUG: User Endpoint is {OIDC_OP_USER_ENDPOINT}")
+print(f"DEBUG: JWKS Endpoint is {OIDC_OP_JWKS_ENDPOINT}")
