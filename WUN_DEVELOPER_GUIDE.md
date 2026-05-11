@@ -64,12 +64,14 @@ The following variables are required in `.env` to connect to the iyou_idp:
 Current iyou_idp values:
 
 ```
-OIDC_OP_AUTHORIZATION_ENDPOINT=http://100.64.0.4:8000/openid/authorize/
-OIDC_OP_TOKEN_ENDPOINT=http://100.64.0.4:8000/openid/token/
-OIDC_OP_USER_ENDPOINT=http://100.64.0.4:8000/openid/userinfo/
+OIDC_OP_AUTHORIZATION_ENDPOINT=http://localhost:8000/openid/authorize/
+OIDC_OP_TOKEN_ENDPOINT=http://localhost:8000/openid/token/
+OIDC_OP_USER_ENDPOINT=http://localhost:8000/openid/userinfo/
 ```
 
-The JWKS endpoint defaults to `http://100.64.0.4:8000/openid/jwks/` and can be overridden via `OIDC_OP_JWKS_ENDPOINT`.
+The JWKS endpoint is configured via `OIDC_OP_JWKS_ENDPOINT` and should use the same host as the other endpoints.
+
+> **Note**: For Local/Sovereign mode, use `http://localhost:8000` to satisfy browser security requirements. Replace with your IdP's IP/host when using Tailscale or other environments.
 
 ### How authentication flows
 

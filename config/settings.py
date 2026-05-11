@@ -27,7 +27,11 @@ SECRET_KEY = 'django-insecure-c+jdu#o4x)!=3((fc4$&2b&94%xsbs6izh=p^2q-s4)qfuz-nd
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = ['100.64.0.4']
+ALLOWED_HOSTS = ['localhost']
+
+# Cookie settings for localhost development (no HTTPS)
+SESSION_COOKIE_SECURE = False
+CSRF_COOKIE_SECURE = False
 
 
 # Application definition
@@ -42,6 +46,28 @@ INSTALLED_APPS = [
     'mozilla_django_oidc',  # Keep this!
     'apps.core',            # Your local app
 ]
+
+# Logging configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'apps.core': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -147,7 +173,7 @@ OIDC_RP_CLIENT_SECRET = env('OIDC_RP_CLIENT_SECRET')
 OIDC_OP_AUTHORIZATION_ENDPOINT = env('OIDC_OP_AUTHORIZATION_ENDPOINT')
 OIDC_OP_TOKEN_ENDPOINT = env('OIDC_OP_TOKEN_ENDPOINT')
 OIDC_OP_USER_ENDPOINT = env('OIDC_OP_USER_ENDPOINT')
-OIDC_OP_JWKS_ENDPOINT = env('OIDC_OP_JWKS_ENDPOINT', default='http://100.64.0.4:8000/openid/jwks/')
+OIDC_OP_JWKS_ENDPOINT = env('OIDC_OP_JWKS_ENDPOINT')
 
 # Redirects
 LOGIN_REDIRECT_URL = '/'
