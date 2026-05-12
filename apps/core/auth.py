@@ -47,6 +47,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 logger.info(f"Found existing user: {user.username}")
                 print(f"DEBUG: Found existing user: {user.username}, ID: {user.id}")
 
+            print(f"DEBUG: COMMITING SESSION FOR: {user.username}")
             print(f"DEBUG: OIDC Backend returning user: {user.username}")
             return user
         except Exception as e:

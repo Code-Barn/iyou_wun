@@ -12,6 +12,7 @@ import bech32
 
 
 def home(request):
+    print(f"DEBUG: Middleware check - User in request: {request.user}")
     print(f"DEBUG: Cookies received at index: {request.COOKIES.keys()}")
     print(f"DEBUG: Session user at index: {request.user}, Authenticated: {request.user.is_authenticated}")
     print(f"!!! ACCESSING HOME - USER: {request.user} - AUTH: {request.user.is_authenticated} !!!")
