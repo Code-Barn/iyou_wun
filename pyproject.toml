@@ -9,4 +9,5 @@ dependencies = [
     "django-environ>=0.13.0",
     "mozilla-django-oidc>=5.0.2",
     "websocket-client>=1.8.0",
+    "python-nostr2>=0.4.0",
 ]

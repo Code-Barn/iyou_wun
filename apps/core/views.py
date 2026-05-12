@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime
 from websocket import WebSocketApp
+import bech32
 
 
 def home(request):
@@ -47,8 +48,11 @@ def fetch_nostr_notes(limit=20):
             msg = json.loads(raw)
             if msg[0] == 'EVENT' and msg[1] == 'wun_feed':
                 e = msg[2]
+                pubkey = e.get('pubkey', '')
+                npub = hex_to_npub(pubkey) if pubkey else ''
                 notes.append({
-                    'pubkey': e.get('pubkey', ''),
+                    'pubkey': pubkey,
+                    'npub': npub,
                     'content': e.get('content', ''),
                     'created_at': datetime.fromtimestamp(e.get('created_at', 0)),
                 })
@@ -84,3 +88,15 @@ def fetch_nostr_notes(limit=20):
         print(f"Error fetching Nostr notes: {e}")
 
     return notes[:limit]
+
+
+def hex_to_npub(hex_pubkey):
+    """Convert hex pubkey to NIP-19 npub format."""
+    try:
+        # Convert hex to bytes
+        data = bytes.fromhex(hex_pubkey)
+        # Encode using bech32
+        converted = bech32.bech32_encode('npub', bech32.convertbits(data, 8, 5))
+        return converted
+    except Exception:
+        return hex_pubkey[:12] + '...'  # Fallback to truncated hex

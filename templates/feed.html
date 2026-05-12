@@ -32,7 +32,8 @@
                                 </div>
                                 <div class="flex-1 min-w-0">
                                     <div class="flex items-center gap-2 mb-2">
-                                        <span class="font-semibold text-gray-900">{{ note.pubkey|truncatechars:12 }}</span>
+                                        <span class="font-semibold text-gray-900">{{ note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                        <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
                                         <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
                                     </div>
                                     <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaks }}</p>
