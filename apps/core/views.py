@@ -12,6 +12,8 @@ import bech32
 
 
 def home(request):
+    print(f"DEBUG: Cookies received at index: {request.COOKIES.keys()}")
+    print(f"DEBUG: Session user at index: {request.user}, Authenticated: {request.user.is_authenticated}")
     if request.user.is_authenticated:
         return redirect('feed')
     return render(request, 'home.html')

@@ -15,6 +15,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             user.is_active = True
             user.save()
             logger.info(f"User created: {user.username}")
+            print(f"DEBUG: User created in create_user: {user.username}, ID: {user.id}, Authenticated: {user.is_authenticated}")
             return user
         except Exception as e:
             logger.error(f"Error creating user: {e}")

@@ -32,6 +32,8 @@ ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 # Cookie settings for localhost development (no HTTPS)
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
+SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_DOMAIN = None
 
 
 # Application definition
