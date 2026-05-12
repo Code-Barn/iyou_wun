@@ -70,6 +70,10 @@ LOGGING = {
             'level': 'INFO',
             'propagate': False,
         },
+        'mozilla_django_oidc': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+        },
     },
 }
 
@@ -171,6 +175,10 @@ AUTHENTICATION_BACKENDS = [
 # OIDC CLIENT (RELYING PARTY) SETTINGS
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
+
+# Temporary SSL verification bypass for development testing
+OIDC_VERIFY_SSL = False
+OIDC_STORE_ID_TOKEN = True
 # NOTE: No default values here — if these are missing from .env,
 # Django will crash with a clear ImproperlyConfigured error.
 # Previously had fallback defaults ('wun-client' / 'wun-secret')
