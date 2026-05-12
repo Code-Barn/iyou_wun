@@ -10,7 +10,7 @@
             <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
             <div class="flex items-center gap-4">
                 <a href="{% url 'dashboard' %}" class="text-sm text-gray-600 hover:text-indigo-600">Dashboard</a>
-                <a href="{% url 'oidc_logout' %}" class="text-sm text-red-500 hover:text-red-700">Logout</a>
+                <a href="{% url 'oidc_logout' %}?next=/" class="text-sm text-red-500 hover:text-red-700">Logout</a>
             </div>
         </div>
     </nav>

@@ -1,4 +1,4 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.views.generic import TemplateView
@@ -12,6 +12,8 @@ import bech32
 
 
 def home(request):
+    if request.user.is_authenticated:
+        return redirect('feed')
     return render(request, 'home.html')
 
 
@@ -25,6 +27,9 @@ class FeedView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+
+        # Debug print to confirm authentication
+        print(f"DEBUG: Rendering feed for user {self.request.user}")
 
         # Fetch Kind 1 events from Nostr relay
         notes = fetch_nostr_notes()
