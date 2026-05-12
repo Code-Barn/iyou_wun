@@ -176,10 +176,12 @@ AUTHENTICATION_BACKENDS = [
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
 
-# Strict URL matching - manually set to ensure exact match with IdP
+# Hard-coded OIDC endpoints - force all to use 127.0.0.1 for issuer matching
+OIDC_OP_AUTHORIZATION_ENDPOINT = "http://127.0.0.1:8000/openid/authorize/"
+OIDC_OP_TOKEN_ENDPOINT = "http://127.0.0.1:8000/openid/token/"
+OIDC_OP_USER_ENDPOINT = "http://127.0.0.1:8000/openid/userinfo/"
 OIDC_OP_JWKS_ENDPOINT = "http://127.0.0.1:8000/openid/jwks/"
-OIDC_RP_CLIENT_ID = "747582"
-OIDC_OP_AUTHORIZATION_ENDPOINT = "http://localhost:8000/openid/authorize/"
+OIDC_RP_SIGN_ALGO = "RS256"
 
 # Temporary SSL verification bypass for development testing
 OIDC_VERIFY_SSL = False
@@ -187,6 +189,9 @@ OIDC_STORE_ID_TOKEN = True
 
 # Bypass KID verification to isolate signature issues
 OIDC_RP_VERIFY_KID = False
+
+# OIDC callback URL - use 127.0.0.1 for consistency
+OIDC_RP_CALLBACK_URL = "http://127.0.0.1:8001/oidc/callback/"
 # NOTE: No default values here — if these are missing from .env,
 # Django will crash with a clear ImproperlyConfigured error.
 # Previously had fallback defaults ('wun-client' / 'wun-secret')

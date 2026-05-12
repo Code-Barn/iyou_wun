@@ -7,6 +7,7 @@ logger = logging.getLogger(__name__)
 class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def authenticate(self, request, **kwargs):
         print("DEBUG: OIDC Authenticate Method STARTED")
+        print("!!! SUCCESS: THE PROTOCOL HAS FINALLY STARTED !!!")
         return super().authenticate(request, **kwargs)
 
     def create_user(self, claims):
