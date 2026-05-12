@@ -8,7 +8,17 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def authenticate(self, request, **kwargs):
         print("DEBUG: OIDC Authenticate Method STARTED")
         print("!!! SUCCESS: THE PROTOCOL HAS FINALLY STARTED !!!")
-        return super().authenticate(request, **kwargs)
+        try:
+            result = super().authenticate(request, **kwargs)
+            print(f"DEBUG: OIDC Authenticate returned: {result}")
+            return result
+        except Exception as e:
+            print(f"!!! OIDC AUTHENTICATE ERROR: {str(e)} !!!")
+            print(f"!!! ERROR TYPE: {type(e).__name__} !!!")
+            import traceback
+            print("!!! FULL TRACEBACK:")
+            traceback.print_exc()
+            raise
 
     def create_user(self, claims):
         """
