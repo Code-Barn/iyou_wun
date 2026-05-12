@@ -159,8 +159,8 @@ AUTH_USER_MODEL = 'auth.User'
 # AUTHENTICATION CONFIGURATION
 # ------------------------------------------------------------------------------
 AUTHENTICATION_BACKENDS = [
-    'django.contrib.auth.backends.ModelBackend',
     'apps.core.auth.MyOIDCAuthenticationBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
 # iyou_wun uses standard Django users where the 'username' is the DID.

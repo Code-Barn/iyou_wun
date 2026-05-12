@@ -13,6 +13,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         try:
             user = User.objects.create_user(username=claims.get('sub'))
             user.is_active = True
+            user.set_unusable_password()
             user.save()
             logger.info(f"User created: {user.username}")
             print(f"DEBUG: User created in create_user: {user.username}, ID: {user.id}, Authenticated: {user.is_authenticated}")
@@ -20,6 +21,31 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         except Exception as e:
             logger.error(f"Error creating user: {e}")
             raise
+
+    def filter_users_by_claims(self, claims):
+        """
+        Get or create user based on claims.
+        This ensures auto-user creation for any valid DID.
+        """
+        logger.info(f"Filtering users by claims: {claims}")
+        did = claims.get('sub')
+        if not did:
+            logger.error("No 'sub' claim found")
+            return None
+
+        # Get or create user
+        user, created = User.objects.get_or_create(username=did)
+        if created:
+            user.set_unusable_password()
+            user.is_active = True
+            user.save()
+            logger.info(f"Auto-created user: {user.username}")
+            print(f"DEBUG: Auto-created user: {user.username}, ID: {user.id}")
+        else:
+            logger.info(f"Found existing user: {user.username}")
+            print(f"DEBUG: Found existing user: {user.username}, ID: {user.id}")
+
+        return user
 
     def verify_claims(self, claims):
         """
