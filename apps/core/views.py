@@ -46,6 +46,15 @@ class FeedView(LoginRequiredMixin, TemplateView):
 
         return context
 
+    def get(self, request, *args, **kwargs):
+        # Add welcome message for first-time users
+        if not request.session.get('has_seen_feed_welcome', False):
+            from django.contrib import messages
+            messages.success(request, "Welcome to the Omni-Social Feed. Your identity is verified and sovereign.")
+            request.session['has_seen_feed_welcome'] = True
+
+        return super().get(request, *args, **kwargs)
+
 
 def fetch_nostr_notes(limit=20):
     """Fetch the last N Kind 1 (Short Text Note) events from a public relay."""

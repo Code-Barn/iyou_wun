@@ -74,6 +74,22 @@ OIDC_RP_CLIENT_SECRET=1522b34850cdd1140f889d8e0fdf6704e52659af5d9a84adabfdfea0
 
 > **Note**: For Local/Sovereign mode, use `http://localhost:8000` to satisfy browser security requirements. Replace with your IdP's IP/host when using Tailscale or other environments.
 
+> **⚠️ Intel Mac Localhost Rule**: On macOS with Intel chips (and some ARM), you **MUST** use `127.0.0.1` for all OIDC back-channel endpoints to satisfy the Issuer check. The browser can use `localhost`, but server-to-server communication must use the IP address to avoid IPv6 ambiguity:
+
+```ini
+# Required for Intel Mac compatibility
+OIDC_OP_AUTHORIZATION_ENDPOINT=http://localhost:8000/openid/authorize/  # Browser-facing
+OIDC_OP_TOKEN_ENDPOINT=http://127.0.0.1:8000/openid/token/              # Server-to-server
+OIDC_OP_USER_ENDPOINT=http://127.0.0.1:8000/openid/userinfo/            # Server-to-server
+OIDC_OP_JWKS_ENDPOINT=http://127.0.0.1:8000/openid/jwks/                # Server-to-server
+```
+
+> **Also update the IdP Client's Redirect URIs** in the admin at `http://127.0.0.1:8000/admin/oidc_provider/client/` to include both:
+> - `http://localhost:8001/oidc/callback/`
+> - `http://127.0.0.1:8001/oidc/callback/`
+
+> Without both URIs registered, you'll get `redirect_uri_mismatch` errors.
+
 ### How authentication flows
 
 ```

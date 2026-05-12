@@ -45,6 +45,65 @@ class MyOIDCAuthenticationBackendTest(TestCase):
             backend.create_user({})
 
 
+class SovereignOnboardingTest(TestCase):
+    """Test DID-based user creation and authentication flow."""
+
+    def setUp(self):
+        self.backend = MyOIDCAuthenticationBackend()
+        self.did = "did:iyou:0x123456789abcdef"
+        self.claims = {"sub": self.did}
+
+    def test_filter_users_by_claims_creates_new_user(self):
+        """Test that filter_users_by_claims creates a user when DID is new."""
+        # Ensure no user exists initially
+        self.assertFalse(User.objects.filter(username=self.did).exists())
+
+        # Call filter_users_by_claims
+        users = self.backend.filter_users_by_claims(self.claims)
+
+        # Verify user was created
+        self.assertEqual(len(users), 1)
+        user = users[0]
+        self.assertEqual(user.username, self.did)
+        self.assertTrue(user.is_active)
+        self.assertFalse(user.has_usable_password())
+
+    def test_filter_users_by_claims_returns_existing_user(self):
+        """Test that filter_users_by_claims returns existing user."""
+        # Create user first
+        existing_user = User.objects.create_user(username=self.did)
+        existing_user.set_unusable_password()
+        existing_user.save()
+
+        # Call filter_users_by_claims
+        users = self.backend.filter_users_by_claims(self.claims)
+
+        # Verify same user is returned
+        self.assertEqual(len(users), 1)
+        self.assertEqual(users[0].id, existing_user.id)
+
+    def test_filter_users_by_claims_returns_empty_for_missing_sub(self):
+        """Test that filter_users_by_claims returns empty list when sub claim is missing."""
+        claims_no_sub = {"some": "claim"}
+        users = self.backend.filter_users_by_claims(claims_no_sub)
+
+        # Should return empty QuerySet (len() == 0)
+        self.assertEqual(len(users), 0)
+
+    def test_get_username_returns_did(self):
+        """Test that get_username extracts DID from claims."""
+        username = self.backend.get_username(self.claims)
+        self.assertEqual(username, self.did)
+
+    def test_verify_claims_requires_sub(self):
+        """Test that verify_claims only requires sub claim."""
+        # Should return True when sub is present
+        self.assertTrue(self.backend.verify_claims(self.claims))
+
+        # Should return False when sub is missing
+        self.assertFalse(self.backend.verify_claims({"other": "claim"}))
+
+
 class HomeViewTest(TestCase):
     def test_home_returns_200(self):
         response = self.client.get("/")

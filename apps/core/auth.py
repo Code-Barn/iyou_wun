@@ -41,6 +41,12 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         """
         Get or create user based on claims.
         This ensures auto-user creation for any valid DID.
+
+        CRITICAL: Must return a list or QuerySet, NOT a single User object.
+        The OIDC library calls len() on the return value to check if a user was found.
+        Returning a single User object causes a TypeError when len(user) is called.
+        Returning [user] (a list) allows len([user]) == 1, which the library expects.
+        Returning User.objects.none() (empty QuerySet) for errors allows len() == 0.
         """
         try:
             logger.info(f"Filtering users by claims: {claims}")
@@ -48,6 +54,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             if not did:
                 logger.error("No 'sub' claim found")
                 print("!!! OIDC AUTH ERROR: No 'sub' claim found !!!")
+                # Return empty QuerySet for len() == 0 (user not found)
                 return User.objects.none()
 
             # Get or create user
@@ -65,7 +72,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             print(f"DEBUG: COMMITING SESSION FOR: {user.username}")
             print(f"DEBUG: New Sovereign User created: {user.username}")
             print(f"DEBUG: OIDC Backend returning user: {user.username}")
-            # THE FIX: Return a list containing the user
+            # CRITICAL: Return as list for len() compatibility
             return [user]
         except Exception as e:
             logger.error(f"OIDC authentication error: {str(e)}")
