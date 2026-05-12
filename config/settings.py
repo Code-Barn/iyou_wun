@@ -29,11 +29,12 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
-# Cookie settings for localhost development (no HTTPS)
+# Nuclear cookie settings for localhost HTTP
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = None
 SESSION_COOKIE_DOMAIN = None
+SESSION_SAVE_EVERY_REQUEST = True
 
 
 # Application definition

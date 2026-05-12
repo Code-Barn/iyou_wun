@@ -45,6 +45,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             logger.info(f"Found existing user: {user.username}")
             print(f"DEBUG: Found existing user: {user.username}, ID: {user.id}")
 
+        print(f"DEBUG: OIDC Backend returning user: {user.username}")
         return user
 
     def verify_claims(self, claims):
