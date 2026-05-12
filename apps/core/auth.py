@@ -48,7 +48,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             if not did:
                 logger.error("No 'sub' claim found")
                 print("!!! OIDC AUTH ERROR: No 'sub' claim found !!!")
-                return None
+                return User.objects.none()
 
             # Get or create user
             user, created = User.objects.get_or_create(username=did)
@@ -63,8 +63,10 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 print(f"DEBUG: Found existing user: {user.username}, ID: {user.id}")
 
             print(f"DEBUG: COMMITING SESSION FOR: {user.username}")
+            print(f"DEBUG: New Sovereign User created: {user.username}")
             print(f"DEBUG: OIDC Backend returning user: {user.username}")
-            return user
+            # THE FIX: Return a list containing the user
+            return [user]
         except Exception as e:
             logger.error(f"OIDC authentication error: {str(e)}")
             print(f"!!! OIDC AUTH ERROR: {str(e)} !!!")
