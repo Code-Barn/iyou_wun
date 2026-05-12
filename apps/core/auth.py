@@ -5,6 +5,10 @@ from django.contrib.auth.models import User
 logger = logging.getLogger(__name__)
 
 class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
+    def authenticate(self, request, **kwargs):
+        print("DEBUG: OIDC Authenticate Method STARTED")
+        return super().authenticate(request, **kwargs)
+
     def create_user(self, claims):
         """
         Create a new user from the OIDC claims.
