@@ -15,6 +15,11 @@ def home(request):
     print(f"DEBUG: Cookies received at index: {request.COOKIES.keys()}")
     print(f"DEBUG: Session user at index: {request.user}, Authenticated: {request.user.is_authenticated}")
     print(f"!!! ACCESSING HOME - USER: {request.user} - AUTH: {request.user.is_authenticated} !!!")
+    if hasattr(request, 'session'):
+        print(f"DEBUG: Session ID: {request.session.session_key}")
+        print(f"DEBUG: Session data: {dict(request.session)}")
+    else:
+        print("DEBUG: No session object found!")
     if request.user.is_authenticated:
         return redirect('feed')
     return render(request, 'home.html')
