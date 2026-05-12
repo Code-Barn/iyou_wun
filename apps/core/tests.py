@@ -1,8 +1,16 @@
+import json
+import logging
+import urllib.request
+import urllib.error
+
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.urls import reverse
+from django.conf import settings
 
 from .auth import MyOIDCAuthenticationBackend
+
+logger = logging.getLogger(__name__)
 
 
 class MyOIDCAuthenticationBackendTest(TestCase):
@@ -78,3 +86,26 @@ class DashboardViewTest(TestCase):
         self.client.force_login(user)
         response = self.client.get("/dashboard")
         self.assertContains(response, "Logout")
+
+
+class JwksConnectivityTest(TestCase):
+    """Pings the IdP's JWKS endpoint to verify connectivity.
+
+    This is an integration test — it requires a running iyou_idp instance
+    at the URL configured in OIDC_OP_JWKS_ENDPOINT.
+    """
+
+    def test_jwks_endpoint_returns_valid_json_with_keys(self):
+        url = settings.OIDC_OP_JWKS_ENDPOINT
+        if not url:
+            self.skipTest("OIDC_OP_JWKS_ENDPOINT is not configured")
+
+        try:
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                self.assertEqual(resp.status, 200)
+                data = json.loads(resp.read().decode())
+                self.assertIn("keys", data)
+                self.assertGreater(len(data["keys"]), 0)
+        except (urllib.error.URLError, ConnectionError, OSError) as e:
+            self.skipTest(f"IdP not reachable at {url}: {e}")

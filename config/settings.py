@@ -167,8 +167,12 @@ AUTHENTICATION_BACKENDS = [
 # OIDC CLIENT (RELYING PARTY) SETTINGS
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
-OIDC_RP_CLIENT_ID = env.str('OIDC_RP_CLIENT_ID', 'wun-client')
-OIDC_RP_CLIENT_SECRET = env.str('OIDC_RP_CLIENT_SECRET', 'wun-secret')
+# NOTE: No default values here — if these are missing from .env,
+# Django will crash with a clear ImproperlyConfigured error.
+# Previously had fallback defaults ('wun-client' / 'wun-secret')
+# which silently masked broken .env config ("Settings Ghosting").
+OIDC_RP_CLIENT_ID = env.str('OIDC_RP_CLIENT_ID')
+OIDC_RP_CLIENT_SECRET = env.str('OIDC_RP_CLIENT_SECRET')
 
 OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT')
 OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT')
