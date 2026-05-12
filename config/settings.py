@@ -192,6 +192,10 @@ OIDC_RP_VERIFY_KID = False
 
 # OIDC callback URL - use 127.0.0.1 for consistency
 OIDC_RP_CALLBACK_URL = "http://127.0.0.1:8001/oidc/callback/"
+
+# DID-based authentication - bypass email requirements
+OIDC_RP_REQUIRED_CLAIMS = []
+OIDC_VERIFY_KID = False
 # NOTE: No default values here — if these are missing from .env,
 # Django will crash with a clear ImproperlyConfigured error.
 # Previously had fallback defaults ('wun-client' / 'wun-secret')

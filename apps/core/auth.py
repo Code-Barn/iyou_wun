@@ -73,6 +73,17 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def verify_claims(self, claims):
         """
         Verify the OIDC claims.
+        Just check for 'sub' (DID) - we don't need email for sovereign identity.
         """
         logger.info(f"Verifying claims: {claims}")
-        return super().verify_claims(claims)
+        print(f"DEBUG: Verifying claims: {claims}")
+        # Just require that we have a DID (sub claim)
+        return 'sub' in claims
+
+    def get_username(self, claims):
+        """
+        Use the DID as the Django username.
+        """
+        did = claims.get('sub')
+        print(f"DEBUG: Mapping DID to username: {did}")
+        return did
