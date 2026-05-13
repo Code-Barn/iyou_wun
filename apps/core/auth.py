@@ -56,27 +56,25 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 # Return empty QuerySet for len() == 0 (user not found)
                 return User.objects.none()
 
-            # Use QuerySet throughout - this is the library's native language
-            users = User.objects.filter(username=did)
+            # 1. Get or create the user first
+            user, created = User.objects.get_or_create(username=did)
 
-            if not users.exists():
-                # Create new user
-                user = User.objects.create_user(username=did)
+            # 2. NOW we can log/print because 'user' exists
+            if created:
                 user.set_unusable_password()
                 user.is_active = True
                 user.save()
                 logger.info(f"Auto-created user: {user.username}")
                 print(f"DEBUG: New Sovereign User created: {user.username}")
-                print(f"!!! SUCCESS: MAPPED DID {did} TO USER {user.id} !!!")
+                print(f"!!! SUCCESS: NEW SOVEREIGN USER CREATED: {did} !!!")
                 print(f"!!! HAMMERING SESSION FOR DID: {did} !!!")
-                # Return QuerySet with the new user
-                return User.objects.filter(id=user.id)
             else:
                 logger.info(f"Found existing user: {user.username}")
                 print(f"DEBUG: Found existing user: {user.username}")
-                print(f"!!! SUCCESS: MAPPED DID {did} TO USER {users.first().id} !!!")
-                # Return existing user as QuerySet
-                return User.objects.filter(id=users.first().id)
+                print(f"!!! SUCCESS: MAPPED TO EXISTING USER: {user.username} !!!")
+
+            # 3. Return the QuerySet
+            return User.objects.filter(id=user.id)
         except Exception as e:
             logger.error(f"OIDC authentication error: {str(e)}")
             print(f"!!! OIDC AUTH ERROR: {str(e)} !!!")
