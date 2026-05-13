@@ -176,7 +176,8 @@ AUTHENTICATION_BACKENDS = [
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
 
-# Hard-coded OIDC endpoints - force all to use 127.0.0.1 for issuer matching
+# FINAL STANDARDIZATION: Use 127.0.0.1 for ALL OIDC endpoints
+# This eliminates the localhost/127.0.0.1 mismatch that causes session drops
 OIDC_OP_AUTHORIZATION_ENDPOINT = "http://127.0.0.1:8000/openid/authorize/"
 OIDC_OP_TOKEN_ENDPOINT = "http://127.0.0.1:8000/openid/token/"
 OIDC_OP_USER_ENDPOINT = "http://127.0.0.1:8000/openid/userinfo/"
