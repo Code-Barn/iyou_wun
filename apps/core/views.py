@@ -23,7 +23,7 @@ def home(request):
         print("DEBUG: No session object found!")
 
     if not request.user.is_authenticated:
-        print("DEBUG: User has successfully logged out.")
+        print(f"DEBUG: HOME VIEW - SESSION_KEY: {request.session.session_key if hasattr(request, 'session') else 'NO_SESSION'}")
 
     if request.user.is_authenticated:
         return redirect('feed')
