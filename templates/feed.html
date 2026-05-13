@@ -1,74 +1,717 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
-<head>
-    <title>Feed - iyou_wun</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
-    <nav class="bg-white shadow-sm border-b">
-        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-            <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
-            <div class="flex items-center gap-4">
-                <a href="{% url 'dashboard' %}" class="text-sm text-gray-600 hover:text-indigo-600">Dashboard</a>
-                <form action="{% url 'oidc_logout' %}" method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <button type="submit" class="text-sm text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer">Logout</button>
-                </form>
+    <head>
+        <title>Feed - iyou_wun</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <style>
+            .toast {
+                animation: slideIn 0.3s ease-out;
+            }
+            @keyframes slideIn {
+                from {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+                to {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+            }
+            .toast.hide {
+                animation: slideOut 0.3s ease-out forwards;
+            }
+            @keyframes slideOut {
+                from {
+                    transform: translateX(0);
+                    opacity: 1;
+                }
+                to {
+                    transform: translateX(100%);
+                    opacity: 0;
+                }
+            }
+        </style>
+    </head>
+    <body class="bg-gray-100 min-h-screen">
+        <nav class="bg-white shadow-sm border-b">
+            <div
+                class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between"
+            >
+                <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
+                <div class="flex items-center gap-4">
+                    <a
+                        href="{% url 'dashboard' %}"
+                        class="text-sm text-gray-600 hover:text-indigo-600"
+                        >Dashboard</a
+                    >
+                    <form
+                        action="{% url 'oidc_logout' %}"
+                        method="post"
+                        style="display: inline"
+                    >
+                        {% csrf_token %}
+                        <button
+                            type="submit"
+                            class="text-sm text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer"
+                        >
+                            Logout
+                        </button>
+                    </form>
+                </div>
             </div>
-        </div>
-    </nav>
+        </nav>
 
-    <main class="max-w-4xl mx-auto px-4 py-10">
-        {% if messages %}
-            {% for message in messages %}
-                <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
-                    <div class="flex">
-                        <div class="flex-shrink-0">
-                            <svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" />
-                            </svg>
-                        </div>
-                        <div class="ml-3">
-                            <p class="text-sm text-green-700">{{ message }}</p>
-                        </div>
+        <main class="max-w-4xl mx-auto px-4 py-10">
+            {% if messages %} {% for message in messages %}
+            <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
+                <div class="flex">
+                    <div class="flex-shrink-0">
+                        <svg
+                            class="h-5 w-5 text-green-400"
+                            xmlns="http://www.w3.org/2000/svg"
+                            viewBox="0 0 20 20"
+                            fill="currentColor"
+                        >
+                            <path
+                                fill-rule="evenodd"
+                                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                clip-rule="evenodd"
+                            />
+                        </svg>
+                    </div>
+                    <div class="ml-3">
+                        <p class="text-sm text-green-700">{{ message }}</p>
                     </div>
                 </div>
-            {% endfor %}
-        {% endif %}
+            </div>
+            {% endfor %} {% endif %}
 
-        <div class="bg-white rounded-lg shadow-md p-8">
-            <h1 class="text-2xl font-bold mb-2">Omni-Social Feed</h1>
-            <p class="text-gray-500 mb-8">Global notes from the Nostr network (Kind 1).</p>
+            <div class="bg-white rounded-lg shadow-md p-8">
+                <h1 class="text-2xl font-bold mb-2">Omni-Social Feed</h1>
+                <p class="text-gray-500 mb-6">
+                    {% if feed_mode == "network" %}Your network on the Nostr protocol{% else %}Global firehose from the Nostr network{% endif %}
+                </p>
 
-            {% if notes %}
-                <div class="space-y-6">
+                <!-- FEED TOGGLE -->
+                <div class="flex items-center gap-2 mb-6 border-b border-gray-200 pb-4">
+                    <a href="/feed" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode != "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Network</a>
+                    <a href="/feed?mode=global" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode == "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Global</a>
+                </div>
+
+                <!-- POST COMPONENT -->
+                {% if user_pubkey %}
+                <div class="mb-8 border border-gray-200 rounded-lg p-6">
+                    <h2 class="text-lg font-semibold mb-4">Post to Nostr</h2>
+                    <textarea
+                        id="postContent"
+                        class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
+                        rows="3"
+                        placeholder="What's on your mind?"
+                    ></textarea>
+                    <div class="mt-4 flex items-center gap-3 justify-between">
+                        <div class="flex items-center gap-3">
+                            <input type="file" id="mediaInput" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
+                            <button type="button" id="uploadButton" onclick="document.getElementById('mediaInput').click()" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 px-3 py-2 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                Upload Media
+                            </button>
+                            <span id="uploadStatus" class="text-xs text-gray-500 hidden"></span>
+                        </div>
+                        <button
+                            id="postButton"
+                            class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onclick="postToNostr()"
+                        >
+                            <span id="postButtonText">Post to Nostr</span>
+                            <span id="postButtonLoading" class="hidden">
+                                <svg
+                                    class="animate-spin -ml-1 h-4 w-4 text-white inline-block"
+                                    xmlns="http://www.w3.org/2000/svg"
+                                    fill="none"
+                                    viewBox="0 0 24 24"
+                                >
+                                    <circle
+                                        class="opacity-25"
+                                        cx="12"
+                                        cy="12"
+                                        r="10"
+                                        stroke="currentColor"
+                                        stroke-width="4"
+                                    ></circle>
+                                    <path
+                                        class="opacity-75"
+                                        fill="currentColor"
+                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                                    ></path>
+                                </svg>
+                                Waiting for Signature...
+                            </span>
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- FEED -->
+                {% if notes %}
+                <div id="feedContainer" class="space-y-6">
                     {% for note in notes %}
-                        <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow">
-                            <div class="flex items-start gap-4">
-                                <div class="flex-shrink-0">
-                                    <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                                        <span class="text-indigo-600 font-mono text-sm">NPUB</span>
-                                    </div>
+                    {% if note.kind == 1 %}
+                    <!-- KIND 1: Text Note -->
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1" data-note-id="{{ forloop.counter }}">
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0">
+                                {% if note.author_avatar %}
+                                <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover" />
+                                {% else %}
+                                <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                    <span class="text-indigo-600 font-mono text-sm">{{ note.author_name|default:"N"|first|upper }}</span>
                                 </div>
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-2">
-                                        <span class="font-semibold text-gray-900">{{ note.npub|default:note.pubkey|truncatechars:12 }}</span>
-                                        <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
-                                        <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
-                                    </div>
-                                    <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaks }}</p>
+                                {% endif %}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="font-semibold text-gray-900">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
+                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
                                 </div>
+                                <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaksbr }}</p>
+                                {% if note.reactions or note.comments %}
+                                <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
+                                    {% if note.reactions %}
+                                    <span class="flex items-center gap-1 text-sm text-pink-600">❤️ {{ note.reactions|length }}</span>
+                                    {% endif %}
+                                    {% if note.comments %}
+                                    <span class="flex items-center gap-1 text-sm text-gray-500">💬 {{ note.comments|length }}</span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% if note.comments %}
+                                <div class="mt-4 space-y-3 pl-4 border-l-2 border-gray-200">
+                                    {% for comment in note.comments %}
+                                    <div class="bg-gray-50 rounded-lg p-3">
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-xs font-mono text-gray-600">{{ comment.npub|truncatechars:12 }}</span>
+                                            <span class="text-xs text-gray-400">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
+                                        </div>
+                                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content|linebreaksbr }}</p>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
                             </div>
                         </div>
+                    </div>
+                    {% elif note.kind == 1063 %}
+                    <!-- KIND 1063: Media Entry -->
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1063">
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0">
+                                {% if note.author_avatar %}
+                                <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover" />
+                                {% else %}
+                                <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                                    <span class="text-purple-600 font-mono text-sm">{{ note.author_name|default:"M"|first|upper }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="font-semibold text-gray-900">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                    {% if note.is_sovereign %}
+                                    <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>
+                                    {% else %}
+                                    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
+                                    {% endif %}
+                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
+                                </div>
+                                {% if note.mime_type and "image" in note.mime_type %}
+                                <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
+                                    <img src="{{ note.file_url }}" alt="{{ note.alt_text|default:note.content }}" class="w-full h-auto max-h-96 object-contain" loading="lazy" />
+                                </div>
+                                {% elif note.mime_type and "video" in note.mime_type %}
+                                <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
+                                    <video src="{{ note.file_url }}" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video>
+                                </div>
+                                {% elif note.mime_type and "audio" in note.mime_type %}
+                                <div class="mb-3">
+                                    <audio src="{{ note.file_url }}" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio>
+                                </div>
+                                {% else %}
+                                <div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                                    <a href="{{ note.file_url }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 {{ note.file_url }}</a>
+                                </div>
+                                {% endif %}
+                                {% if note.content %}
+                                <p class="text-gray-700 whitespace-pre-wrap mb-2">{{ note.content }}</p>
+                                {% endif %}
+                                {% if note.reactions or note.comments %}
+                                <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
+                                    {% if note.reactions %}
+                                    <span class="flex items-center gap-1 text-sm text-pink-600">❤️ {{ note.reactions|length }}</span>
+                                    {% endif %}
+                                    {% if note.comments %}
+                                    <span class="flex items-center gap-1 text-sm text-gray-500">💬 {{ note.comments|length }}</span>
+                                    {% endif %}
+                                </div>
+                                {% endif %}
+                                {% if note.comments %}
+                                <div class="mt-4 space-y-3 pl-4 border-l-2 border-gray-200">
+                                    {% for comment in note.comments %}
+                                    <div class="bg-gray-50 rounded-lg p-3">
+                                        <div class="flex items-center gap-2 mb-1">
+                                            <span class="text-xs font-mono text-gray-600">{{ comment.npub|truncatechars:12 }}</span>
+                                            <span class="text-xs text-gray-400">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
+                                        </div>
+                                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content|linebreaksbr }}</p>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                    {% elif note.kind == 1111 %}
+                    <!-- ORPHAN KIND 1111: Standalone Threaded Comment -->
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1111">
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0">
+                                {% if note.author_avatar %}
+                                <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover" />
+                                {% else %}
+                                <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                                    <span class="text-orange-600 font-mono text-sm">{{ note.author_name|default:"C"|first|upper }}</span>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="font-semibold text-gray-900">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                    <span class="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">Comment</span>
+                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
+                                </div>
+                                <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaksbr }}</p>
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
                     {% endfor %}
                 </div>
-            {% else %}
+                {% else %}
                 <div class="text-center py-12">
-                    <p class="text-gray-500 mb-4">Loading notes from Nostr network...</p>
-                    <p class="text-sm text-gray-400">Connecting to wss://nos.lol</p>
+                    <p class="text-gray-500 mb-4">Loading unified feed from Nostr network...</p>
+                    <p class="text-sm text-gray-400">Connecting to wss://nos.lol — fetching notes, media, reactions, and comments</p>
                 </div>
-            {% endif %}
+                {% endif %}
+            </div>
+        </main>
+
+        <!-- Toast Notification -->
+        <div
+            id="toast"
+            class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide"
+            role="alert"
+        >
+            <span class="font-medium"
+                >Sovereign Event Broadcasted Successfully.</span
+            >
         </div>
-    </main>
-</body>
+
+        <!-- WebSocket Bridge Script -->
+        <script>
+            // Configuration
+            const TAURI_SIGNING_BRIDGE = "ws://127.0.0.1:9001";
+            const NOSTR_RELAYS = ["wss://nos.lol", "wss://relay.damus.io"];
+
+            // User data from Django template
+            const userPubkey = "{{ user_pubkey }}";
+            const userNpub = "{{ user_npub }}";
+            const userDid = "{{ user_did }}";
+
+            // State
+            let tauriSocket = null;
+            let pendingEvent = null;
+            let isProcessing = false;
+
+            // Initialize WebSocket connection to Tauri bridge
+            function initTauriSocket() {
+                if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) {
+                    return;
+                }
+
+                try {
+                    tauriSocket = new WebSocket(TAURI_SIGNING_BRIDGE);
+
+                    tauriSocket.onopen = function () {
+                        console.log(
+                            "Connected to Tauri signing bridge at",
+                            TAURI_SIGNING_BRIDGE,
+                        );
+                    };
+
+                    tauriSocket.onmessage = function (event) {
+                        handleTauriMessage(event.data);
+                    };
+
+                    tauriSocket.onerror = function (error) {
+                        console.error("Tauri bridge connection error:", error);
+                        showToast(
+                            "Error connecting to Tauri bridge. Please ensure iYou Home is running.",
+                            true,
+                        );
+                    };
+
+                    tauriSocket.onclose = function () {
+                        console.log(
+                            "Tauri bridge connection closed. Will retry on next post.",
+                        );
+                    };
+                } catch (err) {
+                    console.error("Failed to create WebSocket:", err);
+                }
+            }
+
+            // Handle messages from Tauri bridge
+            function handleTauriMessage(data) {
+                try {
+                    const message = JSON.parse(data);
+
+                    if (message.type === "signed_event" && pendingEvent) {
+                        // Received signed event back from Tauri
+                        const signedEvent = message.event;
+                        console.log(
+                            "Received signed event from Tauri:",
+                            signedEvent,
+                        );
+
+                        // Add the signature and id to our pending event
+                        pendingEvent.id = signedEvent.id;
+                        pendingEvent.sig = signedEvent.sig;
+
+                        // Broadcast to Nostr relays
+                        broadcastToRelays(pendingEvent);
+                    }
+                } catch (err) {
+                    console.error("Error handling Tauri message:", err);
+                }
+            }
+
+            // Post a text note (Kind 1) via Tauri signing
+            function postToNostr() {
+                const content = document.getElementById("postContent").value.trim();
+                if (!content) {
+                    showToast("Please enter some content to post.", true);
+                    return;
+                }
+                if (!userPubkey) {
+                    showToast("User public key not available. Please refresh the page.", true);
+                    return;
+                }
+                setButtonLoading(true);
+                isProcessing = true;
+                const event = {
+                    kind: 1,
+                    content: content,
+                    pubkey: userPubkey,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: [],
+                };
+                sendEventToTauri(event);
+            }
+
+            // Generic signature pipe — sends any Nostr event kind to Tauri for signing
+            function sendEventToTauri(event) {
+                pendingEvent = event;
+                if (!tauriSocket || tauriSocket.readyState !== WebSocket.OPEN) {
+                    initTauriSocket();
+                }
+                const request = {
+                    type: "sign_event",
+                    event: event,
+                };
+                const checkSocket = setInterval(() => {
+                    if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) {
+                        clearInterval(checkSocket);
+                        console.log("Sending event to Tauri for signing:", event);
+                        tauriSocket.send(JSON.stringify(request));
+                    }
+                }, 100);
+                setTimeout(() => {
+                    if (isProcessing) {
+                        clearInterval(checkSocket);
+                        showToast("Timeout waiting for Tauri. Please try again.", true);
+                        resetPostState();
+                    }
+                }, 5000);
+            }
+
+            // SHA-256 hash via Web Crypto API
+            async function sha256Hex(data) {
+                const hashBuffer = await crypto.subtle.digest("SHA-256", data);
+                const hashArray = Array.from(new Uint8Array(hashBuffer));
+                return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+            }
+
+            // Show upload status
+            function setUploadStatus(text) {
+                const el = document.getElementById("uploadStatus");
+                el.textContent = text;
+                el.classList.remove("hidden");
+            }
+
+            // Handle file selection: upload to Blossom, then sign Kind 1063
+            async function handleMediaSelected(file) {
+                if (!file) return;
+                setUploadStatus("Hashing...");
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const hash = await sha256Hex(arrayBuffer);
+                    setUploadStatus("Uploading to Blossom...");
+                    const response = await fetch("http://127.0.0.1:9002/" + hash, {
+                        method: "PUT",
+                        body: arrayBuffer,
+                    });
+                    if (response.status === 201) {
+                        setUploadStatus("Requesting signature...");
+                        isProcessing = true;
+                        const event = {
+                            kind: 1063,
+                            content: "",
+                            pubkey: userPubkey,
+                            created_at: Math.floor(Date.now() / 1000),
+                            tags: [
+                                ["url", "http://127.0.0.1:9002/" + hash],
+                                ["x", hash],
+                                ["m", file.type],
+                            ],
+                        };
+                        sendEventToTauri(event);
+                    } else {
+                        setUploadStatus("Upload failed (" + response.status + ")");
+                        console.error("Blossom upload error:", response.status);
+                        setTimeout(() => document.getElementById("uploadStatus").classList.add("hidden"), 3000);
+                    }
+                } catch (err) {
+                    setUploadStatus("Error: " + err.message);
+                    console.error("Upload error:", err);
+                    setTimeout(() => document.getElementById("uploadStatus").classList.add("hidden"), 3000);
+                }
+            }
+
+            // Broadcast signed event to Nostr relays
+            function broadcastToRelays(signedEvent) {
+                console.log(
+                    "Broadcasting signed event to relays:",
+                    signedEvent,
+                );
+
+                let broadcastSuccess = false;
+                let relayIndex = 0;
+
+                function broadcastToNextRelay() {
+                    if (relayIndex >= NOSTR_RELAYS.length) {
+                        // All relays tried
+                        if (broadcastSuccess) {
+                            showToast(
+                                "Sovereign Event Broadcasted Successfully.",
+                            );
+                            addNoteToFeed(signedEvent);
+                        } else {
+                            showToast(
+                                "Failed to broadcast to all relays. Event may not be visible.",
+                                true,
+                            );
+                        }
+                        resetPostState();
+                        return;
+                    }
+
+                    const relayUrl = NOSTR_RELAYS[relayIndex];
+                    relayIndex++;
+
+                    try {
+                        const ws = new WebSocket(relayUrl);
+
+                        ws.onopen = function () {
+                            console.log("Connected to relay:", relayUrl);
+                            // Send the EVENT message
+                            const eventMessage = ["EVENT", signedEvent];
+                            ws.send(JSON.stringify(eventMessage));
+                        };
+
+                        ws.onmessage = function (event) {
+                            const msg = JSON.parse(event.data);
+                            if (msg[0] === "OK") {
+                                console.log("Relay accepted event:", relayUrl);
+                                broadcastSuccess = true;
+                            }
+                            ws.close();
+                            // Try next relay
+                            setTimeout(broadcastToNextRelay, 100);
+                        };
+
+                        ws.onerror = function (error) {
+                            console.error("Relay error:", relayUrl, error);
+                            ws.close();
+                            setTimeout(broadcastToNextRelay, 100);
+                        };
+
+                        ws.onclose = function () {
+                            // If we haven't tried all relays yet, continue
+                            if (relayIndex < NOSTR_RELAYS.length) {
+                                setTimeout(broadcastToNextRelay, 100);
+                            }
+                        };
+
+                        // Timeout for this relay
+                        setTimeout(() => {
+                            if (ws.readyState === WebSocket.OPEN) {
+                                ws.close();
+                            }
+                            setTimeout(broadcastToNextRelay, 100);
+                        }, 3000);
+                    } catch (err) {
+                        console.error(
+                            "Error connecting to relay:",
+                            relayUrl,
+                            err,
+                        );
+                        setTimeout(broadcastToNextRelay, 100);
+                    }
+                }
+
+                broadcastToNextRelay();
+            }
+
+            // Add event to feed optimistically (handles Kind 1 and Kind 1063)
+            function addNoteToFeed(event) {
+                const container = document.getElementById("feedContainer");
+                if (!container) return;
+
+                const noteElement = document.createElement("div");
+                const date = new Date(event.created_at * 1000);
+                const formattedDate = date.toLocaleString();
+                const npub = userNpub || userPubkey.substring(0, 12) + "...";
+
+                if (event.kind === 1063) {
+                    noteElement.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
+                    const tags = event.tags || [];
+                    const urlTag = tags.find(t => t[0] === "url");
+                    const mimeTag = tags.find(t => t[0] === "m");
+                    const url = urlTag ? urlTag[1] : "";
+                    const mime = mimeTag ? mimeTag[1] : "";
+                    let mediaHtml = "";
+                    if (mime.startsWith("image/")) {
+                        mediaHtml = `<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><img src="${url}" alt="" class="w-full h-auto max-h-96 object-contain" loading="lazy" /></div>`;
+                    } else if (mime.startsWith("video/")) {
+                        mediaHtml = `<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><video src="${url}" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video></div>`;
+                    } else if (mime.startsWith("audio/")) {
+                        mediaHtml = `<div class="mb-3"><audio src="${url}" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio></div>`;
+                    } else {
+                        mediaHtml = `<div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200"><a href="${url}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 ${url}</a></div>`;
+                    }
+                    noteElement.innerHTML = `
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0">
+                                <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                                    <span class="text-purple-600 font-mono text-sm">MEDIA</span>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="font-semibold text-gray-900">${npub}</span>
+                                    <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>
+                                    <span class="text-xs text-gray-500">${formattedDate}</span>
+                                </div>
+                                ${mediaHtml}
+                                ${event.content ? `<p class="text-gray-700 whitespace-pre-wrap mb-2">${event.content}</p>` : ""}
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    noteElement.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
+                    noteElement.innerHTML = `
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0">
+                                <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                    <span class="text-indigo-600 font-mono text-sm">NPUB</span>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <span class="font-semibold text-gray-900">${npub}</span>
+                                    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
+                                    <span class="text-xs text-gray-500">${formattedDate}</span>
+                                </div>
+                                <p class="text-gray-700 whitespace-pre-wrap">${event.content}</p>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                if (container.firstChild) {
+                    container.insertBefore(noteElement, container.firstChild);
+                } else {
+                    container.appendChild(noteElement);
+                }
+
+                document.getElementById("postContent").value = "";
+                const uploadStatus = document.getElementById("uploadStatus");
+                if (uploadStatus) uploadStatus.classList.add("hidden");
+            }
+
+            // Show toast notification
+            function showToast(message, isError = false) {
+                const toast = document.getElementById("toast");
+                const toastText = toast.querySelector("span");
+
+                toastText.textContent = message;
+
+                if (isError) {
+                    toast.className =
+                        "fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
+                } else {
+                    toast.className =
+                        "fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
+                }
+
+                // Show toast
+                toast.classList.remove("hide");
+
+                // Hide after 3 seconds
+                setTimeout(() => {
+                    toast.classList.add("hide");
+                }, 3000);
+            }
+
+            // Set button loading state
+            function setButtonLoading(loading) {
+                const button = document.getElementById("postButton");
+                const textSpan = document.getElementById("postButtonText");
+                const loadingSpan =
+                    document.getElementById("postButtonLoading");
+
+                if (loading) {
+                    button.disabled = true;
+                    textSpan.classList.add("hidden");
+                    loadingSpan.classList.remove("hidden");
+                } else {
+                    button.disabled = false;
+                    textSpan.classList.remove("hidden");
+                    loadingSpan.classList.add("hidden");
+                }
+            }
+
+            // Reset post state
+            function resetPostState() {
+                setButtonLoading(false);
+                isProcessing = false;
+                pendingEvent = null;
+            }
+
+            // Initialize on page load
+            document.addEventListener("DOMContentLoaded", function () {
+                initTauriSocket();
+            });
+        </script>
+    </body>
 </html>
