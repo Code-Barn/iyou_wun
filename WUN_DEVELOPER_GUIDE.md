@@ -146,23 +146,66 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.is_active = True
         user.save()
         return user
+
+    def filter_users_by_claims(self, claims):
+        """
+        Get or create user based on claims.
+        This ensures auto-user creation for any valid DID.
+        
+        CRITICAL: Must return a QuerySet, NOT a list or single User object.
+        The OIDC library calls len() on the return value to check if a user was found.
+        QuerySet is the NATIVE type the library expects.
+        """
+        did = claims.get('sub')
+        if not did:
+            return User.objects.none()
+        
+        # 1. Get or create the user first
+        user, created = User.objects.get_or_create(username=did)
+        
+        # 2. Set password and activate if new user
+        if created:
+            user.set_unusable_password()
+            user.is_active = True
+            user.save()
+        
+        # 3. Return QuerySet with the user
+        return User.objects.filter(id=user.id)
+
+    def verify_claims(self, claims):
+        """Just check for 'sub' (DID) - we don't need email."""
+        return 'sub' in claims
+
+    def get_username(self, claims):
+        """Use the DID as the Django username."""
+        return claims.get('sub')
 ```
 
 ### How it works
 
-1. **Trigger**: Called by `mozilla-django-oidc` when a user authenticates via the IdP and no local user exists for the given `sub` claim.
+1. **Trigger**: The OIDC library calls these methods during authentication to map IdP claims to local users.
 
-2. **Claim extraction**: The `claims` dict is the parsed JSON from the IdP's `/openid/userinfo/` endpoint. The `sub` claim contains the user's DID (e.g. `did:iyou:0xabcd...`).
+2. **Claim extraction**: The `claims` dict contains parsed data from the IdP's `/openid/userinfo/` endpoint. The `sub` claim contains the user's DID.
 
-3. **User creation**: `User.objects.create_user(username=claims.get('sub'))` creates a standard Django user with the DID as the username. No email or password is set -- authentication is delegated entirely to the IdP.
+3. **User creation/lookup**: 
+   - `filter_users_by_claims`: Primary method that finds or creates users
+   - Uses `get_or_create()` for atomic operations
+   - Returns QuerySet (required by OIDC library)
+   - Sets unusable password for security
 
-4. **Active by default**: `user.is_active = True` ensures the user can log in immediately.
+4. **Claims verification**: `verify_claims` only requires the `sub` claim (DID), no email needed
 
-5. **Subsequent logins**: On repeat visits, `filter_users_by_claims` (inherited from the base backend) finds the existing user by the `sub` claim, and `update_user` refreshes their attributes. The base backend's default `update_user` is a no-op, which is fine for now.
+5. **Username mapping**: `get_username` extracts the DID from claims for use as Django username
 
-### `OIDC_USERNAME_ALGO`
+6. **Subsequent logins**: The OIDC library calls `filter_users_by_claims` on repeat visits, which returns the existing user as a QuerySet.
 
-In `settings.py`, `OIDC_USERNAME_ALGO = lambda claims: claims.get('sub')` provides a second mechanism for deriving the username. This is used by the base backend's `create_user` when it is not overridden. Since we override `create_user`, this lambda is effectively redundant but harmless.
+### Key Improvements Over Base Backend
+
+- **DID-only authentication**: No email requirement, perfect for sovereign identity
+- **QuerySet return type**: Uses Django's native type for maximum compatibility
+- **Atomic operations**: `get_or_create()` prevents race conditions
+- **Explicit username mapping**: Clear DID → username conversion
+- **Minimal requirements**: Only needs `sub` claim to work
 
 ---
 
