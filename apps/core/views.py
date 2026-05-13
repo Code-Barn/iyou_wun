@@ -24,6 +24,7 @@ def home(request):
 
     if not request.user.is_authenticated:
         print(f"DEBUG: HOME VIEW - SESSION_KEY: {request.session.session_key if hasattr(request, 'session') else 'NO_SESSION'}")
+        print(f"DEBUG: ALL COOKIES AT HOME: {request.COOKIES}")
 
     if request.user.is_authenticated:
         return redirect('feed')

@@ -72,6 +72,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             print(f"DEBUG: COMMITING SESSION FOR: {user.username}")
             print(f"DEBUG: New Sovereign User created: {user.username}")
             print(f"!!! SUCCESS: MAPPED DID {did} TO USER {user.id} !!!")
+            print(f"!!! HAMMERING SESSION FOR DID: {did} !!!")
             print(f"DEBUG: OIDC Backend returning user: {user.username}")
             # CRITICAL: Return as list for len() compatibility
             return [user]
