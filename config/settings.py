@@ -30,12 +30,12 @@ DEBUG = True
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 # FINAL COOKIE STANDARDIZATION for 127.0.0.1
-# Try SameSite=None for maximum browser compatibility
+# Use SameSite=Lax for Brave compatibility (SameSite=None requires Secure=True)
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_SAMESITE = 'None'
+SESSION_COOKIE_SAMESITE = 'Lax'
 SESSION_COOKIE_HTTPONLY = True
-SESSION_COOKIE_DOMAIN = '127.0.0.1'
+SESSION_COOKIE_DOMAIN = None
 SESSION_COOKIE_NAME = 'wun_sessionid'
 SESSION_SAVE_EVERY_REQUEST = True
 
