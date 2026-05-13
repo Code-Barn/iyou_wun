@@ -21,6 +21,10 @@ def home(request):
         print(f"DEBUG: Session data: {dict(request.session)}")
     else:
         print("DEBUG: No session object found!")
+
+    if not request.user.is_authenticated:
+        print("DEBUG: User has successfully logged out.")
+
     if request.user.is_authenticated:
         return redirect('feed')
     return render(request, 'home.html')
