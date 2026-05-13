@@ -70,13 +70,13 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 print(f"!!! SUCCESS: MAPPED DID {did} TO USER {user.id} !!!")
                 print(f"!!! HAMMERING SESSION FOR DID: {did} !!!")
                 # Return QuerySet with the new user
-                return User.objects.filter(username=did)
+                return User.objects.filter(id=user.id)
             else:
                 logger.info(f"Found existing user: {user.username}")
                 print(f"DEBUG: Found existing user: {user.username}")
                 print(f"!!! SUCCESS: MAPPED DID {did} TO USER {users.first().id} !!!")
                 # Return existing user as QuerySet
-                return users
+                return User.objects.filter(id=users.first().id)
         except Exception as e:
             logger.error(f"OIDC authentication error: {str(e)}")
             print(f"!!! OIDC AUTH ERROR: {str(e)} !!!")
