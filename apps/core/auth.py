@@ -68,10 +68,12 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 print(f"DEBUG: New Sovereign User created: {user.username}")
                 print(f"!!! SUCCESS: NEW SOVEREIGN USER CREATED: {did} !!!")
                 print(f"!!! HAMMERING SESSION FOR DID: {did} !!!")
+                print(f"DEBUG: OIDC Back-channel successful for DID: {did}")
             else:
                 logger.info(f"Found existing user: {user.username}")
                 print(f"DEBUG: Found existing user: {user.username}")
                 print(f"!!! SUCCESS: MAPPED TO EXISTING USER: {user.username} !!!")
+                print(f"DEBUG: OIDC Back-channel successful for DID: {did}")
 
             # 3. Return the QuerySet
             return User.objects.filter(id=user.id)
