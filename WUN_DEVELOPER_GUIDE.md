@@ -106,11 +106,12 @@ Update the IdP Client at `http://127.0.0.1:8000/admin/oidc_provider/client/`:
 - Browser cookies may be rejected
 - 403/401 errors will appear intermittently
 
-> **Also update the IdP Client's Redirect URIs** in the admin at `http://127.0.0.1:8000/admin/oidc_provider/client/` to include both:
-> - `http://localhost:8001/oidc/callback/`
-> - `http://127.0.0.1:8001/oidc/callback/`
+> **Also update the IdP Client's Redirect URIs** in the admin at `http://127.0.0.1:8000/admin/oidc_provider/client/`:
+> - **Primary**: `http://127.0.0.1:8001/oidc/callback/`
 
-> Without both URIs registered, you'll get `redirect_uri_mismatch` errors.
+> **Note**: After final standardization, only `127.0.0.1` is needed. The previous recommendation to include both was for transition purposes. With `SESSION_COOKIE_NAME = 'wun_sessionid'`, cookie conflicts are eliminated, so only the `127.0.0.1` URI is required.
+
+> Without this URI registered, you'll get `redirect_uri_mismatch` errors.
 
 ### How authentication flows
 
