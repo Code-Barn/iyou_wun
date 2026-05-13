@@ -42,11 +42,10 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         Get or create user based on claims.
         This ensures auto-user creation for any valid DID.
 
-        CRITICAL: Must return a list or QuerySet, NOT a single User object.
+        CRITICAL: Must return a QuerySet, NOT a list or single User object.
         The OIDC library calls len() on the return value to check if a user was found.
-        Returning a single User object causes a TypeError when len(user) is called.
-        Returning [user] (a list) allows len([user]) == 1, which the library expects.
-        Returning User.objects.none() (empty QuerySet) for errors allows len() == 0.
+        QuerySet is the NATIVE type the library expects - it has len() and other methods.
+        Returning User.objects.filter() ensures maximum compatibility with the library.
         """
         try:
             logger.info(f"Filtering users by claims: {claims}")
@@ -57,25 +56,27 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 # Return empty QuerySet for len() == 0 (user not found)
                 return User.objects.none()
 
-            # Get or create user
-            user, created = User.objects.get_or_create(username=did)
-            if created:
+            # Use QuerySet throughout - this is the library's native language
+            users = User.objects.filter(username=did)
+
+            if not users.exists():
+                # Create new user
+                user = User.objects.create_user(username=did)
                 user.set_unusable_password()
                 user.is_active = True
                 user.save()
                 logger.info(f"Auto-created user: {user.username}")
-                print(f"DEBUG: Auto-created user: {user.username}, ID: {user.id}")
+                print(f"DEBUG: New Sovereign User created: {user.username}")
+                print(f"!!! SUCCESS: MAPPED DID {did} TO USER {user.id} !!!")
+                print(f"!!! HAMMERING SESSION FOR DID: {did} !!!")
+                # Return QuerySet with the new user
+                return User.objects.filter(username=did)
             else:
                 logger.info(f"Found existing user: {user.username}")
-                print(f"DEBUG: Found existing user: {user.username}, ID: {user.id}")
-
-            print(f"DEBUG: COMMITING SESSION FOR: {user.username}")
-            print(f"DEBUG: New Sovereign User created: {user.username}")
-            print(f"!!! SUCCESS: MAPPED DID {did} TO USER {user.id} !!!")
-            print(f"!!! HAMMERING SESSION FOR DID: {did} !!!")
-            print(f"DEBUG: OIDC Backend returning user: {user.username}")
-            # CRITICAL: Return as list for len() compatibility
-            return [user]
+                print(f"DEBUG: Found existing user: {user.username}")
+                print(f"!!! SUCCESS: MAPPED DID {did} TO USER {users.first().id} !!!")
+                # Return existing user as QuerySet
+                return users
         except Exception as e:
             logger.error(f"OIDC authentication error: {str(e)}")
             print(f"!!! OIDC AUTH ERROR: {str(e)} !!!")
