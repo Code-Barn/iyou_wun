@@ -33,33 +33,7 @@
         </style>
     </head>
     <body class="bg-gray-100 min-h-screen">
-        <nav class="bg-white shadow-sm border-b">
-            <div
-                class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between"
-            >
-                <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
-                <div class="flex items-center gap-4">
-                    <a
-                        href="{% url 'dashboard' %}"
-                        class="text-sm text-gray-600 hover:text-indigo-600"
-                        >Dashboard</a
-                    >
-                    <form
-                        action="{% url 'oidc_logout' %}"
-                        method="post"
-                        style="display: inline"
-                    >
-                        {% csrf_token %}
-                        <button
-                            type="submit"
-                            class="text-sm text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer"
-                        >
-                            Logout
-                        </button>
-                    </form>
-                </div>
-            </div>
-        </nav>
+        {% include '_nav.html' %}
 
         <main class="max-w-4xl mx-auto px-4 py-10">
             {% if messages %} {% for message in messages %}
@@ -305,10 +279,17 @@
             </div>
         </main>
 
-        <!-- Toast Notification -->
+        <!-- Toast Notifications -->
+        <div
+            id="sovereignToast"
+            class="fixed top-4 right-4 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg toast hide"
+            role="alert"
+        >
+            <span class="font-medium">Sovereign Copy Saved.</span>
+        </div>
         <div
             id="toast"
-            class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide"
+            class="fixed top-20 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide"
             role="alert"
         >
             <span class="font-medium"
@@ -320,7 +301,7 @@
         <script>
             // Configuration
             const TAURI_SIGNING_BRIDGE = "ws://127.0.0.1:9001";
-            const NOSTR_RELAYS = ["wss://nos.lol", "wss://relay.damus.io"];
+            const NOSTR_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
 
             // User data from Django template
             const userPubkey = "{{ user_pubkey }}";
@@ -497,89 +478,70 @@
                 }
             }
 
-            // Broadcast signed event to Nostr relays
+            // Broadcast signed event to ALL Nostr relays in parallel
             function broadcastToRelays(signedEvent) {
                 console.log(
                     "Broadcasting signed event to relays:",
                     signedEvent,
                 );
 
-                let broadcastSuccess = false;
-                let relayIndex = 0;
+                let localRelaySuccess = false;
+                let anyGlobalSuccess = false;
+                let remaining = NOSTR_RELAYS.length;
 
-                function broadcastToNextRelay() {
-                    if (relayIndex >= NOSTR_RELAYS.length) {
-                        // All relays tried
-                        if (broadcastSuccess) {
-                            showToast(
-                                "Sovereign Event Broadcasted Successfully.",
-                            );
-                            addNoteToFeed(signedEvent);
-                        } else {
-                            showToast(
-                                "Failed to broadcast to all relays. Event may not be visible.",
-                                true,
-                            );
-                        }
-                        resetPostState();
-                        return;
+                function checkDone() {
+                    if (remaining > 0) return;
+                    if (localRelaySuccess) {
+                        showSovereignToast("Sovereign Copy Saved.");
                     }
+                    if (anyGlobalSuccess) {
+                        showToast("Sovereign Event Broadcasted Successfully.");
+                        addNoteToFeed(signedEvent);
+                    } else if (!localRelaySuccess) {
+                        showToast(
+                            "Failed to broadcast to all relays. Event may not be visible.",
+                            true,
+                        );
+                    }
+                    resetPostState();
+                }
 
-                    const relayUrl = NOSTR_RELAYS[relayIndex];
-                    relayIndex++;
+                NOSTR_RELAYS.forEach(function (relayUrl) {
+                    const isLocal = relayUrl.startsWith("ws://127.0.0.1:9003");
+                    let finished = false;
+                    const done = function () {
+                        if (finished) return;
+                        finished = true;
+                        remaining--;
+                        checkDone();
+                    };
 
                     try {
                         const ws = new WebSocket(relayUrl);
-
                         ws.onopen = function () {
-                            console.log("Connected to relay:", relayUrl);
-                            // Send the EVENT message
-                            const eventMessage = ["EVENT", signedEvent];
-                            ws.send(JSON.stringify(eventMessage));
+                            ws.send(JSON.stringify(["EVENT", signedEvent]));
                         };
-
                         ws.onmessage = function (event) {
-                            const msg = JSON.parse(event.data);
-                            if (msg[0] === "OK") {
-                                console.log("Relay accepted event:", relayUrl);
-                                broadcastSuccess = true;
-                            }
-                            ws.close();
-                            // Try next relay
-                            setTimeout(broadcastToNextRelay, 100);
+                            try {
+                                const msg = JSON.parse(event.data);
+                                if (msg[0] === "OK") {
+                                    if (isLocal) localRelaySuccess = true;
+                                    else anyGlobalSuccess = true;
+                                }
+                            } catch (e) {}
+                            try { ws.close(); } catch (e) {}
+                            done();
                         };
-
-                        ws.onerror = function (error) {
-                            console.error("Relay error:", relayUrl, error);
-                            ws.close();
-                            setTimeout(broadcastToNextRelay, 100);
-                        };
-
-                        ws.onclose = function () {
-                            // If we haven't tried all relays yet, continue
-                            if (relayIndex < NOSTR_RELAYS.length) {
-                                setTimeout(broadcastToNextRelay, 100);
-                            }
-                        };
-
-                        // Timeout for this relay
-                        setTimeout(() => {
-                            if (ws.readyState === WebSocket.OPEN) {
-                                ws.close();
-                            }
-                            setTimeout(broadcastToNextRelay, 100);
+                        ws.onerror = function () { done(); };
+                        ws.onclose = function () { done(); };
+                        setTimeout(function () {
+                            try { ws.close(); } catch (e) {}
+                            done();
                         }, 3000);
                     } catch (err) {
-                        console.error(
-                            "Error connecting to relay:",
-                            relayUrl,
-                            err,
-                        );
-                        setTimeout(broadcastToNextRelay, 100);
+                        done();
                     }
-                }
-
-                broadcastToNextRelay();
+                });
             }
 
             // Add event to feed optimistically (handles Kind 1 and Kind 1063)
@@ -668,10 +630,10 @@
 
                 if (isError) {
                     toast.className =
-                        "fixed top-4 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
+                        "fixed top-20 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
                 } else {
                     toast.className =
-                        "fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
+                        "fixed top-20 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
                 }
 
                 // Show toast
@@ -679,6 +641,19 @@
 
                 // Hide after 3 seconds
                 setTimeout(() => {
+                    toast.classList.add("hide");
+                }, 3000);
+            }
+
+            // Show sovereign copy toast
+            function showSovereignToast(message) {
+                const toast = document.getElementById("sovereignToast");
+                const toastText = toast.querySelector("span");
+                toastText.textContent = message;
+                toast.className =
+                    "fixed top-4 right-4 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg toast";
+                toast.classList.remove("hide");
+                setTimeout(function () {
                     toast.classList.add("hide");
                 }, 3000);
             }

@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+    <title>Chat - iyou_wun</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" type="text/css" href="https://cdn.conversejs.org/dist/converse.min.css">
+    <style>
+        #conversejs { height: calc(100vh - 57px); }
+        .converse-chatrooms, .converse-chatboxes { max-width: 100% !important; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    {% include '_nav.html' %}
+    <div id="conversejs"></div>
+    <script src="https://cdn.conversejs.org/dist/converse.min.js"></script>
+    <script>
+        var userJid = "{{ user_pubkey }}@127.0.0.1";
+        var userPassword = "{{ user_pubkey }}";
+
+        converse.initialize({
+            websocket_url: 'ws://127.0.0.1:5222',
+            jid: userJid,
+            password: userPassword,
+            view_mode: 'fullscreen',
+            auto_login: true,
+            allow_registration: false,
+            theme: 'light',
+            show_controlbox_by_default: true,
+            hide_muc_panel: true,
+            allow_logout: false,
+            sticky_controlbox: true,
+        });
+    </script>
+</body>
+</html>

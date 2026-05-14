@@ -3,20 +3,15 @@
 <head>
     <title>Dashboard - iyou_wun</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .toast { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast.hide { animation: slideOut 0.3s ease-out forwards; }
+        @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
-    <nav class="bg-white shadow-sm border-b">
-        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-            <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
-            <div class="flex items-center gap-4">
-                <a href="{% url 'feed' %}" class="text-sm text-gray-600 hover:text-indigo-600">Global Feed</a>
-                <form action="{% url 'oidc_logout' %}" method="post" style="display:inline;">
-                    {% csrf_token %}
-                    <button type="submit" class="text-sm text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer">Logout</button>
-                </form>
-            </div>
-        </div>
-    </nav>
+    {% include '_nav.html' %}
 
     <main class="max-w-4xl mx-auto px-4 py-10">
         {% if user.is_authenticated %}
@@ -26,10 +21,61 @@
 
                 <div class="bg-gray-50 border border-gray-200 rounded-lg p-6">
                     <p class="text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Decentralized Identifier</p>
-                    <p class="text-lg font-mono font-semibold text-indigo-600 break-all">{{ user.username }}</p>
+                    <p class="text-lg font-mono font-semibold text-indigo-600 break-all">{{ user_did }}</p>
+                    {% if user_npub %}
+                    <p class="text-xs font-mono text-gray-400 mt-1 break-all">{{ user_npub }}</p>
+                    {% endif %}
                 </div>
             </div>
 
+            <!-- Sovereign Profile -->
+            <div class="bg-white rounded-lg shadow-md p-8 mb-6">
+                <h2 class="text-lg font-semibold mb-4">Sovereign Profile</h2>
+
+                <div class="flex items-start gap-4 mb-6">
+                    {% if profile.picture %}
+                    <img src="{{ profile.picture }}" alt="" class="w-16 h-16 rounded-full object-cover border-2 border-gray-200">
+                    {% else %}
+                    <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200">
+                        <span class="text-indigo-600 text-xl font-bold">{{ profile.name|default:"?"|first }}</span>
+                    </div>
+                    {% endif %}
+                    <div>
+                        <p class="font-semibold text-gray-900">{{ profile.name|default:"No display name set" }}</p>
+                        <p class="text-sm text-gray-500">{{ profile.about|default:"No bio"|truncatechars:100 }}</p>
+                        {% if profile.nip05 %}
+                        <p class="text-xs text-indigo-600 mt-1">{{ profile.nip05 }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <form id="profileForm" onsubmit="return editProfile(event)">
+                    {% csrf_token %}
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
+                            <input type="text" id="profileName" value="{{ profile.name }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Picture URL</label>
+                            <input type="url" id="profilePicture" value="{{ profile.picture }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Bio / About</label>
+                        <textarea id="profileAbout" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">{{ profile.about }}</textarea>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <button type="submit" id="profileSaveBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
+                            <span id="profileBtnText">Publish Profile</span>
+                            <span id="profileBtnLoading" class="hidden">Waiting for Signature...</span>
+                        </button>
+                        <span id="profileStatus" class="text-xs text-gray-500 hidden"></span>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Session Info -->
             <div class="bg-white rounded-lg shadow-md p-8">
                 <h2 class="text-lg font-semibold mb-2">Session</h2>
                 <dl class="divide-y">
@@ -56,5 +102,161 @@
             </div>
         {% endif %}
     </main>
+
+    <!-- Toast -->
+    <div id="toast" class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide" role="alert">
+        <span class="font-medium">Profile updated successfully.</span>
+    </div>
+
+    <script>
+        const TAURI_SIGNING_BRIDGE = "ws://127.0.0.1:9001";
+        const userPubkey = "{{ user_pubkey }}";
+
+        let tauriSocket = null;
+        let pendingEvent = null;
+        let isProcessing = false;
+
+        function initTauriSocket() {
+            if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) return;
+            try {
+                tauriSocket = new WebSocket(TAURI_SIGNING_BRIDGE);
+                tauriSocket.onopen = function () { console.log("Connected to Tauri bridge"); };
+                tauriSocket.onmessage = function (event) { handleTauriMessage(event.data); };
+                tauriSocket.onerror = function () {
+                    showToast("Error connecting to Tauri bridge. Please ensure iYou Home is running.", true);
+                };
+                tauriSocket.onclose = function () { console.log("Tauri bridge closed"); };
+            } catch (err) {
+                console.error("Failed to create WebSocket:", err);
+            }
+        }
+
+        function handleTauriMessage(data) {
+            try {
+                const message = JSON.parse(data);
+                if (message.type === "signed_event" && pendingEvent) {
+                    pendingEvent.id = message.event.id;
+                    pendingEvent.sig = message.event.sig;
+                    broadcastProfile(pendingEvent);
+                }
+            } catch (err) {
+                console.error("Error handling Tauri message:", err);
+            }
+        }
+
+        function sendEventToTauri(event) {
+            pendingEvent = event;
+            if (!tauriSocket || tauriSocket.readyState !== WebSocket.OPEN) {
+                initTauriSocket();
+            }
+            const request = { type: "sign_event", event: event };
+            const checkSocket = setInterval(function () {
+                if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) {
+                    clearInterval(checkSocket);
+                    tauriSocket.send(JSON.stringify(request));
+                }
+            }, 100);
+            setTimeout(function () {
+                if (isProcessing) {
+                    clearInterval(checkSocket);
+                    showToast("Timeout waiting for Tauri. Please try again.", true);
+                    resetState();
+                }
+            }, 5000);
+        }
+
+        function broadcastProfile(signedEvent) {
+            const RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
+            let remaining = RELAYS.length;
+            let anySuccess = false;
+
+            RELAYS.forEach(function (relayUrl) {
+                let finished = false;
+                const done = function () {
+                    if (finished) return;
+                    finished = true;
+                    remaining--;
+                    if (remaining === 0) {
+                        if (anySuccess) {
+                            showToast("Profile published successfully.");
+                        } else {
+                            showToast("Failed to broadcast profile. Try again.", true);
+                        }
+                        resetState();
+                    }
+                };
+                try {
+                    const ws = new WebSocket(relayUrl);
+                    ws.onopen = function () { ws.send(JSON.stringify(["EVENT", signedEvent])); };
+                    ws.onmessage = function (e) {
+                        try {
+                            const msg = JSON.parse(e.data);
+                            if (msg[0] === "OK") anySuccess = true;
+                        } catch (x) {}
+                        try { ws.close(); } catch (x) {}
+                        done();
+                    };
+                    ws.onerror = function () { done(); };
+                    ws.onclose = function () { done(); };
+                    setTimeout(function () { try { ws.close(); } catch (x) {} done(); }, 3000);
+                } catch (err) { done(); }
+            });
+        }
+
+        function editProfile(event) {
+            event.preventDefault();
+            if (!userPubkey) {
+                showToast("User public key not available.", true);
+                return false;
+            }
+
+            const name = document.getElementById("profileName").value.trim();
+            const about = document.getElementById("profileAbout").value.trim();
+            const picture = document.getElementById("profilePicture").value.trim();
+
+            const content = JSON.stringify({
+                name: name,
+                display_name: name,
+                about: about,
+                picture: picture,
+            });
+
+            const profileEvent = {
+                kind: 0,
+                content: content,
+                pubkey: userPubkey,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [],
+            };
+
+            isProcessing = true;
+            document.getElementById("profileBtnText").classList.add("hidden");
+            document.getElementById("profileBtnLoading").classList.remove("hidden");
+            document.getElementById("profileSaveBtn").disabled = true;
+
+            sendEventToTauri(profileEvent);
+            return false;
+        }
+
+        function showToast(message, isError) {
+            const toast = document.getElementById("toast");
+            const span = toast.querySelector("span");
+            span.textContent = message;
+            toast.className = "fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg toast" +
+                (isError ? " bg-red-500 text-white" : " bg-green-500 text-white");
+            toast.classList.remove("hide");
+            setTimeout(function () { toast.classList.add("hide"); }, 3000);
+        }
+
+        function resetState() {
+            isProcessing = false;
+            pendingEvent = null;
+            document.getElementById("profileBtnText").classList.remove("hidden");
+            document.getElementById("profileBtnLoading").classList.add("hidden");
+            document.getElementById("profileSaveBtn").disabled = false;
+        }
+
+        document.addEventListener("DOMContentLoaded", function () { initTauriSocket(); });
+    </script>
 </body>
 </html>

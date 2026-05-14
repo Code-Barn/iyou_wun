@@ -1,0 +1,114 @@
+<!doctype html>
+<html>
+<head>
+    <title>{% if profile.name %}{{ profile.name }}{% else %}{{ npub|truncatechars:20 }}{% endif %} - Profile</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    {% include '_nav.html' %}
+
+    <main class="max-w-4xl mx-auto px-4 py-10">
+        {% if error %}
+        <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+            <p class="text-red-600 font-medium">{{ error }}</p>
+            <a href="{% url 'feed' %}" class="text-sm text-indigo-600 hover:text-indigo-800 mt-2 inline-block">&larr; Back to Feed</a>
+        </div>
+        {% else %}
+
+        <!-- Profile Hero -->
+        <div class="bg-white rounded-lg shadow-md p-8 mb-6">
+            <div class="flex items-start gap-6">
+                <div class="flex-shrink-0">
+                    {% if profile.picture %}
+                    <img src="{{ profile.picture }}" alt="" class="w-24 h-24 rounded-full object-cover border-2 border-gray-200">
+                    {% else %}
+                    <div class="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200">
+                        <span class="text-indigo-600 text-2xl font-bold">{{ profile.name|default:"?"|first }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h1 class="text-2xl font-bold text-gray-900">{{ profile.name|default:"Anonymous" }}</h1>
+                    {% if profile.nip05 %}
+                    <p class="text-sm text-indigo-600">{{ profile.nip05 }}</p>
+                    {% endif %}
+                    <p class="text-xs font-mono text-gray-500 mt-1 break-all">{{ npub }}</p>
+                    {% if profile.about %}
+                    <p class="text-sm text-gray-600 mt-3 whitespace-pre-wrap">{{ profile.about }}</p>
+                    {% endif %}
+                </div>
+                <div class="flex-shrink-0 text-center">
+                    <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+                        <p class="text-2xl font-bold text-amber-700">{{ sovereign_score }}</p>
+                        <p class="text-xs text-amber-600 font-medium">Sovereign<br>Score</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Recent Broadcasts -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-lg font-bold mb-4">Recent Broadcasts</h2>
+                {% if broadcasts %}
+                <div class="space-y-4">
+                    {% for note in broadcasts %}
+                    <div class="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
+                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ note.content|truncatechars:200 }}</p>
+                        <p class="text-xs text-gray-400 mt-2">{{ note.created_at|date:"Y-m-d H:i" }}</p>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500 text-center py-8">No broadcasts yet.</p>
+                {% endif %}
+            </div>
+
+            <!-- Media Assets -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-lg font-bold mb-4">Media Assets</h2>
+                {% if media %}
+                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {% for item in media %}
+                    <div class="border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                        {% if item.mime_type and item.mime_type|slice:":5" == "image" %}
+                        <div class="aspect-square bg-gray-100">
+                            <img src="{{ item.thumbnail_url|default:item.file_url }}" alt="{{ item.alt_text }}" class="w-full h-full object-cover" loading="lazy">
+                        </div>
+                        {% elif item.mime_type and item.mime_type|slice:":5" == "video" %}
+                        <div class="aspect-square bg-gray-900 flex items-center justify-center relative">
+                            <video src="{{ item.file_url }}" class="w-full h-full object-cover" preload="metadata"></video>
+                            <span class="absolute text-white text-3xl opacity-80">&#9654;</span>
+                        </div>
+                        {% elif item.mime_type and item.mime_type|slice:":5" == "audio" %}
+                        <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center">
+                            <span class="text-3xl">&#127925;</span>
+                        </div>
+                        {% else %}
+                        <div class="aspect-square bg-gray-100 flex items-center justify-center">
+                            <span class="text-3xl text-gray-400">&#128196;</span>
+                        </div>
+                        {% endif %}
+                        <div class="p-2">
+                            <div class="flex items-center gap-1">
+                                {% if item.is_sovereign %}
+                                <span class="bg-amber-100 text-amber-800 text-xs font-medium px-1.5 py-0.5 rounded-full">Sovereign</span>
+                                {% else %}
+                                <span class="bg-green-100 text-green-800 text-xs font-medium px-1.5 py-0.5 rounded-full">Verified</span>
+                                {% endif %}
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1">{{ item.created_at|date:"Y-m-d" }}</p>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="text-sm text-gray-500 text-center py-8">No media assets yet.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        {% endif %}
+    </main>
+</body>
+</html>

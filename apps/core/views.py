@@ -41,7 +41,15 @@ def home(request):
 
 @login_required
 def dashboard(request):
-    return render(request, "dashboard.html")
+    user_pubkey = did_to_pubkey(request.user.username)
+    user_npub = did_to_npub(request.user.username)
+    profile = fetch_profile_data(user_pubkey) if user_pubkey else {}
+    return render(request, "dashboard.html", {
+        "user_pubkey": user_pubkey,
+        "user_npub": user_npub,
+        "user_did": request.user.username,
+        "profile": profile,
+    })
 
 
 class FeedView(LoginRequiredMixin, TemplateView):
@@ -87,6 +95,151 @@ class FeedView(LoginRequiredMixin, TemplateView):
             request.session["has_seen_feed_welcome"] = True
 
         return super().get(request, *args, **kwargs)
+
+
+class ChatView(LoginRequiredMixin, TemplateView):
+    template_name = "chat.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user_pubkey = did_to_pubkey(self.request.user.username)
+        context["user_pubkey"] = user_pubkey
+        context["user_did"] = self.request.user.username
+        return context
+
+
+def npub_to_hex(npub_str):
+    """Convert npub1... to hex pubkey."""
+    try:
+        hrp, data = bech32.bech32_decode(npub_str)
+        if hrp != "npub" or data is None:
+            return None
+        decoded = bech32.convertbits(data, 5, 8, False)
+        if decoded is None:
+            return None
+        return bytes(decoded).hex()
+    except Exception:
+        return None
+
+
+def fetch_profile_data(hex_pubkey):
+    """Fetch Kind 0 profile metadata for a pubkey."""
+    events = relay_req({"kinds": [0], "authors": [hex_pubkey], "limit": 1})
+    for e in events.values():
+        try:
+            content = json.loads(e.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            content = {}
+        return {
+            "name": content.get("display_name") or content.get("name", ""),
+            "about": content.get("about", ""),
+            "picture": content.get("picture", ""),
+            "nip05": content.get("nip05", ""),
+            "lud16": content.get("lud16", ""),
+        }
+    return {}
+
+
+def fetch_media_assets(authors=None, limit=50):
+    """Fetch only Kind 1063 media events, flat sorted list."""
+    filter_obj = {"kinds": [1063], "limit": limit}
+    if authors:
+        filter_obj["authors"] = authors
+
+    raw_events = relay_req(filter_obj)
+    if not raw_events:
+        return []
+
+    pubkeys = set()
+    for e in raw_events.values():
+        pk = e.get("pubkey")
+        if pk:
+            pubkeys.add(pk)
+
+    profiles = {}
+    if pubkeys:
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]})
+        for e in profile_events.values():
+            pk = e.get("pubkey", "")
+            try:
+                profiles[pk] = json.loads(e.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                profiles[pk] = {}
+
+    result = []
+    for e in raw_events.values():
+        tags = e.get("tags", [])
+        pk = e.get("pubkey", "")
+        npub_val = hex_to_npub(pk) if pk else ""
+        profile = profiles.get(pk, {})
+        file_url = get_tag_value(tags, "url")
+        result.append({
+            "id": e.get("id", ""),
+            "kind": 1063,
+            "pubkey": pk,
+            "npub": npub_val,
+            "content": e.get("content", ""),
+            "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
+            "tags": tags,
+            "file_url": file_url,
+            "mime_type": get_tag_value(tags, "m"),
+            "dimensions": get_tag_value(tags, "dim"),
+            "thumbnail_url": get_tag_value(tags, "thumb"),
+            "alt_text": get_tag_value(tags, "alt"),
+            "is_sovereign": bool(file_url and "127.0.0.1" in file_url),
+            "author_name": profile.get("display_name") or profile.get("name") or "",
+            "author_avatar": profile.get("picture", ""),
+        })
+
+    result.sort(key=lambda x: x["created_at"], reverse=True)
+    return result[:limit]
+
+
+def fetch_text_notes(authors=None, limit=20):
+    """Fetch Kind 1 text notes for given authors, with profile enrichment."""
+    filter_obj = {"kinds": [1], "limit": limit}
+    if authors:
+        filter_obj["authors"] = authors
+
+    raw_events = relay_req(filter_obj)
+    if not raw_events:
+        return []
+
+    pubkeys = set()
+    for e in raw_events.values():
+        pk = e.get("pubkey")
+        if pk:
+            pubkeys.add(pk)
+
+    profiles = {}
+    if pubkeys:
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]})
+        for e in profile_events.values():
+            pk = e.get("pubkey", "")
+            try:
+                profiles[pk] = json.loads(e.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                profiles[pk] = {}
+
+    result = []
+    for e in raw_events.values():
+        pk = e.get("pubkey", "")
+        npub_val = hex_to_npub(pk) if pk else ""
+        profile = profiles.get(pk, {})
+        result.append({
+            "id": e.get("id", ""),
+            "kind": 1,
+            "pubkey": pk,
+            "npub": npub_val,
+            "content": e.get("content", ""),
+            "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
+            "tags": e.get("tags", []),
+            "author_name": profile.get("display_name") or profile.get("name") or "",
+            "author_avatar": profile.get("picture", ""),
+        })
+
+    result.sort(key=lambda x: x["created_at"], reverse=True)
+    return result[:limit]
 
 
 def get_tag_value(tags, tag_name, index=1, default=""):
@@ -293,6 +446,52 @@ def fetch_contact_pubkeys(user_pubkey):
         tags = e.get("tags", [])
         return [tag[1] for tag in tags if tag and tag[0] == "p" and len(tag) > 1]
     return []
+
+
+class GalleryView(LoginRequiredMixin, TemplateView):
+    template_name = "gallery.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user_pubkey = did_to_pubkey(self.request.user.username)
+        context["user_pubkey"] = user_pubkey
+        context["user_did"] = self.request.user.username
+
+        filter_pubkey = self.request.GET.get("pubkey")
+        authors = [filter_pubkey] if filter_pubkey else None
+        notes = fetch_media_assets(authors=authors)
+        context["notes"] = notes
+        context["filter_pubkey"] = filter_pubkey
+        return context
+
+
+class ProfileView(TemplateView):
+    template_name = "profile.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        npub = kwargs.get("npub")
+        hex_pubkey = npub_to_hex(npub)
+        context["hex_pubkey"] = hex_pubkey
+        context["npub"] = npub
+
+        if not hex_pubkey:
+            context["error"] = f"Invalid npub: {npub}"
+            return context
+
+        profile = fetch_profile_data(hex_pubkey)
+        context["profile"] = profile
+
+        broadcasts = fetch_text_notes(authors=[hex_pubkey])
+        context["broadcasts"] = broadcasts
+
+        media = fetch_media_assets(authors=[hex_pubkey])
+        context["media"] = media
+
+        sovereign_score = sum(1 for m in media if m.get("is_sovereign"))
+        context["sovereign_score"] = sovereign_score
+
+        return context
 
 
 def hex_to_npub(hex_pubkey):

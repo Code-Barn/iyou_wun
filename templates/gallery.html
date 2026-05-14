@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+    <title>Media Gallery - iyou_wun</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    {% include '_nav.html' %}
+
+    <main class="max-w-6xl mx-auto px-4 py-10">
+        <div class="bg-white rounded-lg shadow-md p-8">
+            <div class="flex items-center justify-between mb-6">
+                <h1 class="text-2xl font-bold">Media Gallery</h1>
+                {% if filter_pubkey %}
+                <a href="{% url 'gallery' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Clear filter</a>
+                {% endif %}
+            </div>
+
+            {% if notes %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {% for note in notes %}
+                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
+                    <a href="{% url 'profile' npub=note.npub %}">
+                        {% if note.mime_type and note.mime_type|slice:":5" == "image" %}
+                        <div class="aspect-square bg-gray-100 overflow-hidden">
+                            {% if note.thumbnail_url %}
+                            <img src="{{ note.thumbnail_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover" loading="lazy">
+                            {% else %}
+                            <img src="{{ note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover" loading="lazy">
+                            {% endif %}
+                        </div>
+                        {% elif note.mime_type and note.mime_type|slice:":5" == "video" %}
+                        <div class="aspect-square bg-gray-900 overflow-hidden relative">
+                            <video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata"></video>
+                            <div class="absolute inset-0 flex items-center justify-center">
+                                <span class="text-white text-4xl opacity-80">&#9654;</span>
+                            </div>
+                        </div>
+                        {% elif note.mime_type and note.mime_type|slice:":5" == "audio" %}
+                        <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center">
+                            <span class="text-5xl">&#127925;</span>
+                        </div>
+                        {% else %}
+                        <div class="aspect-square bg-gray-100 flex items-center justify-center">
+                            <span class="text-4xl text-gray-400">&#128196;</span>
+                        </div>
+                        {% endif %}
+                    </a>
+
+                    <div class="p-3">
+                        <div class="flex items-center justify-between mb-2">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <a href="{% url 'profile' npub=note.npub %}" class="text-xs font-mono text-gray-600 hover:text-indigo-600 truncate">
+                                    {{ note.author_name|default:note.npub|truncatechars:20 }}
+                                </a>
+                            </div>
+                            {% if note.is_sovereign %}
+                            <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Sovereign</span>
+                            {% else %}
+                            <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Verified</span>
+                            {% endif %}
+                        </div>
+                        {% if note.content %}
+                        <p class="text-xs text-gray-500 truncate">{{ note.content }}</p>
+                        {% endif %}
+                        <p class="text-xs text-gray-400 mt-1">{{ note.created_at|date:"Y-m-d H:i" }}</p>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="text-center py-12 text-gray-500">
+                <p class="text-lg">No media events found.</p>
+                <p class="text-sm mt-2">Media uploaded via the feed will appear here.</p>
+            </div>
+            {% endif %}
+        </div>
+    </main>
+</body>
+</html>

@@ -168,3 +168,95 @@ class JwksConnectivityTest(TestCase):
                 self.assertGreater(len(data["keys"]), 0)
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             self.skipTest(f"IdP not reachable at {url}: {e}")
+
+
+class ChatViewTest(TestCase):
+    def test_redirects_anonymous(self):
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_redirects_to_oidc_login(self):
+        response = self.client.get(reverse("chat"))
+        self.assertIn(reverse("oidc_authentication_init"), response.url)
+
+    def test_authenticated_user_sees_chat(self):
+        user = User.objects.create_user(username="did:key:z6Mkchat123")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "chat.html")
+
+    def test_chat_contains_xmpp_init(self):
+        user = User.objects.create_user(username="did:key:z6Mkchat456")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertContains(response, "converse.initialize")
+        self.assertContains(response, "127.0.0.1:5222")
+
+    def test_chat_shows_nav(self):
+        user = User.objects.create_user(username="did:key:z6Mknav")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertContains(response, "Dashboard")
+        self.assertContains(response, "Feed")
+
+    def test_authenticated_user_sees_logout_in_chat(self):
+        user = User.objects.create_user(username="did:key:z6Mklogout")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertContains(response, "Logout")
+
+
+class GalleryViewTest(TestCase):
+    def test_redirects_anonymous(self):
+        response = self.client.get(reverse("gallery"))
+        self.assertEqual(response.status_code, 302)
+
+    def test_authenticated_user_sees_gallery(self):
+        user = User.objects.create_user(username="did:key:z6Mkgallery")
+        self.client.force_login(user)
+        response = self.client.get(reverse("gallery"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "gallery.html")
+
+    def test_gallery_contains_media_heading(self):
+        user = User.objects.create_user(username="did:key:z6Mkgallery2")
+        self.client.force_login(user)
+        response = self.client.get(reverse("gallery"))
+        self.assertContains(response, "Media Gallery")
+
+    def test_gallery_shows_nav(self):
+        user = User.objects.create_user(username="did:key:z6Mkgallery3")
+        self.client.force_login(user)
+        response = self.client.get(reverse("gallery"))
+        self.assertContains(response, "Dashboard")
+        self.assertContains(response, "Gallery")
+
+
+class ProfileViewTest(TestCase):
+    def test_invalid_npub_returns_error(self):
+        response = self.client.get(reverse("profile", kwargs={"npub": "invalid"}))
+        self.assertContains(response, "Invalid npub")
+
+    def test_valid_npub_renders_profile_page(self):
+        # Use a known valid npub — we don't mock the relay, so this may show
+        # "No broadcasts yet" / "No media assets yet" which is fine.
+        response = self.client.get(
+            reverse("profile", kwargs={"npub": "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6ctk5d"})
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "profile.html")
+
+
+class DashboardProfileTest(TestCase):
+    def test_dashboard_contains_profile_section(self):
+        user = User.objects.create_user(username="did:key:z6Mkdashprofile")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Sovereign Profile")
+
+    def test_dashboard_contains_publish_button(self):
+        user = User.objects.create_user(username="did:key:z6Mkdashpub")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Publish Profile")
