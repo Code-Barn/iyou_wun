@@ -8,7 +8,9 @@ from datetime import datetime
 import bech32
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
+from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import TemplateView
 from websocket import WebSocketApp
 
@@ -43,12 +45,14 @@ def home(request):
 def dashboard(request):
     user_pubkey = did_to_pubkey(request.user.username)
     user_npub = did_to_npub(request.user.username)
-    profile = fetch_profile_data(user_pubkey) if user_pubkey else {}
+    relays = request.session.get("relays", DEFAULT_RELAYS)
+    profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
     return render(request, "dashboard.html", {
         "user_pubkey": user_pubkey,
         "user_npub": user_npub,
         "user_did": request.user.username,
         "profile": profile,
+        "relays": relays,
     })
 
 
@@ -62,16 +66,18 @@ class FeedView(LoginRequiredMixin, TemplateView):
 
         user_pubkey = did_to_pubkey(self.request.user.username)
         user_npub = did_to_npub(self.request.user.username)
+        relays = self.request.session.get("relays", DEFAULT_RELAYS)
 
         context["user_pubkey"] = user_pubkey
         context["user_npub"] = user_npub
         context["user_did"] = self.request.user.username
+        context["relays_json"] = json.dumps(relays)
 
         thread_id = self.request.GET.get("thread")
         context["thread_id"] = thread_id
 
         if thread_id:
-            notes = fetch_thread(thread_id)
+            notes = fetch_thread(thread_id, relay_urls=relays)
             context["thread_mode"] = True
             context["feed_mode"] = "thread"
         else:
@@ -79,13 +85,13 @@ class FeedView(LoginRequiredMixin, TemplateView):
             context["feed_mode"] = mode
 
             if mode == "network" and user_pubkey:
-                contacts = fetch_contact_pubkeys(user_pubkey)
+                contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
                 if contacts:
-                    notes = fetch_unified_feed(authors=contacts)
+                    notes = fetch_unified_feed(authors=contacts, relay_urls=relays)
                 else:
-                    notes = fetch_unified_feed(authors=CURATED_AUTHORS)
+                    notes = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
             else:
-                notes = fetch_unified_feed()
+                notes = fetch_unified_feed(relay_urls=relays)
 
         context["notes"] = notes
 
@@ -116,6 +122,76 @@ class ChatView(LoginRequiredMixin, TemplateView):
         return context
 
 
+@login_required
+@csrf_exempt
+def api_relays(request):
+    if request.method == 'GET':
+        relays = request.session.get('relays', DEFAULT_RELAYS)
+        return JsonResponse({'relays': relays})
+    data = json.loads(request.body)
+    relays = data.get('relays', DEFAULT_RELAYS)
+    request.session['relays'] = relays
+    return JsonResponse({'relays': relays})
+
+
+@login_required
+def api_feed(request):
+    until = request.GET.get('until')
+    mode = request.GET.get('mode', 'network')
+    limit = 30
+
+    user_pubkey = did_to_pubkey(request.user.username)
+    relays = request.session.get('relays', DEFAULT_RELAYS)
+
+    filter_obj = {"kinds": [1, 7, 1063, 1111], "limit": limit}
+    if until:
+        filter_obj["until"] = int(until)
+
+    if mode == "network" and user_pubkey:
+        contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
+        if contacts:
+            filter_obj["authors"] = contacts
+        else:
+            filter_obj["authors"] = CURATED_AUTHORS
+
+    raw_events = relay_req(filter_obj, relay_urls=relays)
+
+    pubkeys = set()
+    for e in raw_events.values():
+        pk = e.get("pubkey")
+        if pk:
+            pubkeys.add(pk)
+        for tag in e.get("tags", []):
+            if tag and tag[0] == "p" and len(tag) > 1:
+                pubkeys.add(tag[1])
+
+    profiles = {}
+    if pubkeys:
+        profile_events = relay_req(
+            {"kinds": [0], "authors": list(pubkeys)[:100]},
+            relay_urls=relays,
+        )
+        for e in profile_events.values():
+            pk = e.get("pubkey", "")
+            try:
+                profiles[pk] = json.loads(e.get("content", "{}"))
+            except json.JSONDecodeError:
+                profiles[pk] = {}
+
+    notes = process_into_feed(raw_events, profiles, max_items=limit)
+
+    def _serialize(note):
+        result = dict(note)
+        result["created_at"] = note["created_at"].timestamp()
+        if note.get("comments"):
+            result["comments"] = [_serialize(c) for c in note["comments"]]
+        if note.get("reactions"):
+            result["reactions"] = [{"id": r["id"], "pubkey": r["pubkey"], "content": r["content"]} for r in note["reactions"]]
+        return result
+
+    return JsonResponse({"notes": [_serialize(n) for n in notes]})
+
+
 def npub_to_hex(npub_str):
     """Convert npub1... to hex pubkey."""
     try:
@@ -130,9 +206,9 @@ def npub_to_hex(npub_str):
         return None
 
 
-def fetch_profile_data(hex_pubkey):
+def fetch_profile_data(hex_pubkey, relay_urls=None):
     """Fetch Kind 0 profile metadata for a pubkey."""
-    events = relay_req({"kinds": [0], "authors": [hex_pubkey], "limit": 1})
+    events = relay_req({"kinds": [0], "authors": [hex_pubkey], "limit": 1}, relay_urls=relay_urls)
     for e in events.values():
         try:
             content = json.loads(e.get("content", "{}"))
@@ -148,13 +224,13 @@ def fetch_profile_data(hex_pubkey):
     return {}
 
 
-def fetch_media_assets(authors=None, limit=50):
+def fetch_media_assets(authors=None, limit=50, relay_urls=None):
     """Fetch only Kind 1063 media events, flat sorted list."""
     filter_obj = {"kinds": [1063], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
 
-    raw_events = relay_req(filter_obj)
+    raw_events = relay_req(filter_obj, relay_urls=relay_urls)
     if not raw_events:
         return []
 
@@ -166,7 +242,7 @@ def fetch_media_assets(authors=None, limit=50):
 
     profiles = {}
     if pubkeys:
-        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]})
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]}, relay_urls=relay_urls)
         for e in profile_events.values():
             pk = e.get("pubkey", "")
             try:
@@ -203,13 +279,13 @@ def fetch_media_assets(authors=None, limit=50):
     return result[:limit]
 
 
-def fetch_text_notes(authors=None, limit=20):
+def fetch_text_notes(authors=None, limit=20, relay_urls=None):
     """Fetch Kind 1 text notes for given authors, with profile enrichment."""
     filter_obj = {"kinds": [1], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
 
-    raw_events = relay_req(filter_obj)
+    raw_events = relay_req(filter_obj, relay_urls=relay_urls)
     if not raw_events:
         return []
 
@@ -221,7 +297,7 @@ def fetch_text_notes(authors=None, limit=20):
 
     profiles = {}
     if pubkeys:
-        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]})
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]}, relay_urls=relay_urls)
         for e in profile_events.values():
             pk = e.get("pubkey", "")
             try:
@@ -250,13 +326,13 @@ def fetch_text_notes(authors=None, limit=20):
     return result[:limit]
 
 
-def fetch_thread(parent_id):
+def fetch_thread(parent_id, relay_urls=None):
     """Fetch a parent event and its comments, return structured feed list."""
-    parent_raw = relay_req({"ids": [parent_id], "limit": 1})
+    parent_raw = relay_req({"ids": [parent_id], "limit": 1}, relay_urls=relay_urls)
     if not parent_raw:
         return []
 
-    comments_raw = relay_req({"#e": [parent_id], "kinds": [1111], "limit": 50})
+    comments_raw = relay_req({"#e": [parent_id], "kinds": [1111], "limit": 50}, relay_urls=relay_urls)
 
     pubkeys = set()
     for e in list(parent_raw.values()) + list(comments_raw.values()):
@@ -266,7 +342,7 @@ def fetch_thread(parent_id):
 
     profiles = {}
     if pubkeys:
-        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]})
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]}, relay_urls=relay_urls)
         for e in profile_events.values():
             pk = e.get("pubkey", "")
             try:
@@ -291,17 +367,16 @@ def get_tag_value(tags, tag_name, index=1, default=""):
 
 RELAY_URL = "wss://nos.lol"
 
+DEFAULT_RELAYS = ["wss://nos.lol", "wss://relay.iyou.me", "ws://127.0.0.1:9003"]
+
 CURATED_AUTHORS = [
     "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
     "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
 ]
 
 
-def relay_req(filter_obj, sub_id=None, timeout=10):
-    """Open a WebSocket to the relay, send a Nostr REQ, collect events until EOSE or timeout."""
-    if sub_id is None:
-        sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
-
+def _connect_relay(relay_url, sub_id, filter_obj, timeout):
+    """Connect to a single relay and fetch events."""
     events = {}
     done = threading.Event()
 
@@ -327,7 +402,7 @@ def relay_req(filter_obj, sub_id=None, timeout=10):
         done.set()
 
     ws = WebSocketApp(
-        RELAY_URL,
+        relay_url,
         on_open=on_open,
         on_message=on_message,
         on_error=on_error,
@@ -344,9 +419,25 @@ def relay_req(filter_obj, sub_id=None, timeout=10):
         done.wait(timeout=timeout)
         ws.close()
     except Exception as e:
-        print(f"relay_req error: {e}")
+        print(f"_connect_relay error on {relay_url}: {e}")
 
     return events
+
+
+def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None):
+    """Try multiple relays, return events from first responsive one."""
+    if sub_id is None:
+        sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
+
+    if relay_urls is None:
+        relay_urls = DEFAULT_RELAYS
+
+    for relay_url in relay_urls:
+        events = _connect_relay(relay_url, sub_id, filter_obj, timeout)
+        if events:
+            return events
+
+    return {}
 
 
 def process_into_feed(raw_events, profiles=None, max_items=50):
@@ -438,7 +529,7 @@ def process_into_feed(raw_events, profiles=None, max_items=50):
     return feed[:max_items]
 
 
-def fetch_unified_feed(authors=None, limit=50):
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
     Phase 1: Fetch kinds [1, 7, 1063, 1111] with optional authors filter.
@@ -449,7 +540,7 @@ def fetch_unified_feed(authors=None, limit=50):
     if authors:
         filter_obj["authors"] = authors
 
-    raw_events = relay_req(filter_obj)
+    raw_events = relay_req(filter_obj, relay_urls=relay_urls)
 
     pubkeys = set()
     for e in raw_events.values():
@@ -463,7 +554,8 @@ def fetch_unified_feed(authors=None, limit=50):
     profiles = {}
     if pubkeys:
         profile_events = relay_req(
-            {"kinds": [0], "authors": list(pubkeys)[:100]}
+            {"kinds": [0], "authors": list(pubkeys)[:100]},
+            relay_urls=relay_urls,
         )
         for e in profile_events.values():
             pk = e.get("pubkey", "")
@@ -472,12 +564,12 @@ def fetch_unified_feed(authors=None, limit=50):
             except json.JSONDecodeError:
                 profiles[pk] = {}
 
-    return process_into_feed(raw_events, profiles, limit)
+    return process_into_feed(raw_events, profiles, max_items=limit)
 
 
-def fetch_contact_pubkeys(user_pubkey):
+def fetch_contact_pubkeys(user_pubkey, relay_urls=None):
     """Fetch Kind 3 (Contact List) for a user and return followed pubkeys."""
-    events = relay_req({"kinds": [3], "authors": [user_pubkey], "limit": 1})
+    events = relay_req({"kinds": [3], "authors": [user_pubkey], "limit": 1}, relay_urls=relay_urls)
     for e in events.values():
         tags = e.get("tags", [])
         return [tag[1] for tag in tags if tag and tag[0] == "p" and len(tag) > 1]
@@ -490,12 +582,13 @@ class GalleryView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user_pubkey = did_to_pubkey(self.request.user.username)
+        relays = self.request.session.get("relays", DEFAULT_RELAYS)
         context["user_pubkey"] = user_pubkey
         context["user_did"] = self.request.user.username
 
         filter_pubkey = self.request.GET.get("pubkey")
         authors = [filter_pubkey] if filter_pubkey else None
-        notes = fetch_media_assets(authors=authors)
+        notes = fetch_media_assets(authors=authors, relay_urls=relays)
         context["notes"] = notes
         context["filter_pubkey"] = filter_pubkey
         return context

@@ -137,7 +137,7 @@
                     {% for note in notes %}
                     {% if note.kind == 1 %}
                     <!-- KIND 1: Text Note -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1" data-note-id="{{ forloop.counter }}">
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1" data-note-id="{{ forloop.counter }}" data-created-at="{{ note.created_at|date:'U' }}">
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
@@ -186,7 +186,7 @@
                     </div>
                     {% elif note.kind == 1063 %}
                     <!-- KIND 1063: Media Entry -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1063">
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1063" data-created-at="{{ note.created_at|date:'U' }}">
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
@@ -260,7 +260,7 @@
                     </div>
                     {% elif note.kind == 1111 %}
                     <!-- ORPHAN KIND 1111: Standalone Threaded Comment -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1111">
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1111" data-note-id="{{ forloop.counter }}" data-created-at="{{ note.created_at|date:'U' }}">
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
@@ -288,7 +288,22 @@
                 {% else %}
                 <div class="text-center py-12">
                     <p class="text-gray-500 mb-4">Loading unified feed from Nostr network...</p>
-                    <p class="text-sm text-gray-400">Connecting to wss://nos.lol — fetching notes, media, reactions, and comments</p>
+                    <p class="text-sm text-gray-400">Connecting to relays — fetching notes, media, reactions, and comments</p>
+                </div>
+                {% endif %}
+
+                {% if notes %}
+                <div class="mt-6 text-center">
+                    <button id="loadMoreBtn" onclick="loadMoreNotes()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-8 py-3 rounded-lg transition-colors">
+                        Load More
+                    </button>
+                    <div id="loadMoreSpinner" class="hidden mt-4">
+                        <svg class="animate-spin h-6 w-6 text-indigo-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                    <p id="loadMoreEnd" class="text-sm text-gray-400 hidden mt-4">No more notes to load.</p>
                 </div>
                 {% endif %}
             </div>
@@ -316,7 +331,18 @@
         <script>
             // Configuration
             const TAURI_SIGNING_BRIDGE = "ws://127.0.0.1:9001";
-            const NOSTR_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
+            const DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
+            let NOSTR_RELAYS = DEFAULT_RELAYS;
+
+            function loadRelaysFromStorage() {
+                var stored = localStorage.getItem("wun_relays");
+                if (stored) {
+                    try { NOSTR_RELAYS = JSON.parse(stored); } catch (e) { NOSTR_RELAYS = DEFAULT_RELAYS; }
+                } else {
+                    NOSTR_RELAYS = DEFAULT_RELAYS;
+                }
+            }
+            loadRelaysFromStorage();
 
             // User data from Django template
             const userPubkey = "{{ user_pubkey }}";
@@ -698,9 +724,118 @@
                 pendingEvent = null;
             }
 
+            // Load More — fetch next batch of notes
+            function loadMoreNotes() {
+                var container = document.getElementById("feedContainer");
+                if (!container) return;
+                var notes = container.querySelectorAll('[data-note-id]');
+                if (notes.length === 0) return;
+                var lastNote = notes[notes.length - 1];
+                var until = lastNote.getAttribute('data-created-at');
+                if (!until) return;
+
+                var btn = document.getElementById("loadMoreBtn");
+                var spinner = document.getElementById("loadMoreSpinner");
+                var endMsg = document.getElementById("loadMoreEnd");
+                btn.classList.add("hidden");
+                spinner.classList.remove("hidden");
+
+                var mode = new URLSearchParams(window.location.search).get("mode") || "network";
+                fetch("/api/feed?until=" + until + "&mode=" + mode)
+                    .then(function (r) { return r.json(); })
+                    .then(function (data) {
+                        spinner.classList.add("hidden");
+                        var newNotes = data.notes || [];
+                        if (newNotes.length === 0) {
+                            endMsg.classList.remove("hidden");
+                            return;
+                        }
+                        newNotes.forEach(function (note) { appendNoteToFeed(note, container); });
+                        btn.classList.remove("hidden");
+                    })
+                    .catch(function () {
+                        spinner.classList.add("hidden");
+                        btn.classList.remove("hidden");
+                    });
+            }
+
+            // Append a single note (from JSON API) to the feed container
+            function appendNoteToFeed(note, container) {
+                var el = document.createElement("div");
+                var date = new Date(note.created_at * 1000);
+                var formattedDate = date.toLocaleString();
+                var npub = note.npub || note.pubkey.substring(0, 12) + "...";
+
+                if (note.kind === 1) {
+                    el.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
+                    el.setAttribute("data-kind", "1");
+                    el.setAttribute("data-note-id", Date.now());
+                    el.setAttribute("data-created-at", Math.floor(note.created_at));
+                    el.innerHTML = '<div class="flex items-start gap-4">' +
+                        '<div class="flex-shrink-0">' +
+                        (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + note.author_name + '" class="w-10 h-10 rounded-full object-cover" />' :
+                            '<div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center"><span class="text-indigo-600 font-mono text-sm">' + (note.author_name || "N").charAt(0).toUpperCase() + '</span></div>') +
+                        '</div>' +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="flex items-center gap-2 mb-2">' +
+                        '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + (note.author_name || npub) + '</a>' +
+                        '<span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>' +
+                        '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
+                        '</div>' +
+                        '<p class="text-gray-700 whitespace-pre-wrap">' + escapeHtml(note.content) + '</p>' +
+                        (note.reactions && note.reactions.length ? '<div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100"><span class="flex items-center gap-1 text-sm text-pink-600">❤️ ' + note.reactions.length + '</span></div>' : '') +
+                        (note.comments && note.comments.length ? '<div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100"><span class="flex items-center gap-1 text-sm text-gray-500">💬 ' + note.comments.length + '</span></div>' : '') +
+                        '</div></div>';
+                } else if (note.kind === 1063) {
+                    el.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
+                    el.setAttribute("data-kind", "1063");
+                    el.setAttribute("data-note-id", Date.now());
+                    el.setAttribute("data-created-at", Math.floor(note.created_at));
+                    var mime = (note.mime_type || "").toLowerCase();
+                    var mediaHtml = "";
+                    if (mime.indexOf("image") !== -1) {
+                        mediaHtml = '<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><img src="' + note.file_url + '" alt="" class="w-full h-auto max-h-96 object-contain" loading="lazy" /></div>';
+                    } else if (mime.indexOf("video") !== -1) {
+                        mediaHtml = '<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><video src="' + note.file_url + '" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video></div>';
+                    } else if (mime.indexOf("audio") !== -1) {
+                        mediaHtml = '<div class="mb-3"><audio src="' + note.file_url + '" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio></div>';
+                    } else {
+                        mediaHtml = '<div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200"><a href="' + note.file_url + '" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 ' + note.file_url + '</a></div>';
+                    }
+                    var badge = note.is_sovereign ? 'Sovereign' : 'Verified';
+                    var badgeClass = note.is_sovereign ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800';
+                    el.innerHTML = '<div class="flex items-start gap-4">' +
+                        '<div class="flex-shrink-0">' +
+                        (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + note.author_name + '" class="w-10 h-10 rounded-full object-cover" />' :
+                            '<div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center"><span class="text-purple-600 font-mono text-sm">M</span></div>') +
+                        '</div>' +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="flex items-center gap-2 mb-2">' +
+                        '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + (note.author_name || npub) + '</a>' +
+                        '<span class="' + badgeClass + ' text-xs font-medium px-2 py-0.5 rounded-full">' + badge + '</span>' +
+                        '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
+                        '</div>' +
+                        mediaHtml +
+                        (note.content ? '<p class="text-gray-700 whitespace-pre-wrap mb-2">' + escapeHtml(note.content) + '</p>' : '') +
+                        '</div></div>';
+                }
+
+                if (el.innerHTML) {
+                    container.appendChild(el);
+                }
+            }
+
+            function escapeHtml(str) {
+                if (!str) return "";
+                var div = document.createElement("div");
+                div.appendChild(document.createTextNode(str));
+                return div.innerHTML;
+            }
+
             // Initialize on page load
             document.addEventListener("DOMContentLoaded", function () {
                 initTauriSocket();
+                loadRelaysFromStorage();
             });
         </script>
     </body>

@@ -26,53 +26,96 @@
                     <p class="text-xs font-mono text-gray-400 mt-1 break-all">{{ user_npub }}</p>
                     {% endif %}
                 </div>
+
+                {% if user_npub %}
+                <div class="mt-4">
+                    <a href="{% url 'profile' npub=user_npub %}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
+                        View My Sovereign Profile
+                    </a>
+                </div>
+                {% endif %}
             </div>
 
-            <!-- Sovereign Profile -->
+            <!-- Tab Bar -->
             <div class="bg-white rounded-lg shadow-md p-8 mb-6">
-                <h2 class="text-lg font-semibold mb-4">Sovereign Profile</h2>
-
-                <div class="flex items-start gap-4 mb-6">
-                    {% if profile.picture %}
-                    <img src="{{ profile.picture }}" alt="" class="w-16 h-16 rounded-full object-cover border-2 border-gray-200">
-                    {% else %}
-                    <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200">
-                        <span class="text-indigo-600 text-xl font-bold">{{ profile.name|default:"?"|first }}</span>
-                    </div>
-                    {% endif %}
-                    <div>
-                        <p class="font-semibold text-gray-900">{{ profile.name|default:"No display name set" }}</p>
-                        <p class="text-sm text-gray-500">{{ profile.about|default:"No bio"|truncatechars:100 }}</p>
-                        {% if profile.nip05 %}
-                        <p class="text-xs text-indigo-600 mt-1">{{ profile.nip05 }}</p>
-                        {% endif %}
-                    </div>
+                <div class="flex border-b border-gray-200 mb-6">
+                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors" data-tab="profile" onclick="switchTab('profile')">
+                        Profile
+                    </button>
+                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="settings" onclick="switchTab('settings')">
+                        Settings
+                    </button>
                 </div>
 
-                <form id="profileForm" onsubmit="return editProfile(event)">
-                    {% csrf_token %}
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
-                            <input type="text" id="profileName" value="{{ profile.name }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                <!-- Profile Tab -->
+                <div id="tab-profile" class="tab-panel">
+                    <h2 class="text-lg font-semibold mb-4">Sovereign Profile</h2>
+
+                    <div class="flex items-start gap-4 mb-6">
+                        {% if profile.picture %}
+                        <img src="{{ profile.picture }}" alt="" class="w-16 h-16 rounded-full object-cover border-2 border-gray-200">
+                        {% else %}
+                        <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200">
+                            <span class="text-indigo-600 text-xl font-bold">{{ profile.name|default:"?"|first }}</span>
                         </div>
+                        {% endif %}
                         <div>
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Picture URL</label>
-                            <input type="url" id="profilePicture" value="{{ profile.picture }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                            <p class="font-semibold text-gray-900">{{ profile.name|default:"No display name set" }}</p>
+                            <p class="text-sm text-gray-500">{{ profile.about|default:"No bio"|truncatechars:100 }}</p>
+                            {% if profile.nip05 %}
+                            <p class="text-xs text-indigo-600 mt-1">{{ profile.nip05 }}</p>
+                            {% endif %}
                         </div>
                     </div>
-                    <div class="mb-4">
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Bio / About</label>
-                        <textarea id="profileAbout" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">{{ profile.about }}</textarea>
+
+                    <form id="profileForm" onsubmit="return editProfile(event)">
+                        {% csrf_token %}
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
+                                <input type="text" id="profileName" value="{{ profile.name }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Picture URL</label>
+                                <input type="url" id="profilePicture" value="{{ profile.picture }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Bio / About</label>
+                            <textarea id="profileAbout" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">{{ profile.about }}</textarea>
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <button type="submit" id="profileSaveBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
+                                <span id="profileBtnText">Publish Profile</span>
+                                <span id="profileBtnLoading" class="hidden">Waiting for Signature...</span>
+                            </button>
+                            <span id="profileStatus" class="text-xs text-gray-500 hidden"></span>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Settings Tab -->
+                <div id="tab-settings" class="tab-panel hidden">
+                    <h2 class="text-lg font-semibold mb-4">Sovereign Switchboard</h2>
+                    <p class="text-sm text-gray-500 mb-4">Manage your Nostr relay connections. Events are broadcast to all active relays.</p>
+
+                    <div id="relayList" class="space-y-2 mb-4">
                     </div>
-                    <div class="flex items-center gap-3">
-                        <button type="submit" id="profileSaveBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
-                            <span id="profileBtnText">Publish Profile</span>
-                            <span id="profileBtnLoading" class="hidden">Waiting for Signature...</span>
+
+                    <div class="flex items-center gap-2 mb-4">
+                        <input type="text" id="relayInput" placeholder="wss://example.com" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                        <button type="button" onclick="addRelay()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-gray-300">
+                            Add Relay
                         </button>
-                        <span id="profileStatus" class="text-xs text-gray-500 hidden"></span>
                     </div>
-                </form>
+
+                    <div class="flex items-center gap-3">
+                        <button type="button" onclick="saveRelays()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
+                            Save Relays
+                        </button>
+                        <span id="relayStatus" class="text-xs text-gray-500 hidden"></span>
+                    </div>
+                </div>
             </div>
 
             <!-- Session Info -->
@@ -115,6 +158,17 @@
         let tauriSocket = null;
         let pendingEvent = null;
         let isProcessing = false;
+
+        const DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me"];
+        let userRelays = [];
+
+        function getRelays() {
+            const stored = localStorage.getItem("wun_relays");
+            if (stored) {
+                try { return JSON.parse(stored); } catch (e) {}
+            }
+            return DEFAULT_RELAYS;
+        }
 
         function initTauriSocket() {
             if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) return;
@@ -166,11 +220,11 @@
         }
 
         function broadcastProfile(signedEvent) {
-            const RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
-            let remaining = RELAYS.length;
+            const relays = getRelays();
+            let remaining = relays.length;
             let anySuccess = false;
 
-            RELAYS.forEach(function (relayUrl) {
+            relays.forEach(function (relayUrl) {
                 let finished = false;
                 const done = function () {
                     if (finished) return;
@@ -256,7 +310,93 @@
             document.getElementById("profileSaveBtn").disabled = false;
         }
 
-        document.addEventListener("DOMContentLoaded", function () { initTauriSocket(); });
+        function switchTab(name) {
+            document.querySelectorAll(".tab-panel").forEach(function (el) {
+                el.classList.add("hidden");
+            });
+            document.getElementById("tab-" + name).classList.remove("hidden");
+            document.querySelectorAll(".tab-btn").forEach(function (btn) {
+                btn.classList.remove("text-indigo-600", "border-indigo-600");
+                btn.classList.add("text-gray-500", "border-transparent");
+            });
+            var active = document.querySelector('.tab-btn[data-tab="' + name + '"]');
+            if (active) {
+                active.classList.remove("text-gray-500", "border-transparent");
+                active.classList.add("text-indigo-600", "border-indigo-600");
+            }
+        }
+
+        function renderRelayList() {
+            var list = document.getElementById("relayList");
+            list.innerHTML = "";
+            userRelays.forEach(function (url, i) {
+                var div = document.createElement("div");
+                div.className = "flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-4 py-2";
+                div.innerHTML = '<span class="text-sm font-mono text-gray-700 break-all">' + url + '</span>' +
+                    '<button type="button" onclick="removeRelay(' + i + ')" class="text-red-500 hover:text-red-700 text-sm font-medium ml-2 flex-shrink-0">Remove</button>';
+                list.appendChild(div);
+            });
+        }
+
+        function addRelay() {
+            var input = document.getElementById("relayInput");
+            var url = input.value.trim();
+            if (!url) return;
+            if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+                showRelayStatus("Relay URL must start with ws:// or wss://", true);
+                return;
+            }
+            if (userRelays.indexOf(url) !== -1) {
+                showRelayStatus("Relay already in list", true);
+                return;
+            }
+            userRelays.push(url);
+            input.value = "";
+            renderRelayList();
+        }
+
+        function removeRelay(index) {
+            userRelays.splice(index, 1);
+            renderRelayList();
+        }
+
+        function saveRelays() {
+            localStorage.setItem("wun_relays", JSON.stringify(userRelays));
+            fetch("/api/relays", {
+                method: "POST",
+                headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+                body: JSON.stringify({ relays: userRelays }),
+            }).then(function (r) { return r.json(); }).then(function () {
+                showRelayStatus("Relays saved successfully.");
+            }).catch(function () {
+                showRelayStatus("Saved locally. Server sync failed.", true);
+            });
+        }
+
+        function showRelayStatus(message, isError) {
+            var el = document.getElementById("relayStatus");
+            el.textContent = message;
+            el.className = "text-xs " + (isError ? "text-red-500" : "text-green-600");
+            el.classList.remove("hidden");
+            setTimeout(function () { el.classList.add("hidden"); }, 3000);
+        }
+
+        function loadRelays() {
+            fetch("/api/relays").then(function (r) { return r.json(); }).then(function (data) {
+                userRelays = data.relays || DEFAULT_RELAYS;
+                localStorage.setItem("wun_relays", JSON.stringify(userRelays));
+                renderRelayList();
+            }).catch(function () {
+                userRelays = getRelays();
+                renderRelayList();
+            });
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            initTauriSocket();
+            switchTab("profile");
+            loadRelays();
+        });
     </script>
 </body>
 </html>
