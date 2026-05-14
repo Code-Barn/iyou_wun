@@ -67,17 +67,25 @@ class FeedView(LoginRequiredMixin, TemplateView):
         context["user_npub"] = user_npub
         context["user_did"] = self.request.user.username
 
-        mode = self.request.GET.get("mode", "network")
-        context["feed_mode"] = mode
+        thread_id = self.request.GET.get("thread")
+        context["thread_id"] = thread_id
 
-        if mode == "network" and user_pubkey:
-            contacts = fetch_contact_pubkeys(user_pubkey)
-            if contacts:
-                notes = fetch_unified_feed(authors=contacts)
-            else:
-                notes = fetch_unified_feed(authors=CURATED_AUTHORS)
+        if thread_id:
+            notes = fetch_thread(thread_id)
+            context["thread_mode"] = True
+            context["feed_mode"] = "thread"
         else:
-            notes = fetch_unified_feed()
+            mode = self.request.GET.get("mode", "network")
+            context["feed_mode"] = mode
+
+            if mode == "network" and user_pubkey:
+                contacts = fetch_contact_pubkeys(user_pubkey)
+                if contacts:
+                    notes = fetch_unified_feed(authors=contacts)
+                else:
+                    notes = fetch_unified_feed(authors=CURATED_AUTHORS)
+            else:
+                notes = fetch_unified_feed()
 
         context["notes"] = notes
 
@@ -240,6 +248,34 @@ def fetch_text_notes(authors=None, limit=20):
 
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return result[:limit]
+
+
+def fetch_thread(parent_id):
+    """Fetch a parent event and its comments, return structured feed list."""
+    parent_raw = relay_req({"ids": [parent_id], "limit": 1})
+    if not parent_raw:
+        return []
+
+    comments_raw = relay_req({"#e": [parent_id], "kinds": [1111], "limit": 50})
+
+    pubkeys = set()
+    for e in list(parent_raw.values()) + list(comments_raw.values()):
+        pk = e.get("pubkey")
+        if pk:
+            pubkeys.add(pk)
+
+    profiles = {}
+    if pubkeys:
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]})
+        for e in profile_events.values():
+            pk = e.get("pubkey", "")
+            try:
+                profiles[pk] = json.loads(e.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                profiles[pk] = {}
+
+    combined = {**parent_raw, **comments_raw}
+    return process_into_feed(combined, profiles, max_items=50)
 
 
 def get_tag_value(tags, tag_name, index=1, default=""):

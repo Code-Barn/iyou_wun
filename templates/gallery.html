@@ -3,6 +3,15 @@
 <head>
     <title>Media Gallery - iyou_wun</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .modal-open { overflow: hidden; }
+        #mediaModal {
+            opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        }
+        #mediaModal.show {
+            opacity: 1; pointer-events: auto;
+        }
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
     {% include '_nav.html' %}
@@ -16,37 +25,43 @@
                 {% endif %}
             </div>
 
-            {% if notes %}
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {% for note in notes %}
-                <div class="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
-                    <a href="{% url 'profile' npub=note.npub %}">
-                        {% if note.mime_type and note.mime_type|slice:":5" == "image" %}
-                        <div class="aspect-square bg-gray-100 overflow-hidden">
-                            {% if note.thumbnail_url %}
-                            <img src="{{ note.thumbnail_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover" loading="lazy">
-                            {% else %}
-                            <img src="{{ note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover" loading="lazy">
-                            {% endif %}
-                        </div>
-                        {% elif note.mime_type and note.mime_type|slice:":5" == "video" %}
-                        <div class="aspect-square bg-gray-900 overflow-hidden relative">
-                            <video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata"></video>
-                            <div class="absolute inset-0 flex items-center justify-center">
-                                <span class="text-white text-4xl opacity-80">&#9654;</span>
-                            </div>
-                        </div>
-                        {% elif note.mime_type and note.mime_type|slice:":5" == "audio" %}
-                        <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center">
-                            <span class="text-5xl">&#127925;</span>
-                        </div>
-                        {% else %}
-                        <div class="aspect-square bg-gray-100 flex items-center justify-center">
-                            <span class="text-4xl text-gray-400">&#128196;</span>
-                        </div>
-                        {% endif %}
-                    </a>
+            <!-- MIME-type filter sub-nav -->
+            <div class="flex items-center gap-2 mb-6 border-b border-gray-200 pb-4">
+                <button onclick="filterGallery('all')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-indigo-600 text-white" data-filter="all">All</button>
+                <button onclick="filterGallery('image')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="image">Images</button>
+                <button onclick="filterGallery('video')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="video">Video</button>
+                <button onclick="filterGallery('audio')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="audio">Audio</button>
+            </div>
 
+            {% if notes %}
+            <div id="galleryGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {% for note in notes %}
+                {% with mime=note.mime_type|lower %}
+                {% if mime and "image" in mime %}
+                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="image">
+                    <div class="aspect-square bg-gray-100 overflow-hidden cursor-pointer" onclick="openModal('{{ note.file_url }}', 'image', '{{ note.alt_text|addslashes }}')">
+                        <img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover" loading="lazy">
+                    </div>
+                {% elif mime and "video" in mime %}
+                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="video">
+                    <div class="aspect-square bg-gray-900 overflow-hidden relative cursor-pointer" onclick="openModal('{{ note.file_url }}', 'video', '{{ note.alt_text|addslashes }}')">
+                        <video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata"></video>
+                        <div class="absolute inset-0 flex items-center justify-center hover:bg-black hover:bg-opacity-10 transition-colors">
+                            <span class="text-white text-4xl opacity-80">&#9654;</span>
+                        </div>
+                    </div>
+                {% elif mime and "audio" in mime %}
+                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="audio">
+                    <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center cursor-pointer" onclick="openModal('{{ note.file_url }}', 'audio', '{{ note.alt_text|addslashes }}')">
+                        <span class="text-5xl">&#127925;</span>
+                    </div>
+                {% else %}
+                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="other">
+                    <div class="aspect-square bg-gray-100 flex items-center justify-center cursor-pointer" onclick="openModal('{{ note.file_url }}', 'other', '')">
+                        <span class="text-4xl text-gray-400">&#128196;</span>
+                    </div>
+                {% endif %}
+                {% endwith %}
                     <div class="p-3">
                         <div class="flex items-center justify-between mb-2">
                             <div class="flex items-center gap-2 min-w-0">
@@ -76,5 +91,87 @@
             {% endif %}
         </div>
     </main>
+
+    <!-- Media Modal -->
+    <div id="mediaModal" class="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4" onclick="closeModal(event)">
+        <div class="relative max-w-4xl w-full max-h-full" onclick="event.stopPropagation()">
+            <button onclick="closeModal()" class="absolute -top-10 right-0 text-white text-2xl hover:text-gray-300">&times;</button>
+            <div id="modalContent" class="flex items-center justify-center max-h-[90vh]"></div>
+        </div>
+    </div>
+
+    <script>
+        var modal = document.getElementById("mediaModal");
+        var modalContent = document.getElementById("modalContent");
+
+        function openModal(url, type, alt) {
+            modalContent.innerHTML = "";
+            if (type === "image") {
+                var img = document.createElement("img");
+                img.src = url;
+                img.alt = alt || "";
+                img.className = "max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain";
+                modalContent.appendChild(img);
+            } else if (type === "video") {
+                var video = document.createElement("video");
+                video.src = url;
+                video.controls = true;
+                video.autoplay = true;
+                video.className = "max-w-full max-h-[85vh] rounded-lg shadow-2xl";
+                modalContent.appendChild(video);
+            } else if (type === "audio") {
+                var div = document.createElement("div");
+                div.className = "bg-white rounded-lg p-8 shadow-2xl text-center";
+                var icon = document.createElement("div");
+                icon.className = "text-6xl mb-6";
+                icon.textContent = "\uD83C\uDFB5";
+                var audio = document.createElement("audio");
+                audio.src = url;
+                audio.controls = true;
+                audio.autoplay = true;
+                audio.className = "w-full max-w-md";
+                div.appendChild(icon);
+                div.appendChild(audio);
+                modalContent.appendChild(div);
+            } else {
+                var link = document.createElement("a");
+                link.href = url;
+                link.target = "_blank";
+                link.className = "text-white text-lg underline hover:text-indigo-300";
+                link.textContent = "Open file \u2197";
+                modalContent.appendChild(link);
+            }
+            modal.classList.add("show");
+            document.body.classList.add("modal-open");
+        }
+
+        function closeModal(e) {
+            if (e && e.target !== modal) return;
+            modal.classList.remove("show");
+            document.body.classList.remove("modal-open");
+            modalContent.innerHTML = "";
+        }
+
+        document.addEventListener("keydown", function (e) {
+            if (e.key === "Escape") closeModal({ target: modal });
+        });
+
+        function filterGallery(type) {
+            var cards = document.querySelectorAll(".gallery-card");
+            var btns = document.querySelectorAll(".filter-btn");
+            btns.forEach(function (b) {
+                var isActive = b.getAttribute("data-filter") === type;
+                b.className = "filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 " +
+                    (isActive ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200");
+            });
+            cards.forEach(function (card) {
+                if (type === "all" || card.getAttribute("data-type") === type) {
+                    card.style.display = "";
+                } else {
+                    card.style.display = "none";
+                }
+            });
+        }
+    </script>
 </body>
 </html>

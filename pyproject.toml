@@ -11,3 +11,14 @@ dependencies = [
     "websocket-client>=1.8.0",
     "bech32>=1.2.0",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.9",
+]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["test_*.py"]
+testpaths = ["apps/core/tests"]

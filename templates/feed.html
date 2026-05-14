@@ -66,10 +66,16 @@
                     {% if feed_mode == "network" %}Your network on the Nostr protocol{% else %}Global firehose from the Nostr network{% endif %}
                 </p>
 
-                <!-- FEED TOGGLE -->
+                <!-- FEED TOGGLE: Network / Global / Thread -->
                 <div class="flex items-center gap-2 mb-6 border-b border-gray-200 pb-4">
+                    {% if thread_mode %}
+                    <a href="{% url 'feed' %}" class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-indigo-600 hover:bg-gray-200">&larr; Back to Feed</a>
+                    <span class="text-sm text-gray-400">|</span>
+                    <span class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white">Thread View</span>
+                    {% else %}
                     <a href="/feed" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode != "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Network</a>
                     <a href="/feed?mode=global" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode == "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Global</a>
+                    {% endif %}
                 </div>
 
                 <!-- POST COMPONENT -->
@@ -135,16 +141,16 @@
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
-                                <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover" />
+                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-indigo-300" /></a>
                                 {% else %}
-                                <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
+                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-indigo-300">
                                     <span class="text-indigo-600 font-mono text-sm">{{ note.author_name|default:"N"|first|upper }}</span>
-                                </div>
+                                </div></a>
                                 {% endif %}
                             </div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 mb-2">
-                                    <span class="font-semibold text-gray-900">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
                                     <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
                                     <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
                                 </div>
@@ -172,6 +178,9 @@
                                     {% endfor %}
                                 </div>
                                 {% endif %}
+                                {% if note.comments|length > 0 %}
+                                <a href="/feed?thread={{ note.id }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">View Thread &rarr;</a>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -181,16 +190,16 @@
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
-                                <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover" />
+                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-purple-300" /></a>
                                 {% else %}
-                                <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
+                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-purple-300">
                                     <span class="text-purple-600 font-mono text-sm">{{ note.author_name|default:"M"|first|upper }}</span>
-                                </div>
+                                </div></a>
                                 {% endif %}
                             </div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 mb-2">
-                                    <span class="font-semibold text-gray-900">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
                                     {% if note.is_sovereign %}
                                     <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>
                                     {% else %}
@@ -198,15 +207,16 @@
                                     {% endif %}
                                     <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
                                 </div>
-                                {% if note.mime_type and "image" in note.mime_type %}
+                                {% with mime=note.mime_type|lower %}
+                                {% if mime and "image" in mime %}
                                 <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
                                     <img src="{{ note.file_url }}" alt="{{ note.alt_text|default:note.content }}" class="w-full h-auto max-h-96 object-contain" loading="lazy" />
                                 </div>
-                                {% elif note.mime_type and "video" in note.mime_type %}
+                                {% elif mime and "video" in mime %}
                                 <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
                                     <video src="{{ note.file_url }}" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video>
                                 </div>
-                                {% elif note.mime_type and "audio" in note.mime_type %}
+                                {% elif mime and "audio" in mime %}
                                 <div class="mb-3">
                                     <audio src="{{ note.file_url }}" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio>
                                 </div>
@@ -215,6 +225,7 @@
                                     <a href="{{ note.file_url }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 {{ note.file_url }}</a>
                                 </div>
                                 {% endif %}
+                                {% endwith %}
                                 {% if note.content %}
                                 <p class="text-gray-700 whitespace-pre-wrap mb-2">{{ note.content }}</p>
                                 {% endif %}
@@ -241,6 +252,9 @@
                                     {% endfor %}
                                 </div>
                                 {% endif %}
+                                {% if note.comments|length > 0 %}
+                                <a href="/feed?thread={{ note.id }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">View Thread &rarr;</a>
+                                {% endif %}
                             </div>
                         </div>
                     </div>
@@ -250,20 +264,21 @@
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
-                                <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover" />
+                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-orange-300" /></a>
                                 {% else %}
-                                <div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center">
+                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-orange-300">
                                     <span class="text-orange-600 font-mono text-sm">{{ note.author_name|default:"C"|first|upper }}</span>
-                                </div>
+                                </div></a>
                                 {% endif %}
                             </div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex items-center gap-2 mb-2">
-                                    <span class="font-semibold text-gray-900">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</span>
+                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
                                     <span class="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">Comment</span>
                                     <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
                                 </div>
                                 <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaksbr }}</p>
+                                {% for t in note.tags %}{% if t.0 == 'e' %}<a href="/feed?thread={{ t.1 }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">View Thread &rarr;</a>{% endif %}{% endfor %}
                             </div>
                         </div>
                     </div>
