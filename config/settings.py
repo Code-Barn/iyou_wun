@@ -179,13 +179,12 @@ AUTHENTICATION_BACKENDS = [
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
 
-# FINAL STANDARDIZATION: Use 127.0.0.1 for ALL OIDC endpoints
-# This eliminates the localhost/127.0.0.1 mismatch that causes session drops
-OIDC_OP_AUTHORIZATION_ENDPOINT = "http://127.0.0.1:8000/openid/authorize/"
-OIDC_OP_TOKEN_ENDPOINT = "http://127.0.0.1:8000/openid/token/"
-OIDC_OP_USER_ENDPOINT = "http://127.0.0.1:8000/openid/userinfo/"
-OIDC_OP_JWKS_ENDPOINT = "http://127.0.0.1:8000/openid/jwks/"
-OIDC_RP_SIGN_ALGO = "RS256"
+# OIDC endpoints read from environment with cluster-internal DNS defaults
+IDP_BASE = env.str('IDP_BASE_URL', default='http://iyou-idp.identity.svc.cluster.local:8000')
+OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT', default=f'{IDP_BASE}/openid/authorize/')
+OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT', default=f'{IDP_BASE}/openid/token/')
+OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT', default=f'{IDP_BASE}/openid/userinfo/')
+OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT', default=f'{IDP_BASE}/openid/jwks/')
 
 # Temporary SSL verification bypass for development testing
 OIDC_VERIFY_SSL = False
@@ -194,23 +193,16 @@ OIDC_STORE_ID_TOKEN = True
 # Bypass KID verification to isolate signature issues
 OIDC_RP_VERIFY_KID = False
 
-# OIDC callback URL - use 127.0.0.1 for consistency
-OIDC_RP_CALLBACK_URL = "http://127.0.0.1:8001/oidc/callback/"
+# OIDC callback URL - readable from env, default for local development
+OIDC_RP_CALLBACK_URL = env.str('OIDC_RP_CALLBACK_URL', default='http://127.0.0.1:8001/oidc/callback/')
 
 # DID-based authentication - bypass email requirements
 OIDC_RP_REQUIRED_CLAIMS = []
 OIDC_VERIFY_KID = False
-# NOTE: No default values here — if these are missing from .env,
-# Django will crash with a clear ImproperlyConfigured error.
-# Previously had fallback defaults ('wun-client' / 'wun-secret')
-# which silently masked broken .env config ("Settings Ghosting").
+
+# Client credentials — must be set via env, no defaults
 OIDC_RP_CLIENT_ID = env.str('OIDC_RP_CLIENT_ID')
 OIDC_RP_CLIENT_SECRET = env.str('OIDC_RP_CLIENT_SECRET')
-
-OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT')
-OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT')
-OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT')
-OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT')
 
 # Redirects
 LOGIN_REDIRECT_URL = '/'
@@ -220,8 +212,5 @@ LOGIN_URL = 'oidc_authentication_init'
 # This ensures the 'sub' (the DID) from the IdP is used as the local username
 OIDC_USERNAME_ALGO = lambda claims: claims.get('sub')
 
-# Debug print to verify environment loading
-print(f"DEBUG: Auth Endpoint is {OIDC_OP_AUTHORIZATION_ENDPOINT}")
-print(f"DEBUG: Token Endpoint is {OIDC_OP_TOKEN_ENDPOINT}")
-print(f"DEBUG: User Endpoint is {OIDC_OP_USER_ENDPOINT}")
-print(f"DEBUG: JWKS Endpoint is {OIDC_OP_JWKS_ENDPOINT}")
+# Required for collectstatic in production
+STATIC_ROOT = BASE_DIR / 'staticfiles'
