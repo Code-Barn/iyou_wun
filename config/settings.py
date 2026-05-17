@@ -22,12 +22,16 @@ environ.Env.read_env(BASE_DIR / ".env")
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-c+jdu#o4x)!=3((fc4$&2b&94%xsbs6izh=p^2q-s4)qfuz-nd'
+SECRET_KEY = env.str('WUN_SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = env.bool('WUN_DEBUG', default=False)
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+ALLOWED_HOSTS = env.list('WUN_ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
+
+# Production proxy header — only active when debug is off
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # FINAL COOKIE STANDARDIZATION for 127.0.0.1
 # Use SameSite=Lax for Brave compatibility (SameSite=None requires Secure=True)
@@ -114,10 +118,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    'default': env.db('DATABASE_URL', default='sqlite:///db.sqlite3'),
 }
 
 
@@ -179,12 +180,12 @@ AUTHENTICATION_BACKENDS = [
 # ------------------------------------------------------------------------------
 OIDC_RP_SIGN_ALGO = 'RS256'
 
-# OIDC endpoints read from environment with cluster-internal DNS defaults
-IDP_BASE = env.str('IDP_BASE_URL', default='http://iyou-idp.identity.svc.cluster.local:8000')
-OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT', default=f'{IDP_BASE}/openid/authorize/')
-OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT', default=f'{IDP_BASE}/openid/token/')
-OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT', default=f'{IDP_BASE}/openid/userinfo/')
-OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT', default=f'{IDP_BASE}/openid/jwks/')
+# OIDC endpoints — default fallbacks target cluster-internal DNS routing
+# Authorization endpoint is browser-facing; token/userinfo/jwks use back-channel
+OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT', default='https://idp.iyou.me/openid/authorize/')
+OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT', default='http://iyou-idp.identity.svc.cluster.local:8000/openid/token/')
+OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT', default='http://iyou-idp.identity.svc.cluster.local:8000/openid/userinfo/')
+OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT', default='http://iyou-idp.identity.svc.cluster.local:8000/openid/jwks/')
 
 # Temporary SSL verification bypass for development testing
 OIDC_VERIFY_SSL = False

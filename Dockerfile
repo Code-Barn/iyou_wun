@@ -1,27 +1,40 @@
+# Stage 1: Build Layer
 FROM python:3.12-slim AS builder
 
-WORKDIR /app
-
-COPY pyproject.toml .
-RUN pip install --no-cache-dir "gunicorn>=23.0" \
-    "django>=5.2.13" \
-    "django-environ>=0.13.0" \
-    "mozilla-django-oidc>=5.0.2" \
-    "websocket-client>=1.8.0" \
-    "bech32>=1.2.0"
-
-
-FROM python:3.12-slim AS runtime
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+COPY pyproject.toml uv.lock ./
+RUN uv sync --no-dev
 
 COPY . .
+RUN uv run python manage.py collectstatic --noinput
 
-EXPOSE 8001
+# Stage 2: Hardened Execution Runtime
+FROM python:3.12-slim
 
-CMD python manage.py migrate --noinput && \
-    python manage.py collectstatic --noinput && \
-    gunicorn config.wsgi:application --bind 0.0.0.0:8001
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /app/.venv /app/.venv
+COPY . .
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1
+
+COPY docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
+ENTRYPOINT ["/docker-entrypoint.sh"]
