@@ -14,12 +14,13 @@ The project is in active development. Authentication works end-to-end. Beyond th
 
 | Component           | Technology                           |
 | ------------------- | ------------------------------------ |
-| Language            | Python 3.10                          |
+| Language            | Python 3.12                          |
 | Framework           | Django 5.2.13                        |
 | Auth                | mozilla-django-oidc 5.0.2            |
 | Config              | django-environ 0.13+                 |
 | Styling             | Tailwind CSS (CDN, v3)              |
-| Database            | SQLite (default) / `db.sqlite3`      |
+| Database            | PostgreSQL (production via DATABASE_URL), SQLite (default local dev) |
+| WSGI server         | Gunicorn 23+                         |
 | WebSocket (server)  | websocket-client 1.9+                |
 | WebSocket (client)  | Native browser `WebSocket` API       |
 | Nostr relays        | nos.lol, relay.iyou.me, local :9003  |
@@ -28,6 +29,7 @@ The project is in active development. Authentication works end-to-end. Beyond th
 | Signing bridge      | Tauri (iyou_home, port 9001)         |
 | DID conversion      | bech32 library                       |
 | Package manager     | uv                                   |
+| Container runtime   | Docker (multi-stage, python:3.12-slim) |
 
 ---
 
@@ -43,7 +45,8 @@ The project is in active development. Authentication works end-to-end. Beyond th
 ```bash
 # Copy environment template and fill in credentials
 cp .env.example .env
-# Edit .env with your OIDC_RP_CLIENT_ID and OIDC_RP_CLIENT_SECRET
+# Edit .env with your OIDC_RP_CLIENT_ID, OIDC_RP_CLIENT_SECRET,
+# WUN_SECRET_KEY (any long random string), and DATABASE_URL if using PostgreSQL
 
 # Install dependencies
 uv sync
@@ -55,28 +58,63 @@ uv run python manage.py migrate
 uv run python manage.py runserver 8001
 ```
 
+### Production (Docker)
+
+```bash
+# Build the production image (multi-stage, uv-compiled)
+docker build -t iyou-wun:latest .
+
+# Run with required env vars
+docker run -d --name iyou-wun \
+  -p 8001:8000 \
+  -e WUN_SECRET_KEY="<long-random-secret>" \
+  -e WUN_DEBUG=False \
+  -e WUN_ALLOWED_HOSTS="['localhost','127.0.0.1','wun.iyou.me']" \
+  -e DATABASE_URL="postgres://user:pass@host:5432/wun" \
+  -e OIDC_RP_CLIENT_ID="747582" \
+  -e OIDC_RP_CLIENT_SECRET="<secret>" \
+  iyou-wun:latest
+```
+
+> Port mapping: `8001:8000` because the container binds internally on `8000` (Gunicorn), and Traefik/K3s exposes it as `8001` at the ingress layer.
+
 ---
 
-## OIDC Environment Variables
+## Environment Variables
 
-The following variables are required in `.env` to connect to the iyou_idp:
+### WUN_ Namespace (Django Core)
 
-| Variable                            | Purpose                                          |
-| ----------------------------------- | ------------------------------------------------ |
-| `OIDC_OP_AUTHORIZATION_ENDPOINT`    | IdP authorization URL (user login redirect)      |
-| `OIDC_OP_TOKEN_ENDPOINT`            | IdP token exchange endpoint                      |
-| `OIDC_OP_USER_ENDPOINT`             | IdP userinfo endpoint (returns claims)           |
-| `OIDC_OP_JWKS_ENDPOINT`             | IdP JWKS key set endpoint                        |
-| `OIDC_RP_CLIENT_ID`                 | Client ID registered with the IdP                |
-| `OIDC_RP_CLIENT_SECRET`             | Client secret registered with the IdP            |
+The `config/settings.py` reads operational parameters from `WUN_`-prefixed env vars. These are required for all environments:
 
-Current iyou_idp values (localhost):
+| Variable                          | Default                         | Purpose                            |
+| --------------------------------- | ------------------------------- | ---------------------------------- |
+| `WUN_SECRET_KEY`                  | *(required — no default)*       | Django secret key (production-grade random string) |
+| `WUN_DEBUG`                       | `False`                         | Django debug mode                  |
+| `WUN_ALLOWED_HOSTS`               | `['localhost', '127.0.0.1']`    | Django allowed hosts (list format) |
+| `DATABASE_URL`                    | `sqlite:///db.sqlite3`          | Database connection string (use `postgres://...` in production) |
+
+### OIDC Endpoints
+
+The following variables connect to the iyou_idp. Fallback defaults target the cluster-internal DNS routing:
+
+| Variable                            | Production Default (Cluster DNS)                          | Purpose                                          |
+| ----------------------------------- | --------------------------------------------------------- | ------------------------------------------------ |
+| `OIDC_OP_AUTHORIZATION_ENDPOINT`    | `https://idp.iyou.me/openid/authorize/`                   | IdP authorization URL (browser-facing redirect)  |
+| `OIDC_OP_TOKEN_ENDPOINT`            | `http://iyou-idp.identity.svc.cluster.local:8000/openid/token/` | IdP token exchange (back-channel)          |
+| `OIDC_OP_USER_ENDPOINT`             | `http://iyou-idp.identity.svc.cluster.local:8000/openid/userinfo/` | IdP userinfo/claims (back-channel)         |
+| `OIDC_OP_JWKS_ENDPOINT`             | `http://iyou-idp.identity.svc.cluster.local:8000/openid/jwks/` | IdP JWKS key set (back-channel)                 |
+| `OIDC_RP_CLIENT_ID`                 | *(required — no default)*       | Client ID registered with the IdP                |
+| `OIDC_RP_CLIENT_SECRET`             | *(required — no default)*       | Client secret registered with the IdP            |
+| `OIDC_RP_CALLBACK_URL`              | `http://127.0.0.1:8001/oidc/callback/` | OIDC callback URL                          |
+
+Current iyou_idp development values (localhost):
 
 ```ini
-OIDC_OP_AUTHORIZATION_ENDPOINT=http://localhost:8000/openid/authorize/
-OIDC_OP_TOKEN_ENDPOINT=http://localhost:8000/openid/token/
-OIDC_OP_USER_ENDPOINT=http://localhost:8000/openid/userinfo/
-OIDC_OP_JWKS_ENDPOINT=http://localhost:8000/openid/jwks/
+OIDC_OP_AUTHORIZATION_ENDPOINT=http://127.0.0.1:8000/openid/authorize/
+OIDC_OP_TOKEN_ENDPOINT=http://127.0.0.1:8000/openid/token/
+OIDC_OP_USER_ENDPOINT=http://127.0.0.1:8000/openid/userinfo/
+OIDC_OP_JWKS_ENDPOINT=http://127.0.0.1:8000/openid/jwks/
+OIDC_RP_CALLBACK_URL=http://127.0.0.1:8001/oidc/callback/
 OIDC_RP_CLIENT_ID=747582
 OIDC_RP_CLIENT_SECRET=1522b34850cdd1140f889d8e0fdf6704e52659af5d9a84adabfdfea0
 ```
@@ -340,6 +378,9 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 .
 ├── main.py                          # CLI entry point (stub)
 ├── pyproject.toml                   # Project metadata & dependencies
+├── Dockerfile                       # Multi-stage production build (uv + gunicorn)
+├── docker-entrypoint.sh             # Container init (migrate → gunicorn on :8000)
+├── .dockerignore                    # Excludes garbage from Docker context
 ├── .env                             # Environment variables (git-ignored)
 ├── .env.example                     # Template for .env (safe to commit)
 ├── WUN_DEVELOPER_GUIDE.md           # This file
@@ -464,7 +505,6 @@ CSRF_COOKIE_NAME = 'wun_csrftoken'
 - `OIDC_USERNAME_ALGO` lambda and `MyOIDCAuthenticationBackend.create_user` both derive the username from `sub` — redundant but not harmful. Clean up by choosing one approach.
 - No domain models yet (`models.py` is empty).
 - `main.py` is a stub with unclear purpose.
-- Production hardening needed: `DEBUG = True`, default `SECRET_KEY`, `ALLOWED_HOSTS`, Tailwind via CDN.
 - `apps/core/admin.py` is empty — no models registered for the admin interface.
-- `uv.lock` exists but should be regenerated after dependency changes with `uv sync`.
+- Tailwind CSS is loaded via CDN — consider a build step for production offline resilience.
 - Profile pages (`/profile/<npub>/`) are public but the feed/gallery links to them are only visible to authenticated users.

@@ -9,3 +9,11 @@ wheels/
 # Virtual environments
 .venv
 .env
+
+# Local database
+db.sqlite3
+
+# Package-manager runtime caches
+node_modules/
+.uv/
+.pytest_cache/
