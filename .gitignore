@@ -17,3 +17,6 @@ db.sqlite3
 node_modules/
 .uv/
 .pytest_cache/
+
+# macOS
+.DS_Store
