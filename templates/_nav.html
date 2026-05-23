@@ -2,28 +2,72 @@
     <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
         <span class="font-bold text-lg text-indigo-600">iyou_wun</span>
         <div class="flex items-center gap-4">
-            <a href="{% url 'feed' %}" class="text-sm text-gray-600 hover:text-indigo-600">Feed</a>
-            <a href="{% url 'gallery' %}" class="text-sm text-gray-600 hover:text-indigo-600">Gallery</a>
-            <a href="{% url 'dashboard' %}" class="text-sm text-gray-600 hover:text-indigo-600">Dashboard</a>
-            <a href="{% url 'chat' %}" class="text-sm font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 border border-indigo-200">Chat</a>
-            <span id="meshBadge" class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-medium hidden">Sovereign Mesh Active</span>
+            <a
+                href="{% url 'feed' %}"
+                class="text-sm text-gray-600 hover:text-indigo-600"
+                >Feed</a
+            >
+            <a
+                href="{% url 'gallery' %}"
+                class="text-sm text-gray-600 hover:text-indigo-600"
+                >Gallery</a
+            >
             {% if user.is_authenticated %}
-            <span class="text-xs text-gray-400 hidden sm:inline">Logged in as <span class="font-mono text-gray-500">{{ user.username|truncatechars:19 }}</span></span>
-            {% endif %}
-            <form action="{% url 'oidc_logout' %}" method="post" style="display:inline;">
+            <a
+                href="{% url 'dashboard' %}"
+                class="text-sm text-gray-600 hover:text-indigo-600"
+                >Dashboard</a
+            >
+            <a
+                href="{% url 'chat' %}"
+                class="text-sm font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 border border-indigo-200"
+                >Chat</a
+            >
+            <span
+                id="meshBadge"
+                class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded-full font-medium hidden"
+                >Sovereign Mesh Active</span
+            >
+            <span class="text-xs text-gray-400 hidden sm:inline"
+                >Logged in as
+                <span class="font-mono text-gray-500"
+                    >{{ user.username|truncatechars:19 }}</span
+                ></span
+            >
+            <form
+                action="{% url 'oidc_logout' %}"
+                method="post"
+                style="display: inline"
+            >
                 {% csrf_token %}
-                <button type="submit" class="text-sm text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer">Logout</button>
+                <button
+                    type="submit"
+                    class="text-sm text-red-500 hover:text-red-700 bg-transparent border-none cursor-pointer"
+                >
+                    Logout
+                </button>
             </form>
+            {% else %}
+            <a
+                href="{% url 'oidc_authentication_init' %}?next={{ request.build_absolute_uri|urlencode }}"
+                class="text-sm text-indigo-600 hover:text-indigo-800 font-medium"
+            >
+                Sign In
+            </a>
+
+            {% endif %}
         </div>
     </div>
 </nav>
 
 <script>
-document.addEventListener("DOMContentLoaded", function () {
-    var badge = document.getElementById("meshBadge");
-    if (!badge) return;
-    fetch("http://127.0.0.1:9001/", { signal: AbortSignal.timeout(300) })
-        .then(function (r) { if (r.ok) badge.classList.remove("hidden"); })
-        .catch(function () {});
-});
+    document.addEventListener("DOMContentLoaded", function () {
+        var badge = document.getElementById("meshBadge");
+        if (!badge) return;
+        fetch("http://127.0.0.1:9001/", { signal: AbortSignal.timeout(300) })
+            .then(function (r) {
+                if (r.ok) badge.classList.remove("hidden");
+            })
+            .catch(function () {});
+    });
 </script>

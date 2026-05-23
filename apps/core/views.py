@@ -23,6 +23,7 @@ from datetime import datetime
 import bech32
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
+from urllib.parse import urlencode
 from django.http import JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
@@ -31,29 +32,7 @@ from websocket import WebSocketApp
 
 
 def home(request):
-    print(f"DEBUG: Middleware check - User in request: {request.user}")
-    print(f"DEBUG: Cookies received at index: {request.COOKIES.keys()}")
-    print(
-        f"DEBUG: Session user at index: {request.user}, Authenticated: {request.user.is_authenticated}"
-    )
-    print(
-        f"!!! ACCESSING HOME - USER: {request.user} - AUTH: {request.user.is_authenticated} !!!"
-    )
-    if hasattr(request, "session"):
-        print(f"DEBUG: Session ID: {request.session.session_key}")
-        print(f"DEBUG: Session data: {dict(request.session)}")
-    else:
-        print("DEBUG: No session object found!")
-
-    if not request.user.is_authenticated:
-        print(
-            f"DEBUG: HOME VIEW - SESSION_KEY: {request.session.session_key if hasattr(request, 'session') else 'NO_SESSION'}"
-        )
-        print(f"DEBUG: ALL COOKIES AT HOME: {request.COOKIES}")
-
-    if request.user.is_authenticated:
-        return redirect("feed")
-    return render(request, "home.html")
+    return redirect("feed")
 
 
 @login_required
@@ -71,21 +50,19 @@ def dashboard(request):
     })
 
 
-class FeedView(LoginRequiredMixin, TemplateView):
+class FeedView(TemplateView):
     template_name = "feed.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        print(f"DEBUG: Rendering feed for user {self.request.user}")
-
-        user_pubkey = did_to_pubkey(self.request.user.username)
-        user_npub = did_to_npub(self.request.user.username)
+        user_pubkey = did_to_pubkey(self.request.user.username) if self.request.user.is_authenticated else None
+        user_npub = did_to_npub(self.request.user.username) if self.request.user.is_authenticated else None
         relays = self.request.session.get("relays", DEFAULT_RELAYS)
 
         context["user_pubkey"] = user_pubkey
         context["user_npub"] = user_npub
-        context["user_did"] = self.request.user.username
+        context["user_did"] = self.request.user.username if self.request.user.is_authenticated else None
         context["relays_json"] = json.dumps(relays)
 
         thread_id = self.request.GET.get("thread")
@@ -113,8 +90,7 @@ class FeedView(LoginRequiredMixin, TemplateView):
         return context
 
     def get(self, request, *args, **kwargs):
-        # Add welcome message for first-time users
-        if not request.session.get("has_seen_feed_welcome", False):
+        if request.user.is_authenticated and not request.session.get("has_seen_feed_welcome", False):
             from django.contrib import messages
 
             messages.success(

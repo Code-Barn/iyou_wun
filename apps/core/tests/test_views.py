@@ -27,17 +27,10 @@ logger = logging.getLogger(__name__)
 
 
 class HomeViewTest(TestCase):
-    def test_home_returns_200(self):
+    def test_home_redirects_to_feed(self):
         response = self.client.get("/")
-        self.assertEqual(response.status_code, 200)
-
-    def test_home_uses_correct_template(self):
-        response = self.client.get("/")
-        self.assertTemplateUsed(response, "home.html")
-
-    def test_home_contains_login_button(self):
-        response = self.client.get("/")
-        self.assertContains(response, "Login with iYou Identity")
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, "/feed")
 
 
 class DashboardViewTest(TestCase):
@@ -45,9 +38,9 @@ class DashboardViewTest(TestCase):
         response = self.client.get("/dashboard")
         self.assertEqual(response.status_code, 302)
 
-    def test_dashboard_redirects_to_oidc_login(self):
+    def test_dashboard_redirects_to_idp_login(self):
         response = self.client.get("/dashboard")
-        self.assertIn(reverse("oidc_authentication_init"), response.url)
+        self.assertIn("http://127.0.0.1:8000/openid/authorize/", response.url)
 
     def test_authenticated_user_sees_did(self):
         user = User.objects.create_user(username="did:iyou:0xabc123")
@@ -97,9 +90,9 @@ class ChatViewTest(TestCase):
         response = self.client.get(reverse("chat"))
         self.assertEqual(response.status_code, 302)
 
-    def test_redirects_to_oidc_login(self):
+    def test_redirects_to_idp_login(self):
         response = self.client.get(reverse("chat"))
-        self.assertIn(reverse("oidc_authentication_init"), response.url)
+        self.assertIn("http://127.0.0.1:8000/openid/authorize/", response.url)
 
     def test_authenticated_user_sees_chat(self):
         user = User.objects.create_user(username="did:key:z6Mkchat123")

@@ -24,8 +24,10 @@ https://docs.djangoproject.com/en/5.2/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.2/ref/settings/
 """
-import environ
+
 from pathlib import Path
+
+import environ
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -37,103 +39,103 @@ environ.Env.read_env(BASE_DIR / ".env")
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = env.str('WUN_SECRET_KEY')
+SECRET_KEY = env.str("WUN_SECRET_KEY")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = env.bool('WUN_DEBUG', default=False)
+DEBUG = env.bool("WUN_DEBUG", default=False)
 
-ALLOWED_HOSTS = env.list('WUN_ALLOWED_HOSTS', default=['localhost', '127.0.0.1'])
+ALLOWED_HOSTS = env.list("WUN_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
 # Production proxy header — only active when debug is off
 if not DEBUG:
-    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # FINAL COOKIE STANDARDIZATION for 127.0.0.1
 # Use SameSite=Lax for Brave compatibility (SameSite=None requires Secure=True)
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
-SESSION_COOKIE_SAMESITE = 'Lax'
+SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_DOMAIN = None
-SESSION_COOKIE_NAME = 'wun_sessionid'
-CSRF_COOKIE_NAME = 'wun_csrftoken'
+SESSION_COOKIE_NAME = "wun_sessionid"
+CSRF_COOKIE_NAME = "wun_csrftoken"
 SESSION_SAVE_EVERY_REQUEST = True
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'django.contrib.admin',
-    'django.contrib.auth',
-    'django.contrib.contenttypes',
-    'django.contrib.sessions',
-    'django.contrib.messages',
-    'django.contrib.staticfiles',
-    'mozilla_django_oidc',  # Keep this!
-    'apps.core',            # Your local app
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "mozilla_django_oidc",  # Keep this!
+    "apps.core",  # Your local app
 ]
 
 # Logging configuration
 LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
         },
     },
-    'root': {
-        'handlers': ['console'],
-        'level': 'INFO',
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
     },
-    'loggers': {
-        'apps.core': {
-            'handlers': ['console'],
-            'level': 'INFO',
-            'propagate': False,
+    "loggers": {
+        "apps.core": {
+            "handlers": ["console"],
+            "level": "INFO",
+            "propagate": False,
         },
-        'mozilla_django_oidc': {
-            'handlers': ['console'],
-            'level': 'DEBUG',
+        "mozilla_django_oidc": {
+            "handlers": ["console"],
+            "level": "DEBUG",
         },
     },
 }
 
 MIDDLEWARE = [
-    'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.common.CommonMiddleware',
-    'django.middleware.csrf.CsrfViewMiddleware',
-    'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'django.contrib.messages.middleware.MessageMiddleware',
-    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-ROOT_URLCONF = 'config.urls'
+ROOT_URLCONF = "config.urls"
 
 TEMPLATES = [
     {
-        'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR / 'templates'],
-        'APP_DIRS': True,
-        'OPTIONS': {
-            'context_processors': [
-                'django.template.context_processors.request',
-                'django.contrib.auth.context_processors.auth',
-                'django.contrib.messages.context_processors.messages',
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [BASE_DIR / "templates"],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
             ],
         },
     },
 ]
 
-WSGI_APPLICATION = 'config.wsgi.application'
+WSGI_APPLICATION = "config.wsgi.application"
 
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
-    'default': env.db('DATABASE_URL', default='sqlite:///db.sqlite3'),
+    "default": env.db("DATABASE_URL", default="sqlite:///db.sqlite3"),
 }
 
 
@@ -142,16 +144,16 @@ DATABASES = {
 
 AUTH_PASSWORD_VALIDATORS = [
     {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
+        "NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        "NAME": "django.contrib.auth.password_validation.MinimumLengthValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.CommonPasswordValidator",
     },
     {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+        "NAME": "django.contrib.auth.password_validation.NumericPasswordValidator",
     },
 ]
 
@@ -159,9 +161,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en-us'
+LANGUAGE_CODE = "en-us"
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "UTC"
 
 USE_I18N = True
 
@@ -171,21 +173,21 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = "static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
-DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Standard User Model
-AUTH_USER_MODEL = 'auth.User'
+AUTH_USER_MODEL = "auth.User"
 
 # AUTHENTICATION CONFIGURATION
 # ------------------------------------------------------------------------------
 AUTHENTICATION_BACKENDS = [
-    'apps.core.auth.MyOIDCAuthenticationBackend',
-    'django.contrib.auth.backends.ModelBackend',
+    "apps.core.auth.MyOIDCAuthenticationBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 # iyou_wun uses standard Django users where the 'username' is the DID.
@@ -193,14 +195,25 @@ AUTHENTICATION_BACKENDS = [
 
 # OIDC CLIENT (RELYING PARTY) SETTINGS
 # ------------------------------------------------------------------------------
-OIDC_RP_SIGN_ALGO = 'RS256'
+OIDC_RP_SIGN_ALGO = "RS256"
 
 # OIDC endpoints — default fallbacks target cluster-internal DNS routing
 # Authorization endpoint is browser-facing; token/userinfo/jwks use back-channel
-OIDC_OP_AUTHORIZATION_ENDPOINT = env.str('OIDC_OP_AUTHORIZATION_ENDPOINT', default='https://idp.iyou.me/openid/authorize/')
-OIDC_OP_TOKEN_ENDPOINT = env.str('OIDC_OP_TOKEN_ENDPOINT', default='http://iyou-idp.identity.svc.cluster.local:8000/openid/token/')
-OIDC_OP_USER_ENDPOINT = env.str('OIDC_OP_USER_ENDPOINT', default='http://iyou-idp.identity.svc.cluster.local:8000/openid/userinfo/')
-OIDC_OP_JWKS_ENDPOINT = env.str('OIDC_OP_JWKS_ENDPOINT', default='http://iyou-idp.identity.svc.cluster.local:8000/openid/jwks/')
+OIDC_OP_AUTHORIZATION_ENDPOINT = env.str(
+    "OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://idp.iyou.me/openid/authorize/"
+)
+OIDC_OP_TOKEN_ENDPOINT = env.str(
+    "OIDC_OP_TOKEN_ENDPOINT",
+    default="http://iyou-idp.identity.svc.cluster.local:8000/openid/token/",
+)
+OIDC_OP_USER_ENDPOINT = env.str(
+    "OIDC_OP_USER_ENDPOINT",
+    default="http://iyou-idp.identity.svc.cluster.local:8000/openid/userinfo/",
+)
+OIDC_OP_JWKS_ENDPOINT = env.str(
+    "OIDC_OP_JWKS_ENDPOINT",
+    default="http://iyou-idp.identity.svc.cluster.local:8000/openid/jwks/",
+)
 
 # Temporary SSL verification bypass for development testing
 OIDC_VERIFY_SSL = False
@@ -210,23 +223,25 @@ OIDC_STORE_ID_TOKEN = True
 OIDC_RP_VERIFY_KID = False
 
 # OIDC callback URL - readable from env, default for local development
-OIDC_RP_CALLBACK_URL = env.str('OIDC_RP_CALLBACK_URL', default='http://127.0.0.1:8001/oidc/callback/')
+OIDC_RP_CALLBACK_URL = env.str(
+    "OIDC_RP_CALLBACK_URL", default="http://127.0.0.1:8001/oidc/callback/"
+)
 
 # DID-based authentication - bypass email requirements
 OIDC_RP_REQUIRED_CLAIMS = []
 OIDC_VERIFY_KID = False
 
 # Client credentials — must be set via env, no defaults
-OIDC_RP_CLIENT_ID = env.str('OIDC_RP_CLIENT_ID')
-OIDC_RP_CLIENT_SECRET = env.str('OIDC_RP_CLIENT_SECRET')
+OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID")
+OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET")
 
 # Redirects
-LOGIN_REDIRECT_URL = '/'
-LOGOUT_REDIRECT_URL = '/'
-LOGIN_URL = 'oidc_authentication_init'
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/"
+LOGIN_URL = "http://127.0.0.1:8000/openid/authorize/"
 
 # This ensures the 'sub' (the DID) from the IdP is used as the local username
-OIDC_USERNAME_ALGO = lambda claims: claims.get('sub')
+OIDC_USERNAME_ALGO = lambda claims: claims.get("sub")
 
 # Required for collectstatic in production
-STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATIC_ROOT = BASE_DIR / "staticfiles"
