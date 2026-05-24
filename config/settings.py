@@ -245,3 +245,6 @@ OIDC_USERNAME_ALGO = lambda claims: claims.get("sub")
 
 # Required for collectstatic in production
 STATIC_ROOT = BASE_DIR / "staticfiles"
+
+# Poly Governance Engine
+POLY_ENGINE_URL = env.str("POLY_ENGINE_URL", default="http://127.0.0.1:8000")

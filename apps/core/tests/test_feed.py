@@ -244,3 +244,73 @@ class ProcessIntoFeedTest(TestCase):
         self.assertIn("npub", result[0])
         self.assertIsInstance(result[0]["npub"], str)
         self.assertTrue(len(result[0]["npub"]) > 0)
+
+    # --- Poll governance tests (Kind 30023 / 1112) ---
+
+    def test_kind_30023_appears_in_feed(self):
+        events = {"poll": make_event("poll", 30023, content="Test Poll?")}
+        result = process_into_feed(events)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "poll")
+        self.assertEqual(result[0]["kind"], 30023)
+
+    def test_kind_30023_extracts_poll_options(self):
+        events = {
+            "poll": make_event("poll", 30023, content="Favorite color?", tags=[
+                ["option", "Red"],
+                ["option", "Blue"],
+                ["option", "Green"],
+            ])
+        }
+        result = process_into_feed(events)
+        self.assertEqual(result[0]["poll_options"], ["Red", "Blue", "Green"])
+
+    def test_kind_30023_no_options_returns_empty_list(self):
+        events = {"poll": make_event("poll", 30023, content="No options?")}
+        result = process_into_feed(events)
+        self.assertEqual(result[0]["poll_options"], [])
+
+    def test_kind_30023_extracts_scope_tags(self):
+        events = {
+            "poll": make_event("poll", 30023, tags=[
+                ["option", "Yes"],
+                ["geohash", "9q8yy"],
+                ["org", "iyou"],
+                ["expires", "20261201"],
+            ])
+        }
+        result = process_into_feed(events)
+        self.assertEqual(result[0]["poll_scope_geohash"], "9q8yy")
+        self.assertEqual(result[0]["poll_scope_org"], "iyou")
+        self.assertEqual(result[0]["poll_closes_at"], "20261201")
+
+    def test_kind_1112_vote_grouped_under_parent_poll(self):
+        events = {
+            "poll": make_event("poll", 30023, content="Test poll?", tags=[["option", "A"]]),
+            "vote": make_event("vote", 1112, tags=[["e", "poll"]]),
+        }
+        result = process_into_feed(events)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "poll")
+        self.assertIn("votes", result[0])
+        self.assertEqual(len(result[0]["votes"]), 1)
+        self.assertEqual(result[0]["votes"][0]["id"], "vote")
+
+    def test_kind_1112_vote_dropped_without_parent(self):
+        events = {
+            "vote": make_event("vote", 1112, tags=[["e", "nonexistent"]]),
+            "poll": make_event("poll", 30023, content="Real poll?", tags=[["option", "A"]]),
+        }
+        result = process_into_feed(events)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["id"], "poll")
+        self.assertEqual(result[0].get("votes", []), [])
+
+    def test_mixed_kinds_includes_poll(self):
+        events = {
+            "note": make_event("note", 1, content="text"),
+            "poll": make_event("poll", 30023, content="Poll?", tags=[["option", "A"]]),
+        }
+        result = process_into_feed(events)
+        ids = {i["id"] for i in result}
+        self.assertEqual(ids, {"note", "poll"})
