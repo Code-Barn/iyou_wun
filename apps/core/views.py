@@ -24,11 +24,13 @@ import bech32
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from urllib.parse import urlencode
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.generic import TemplateView
 from websocket import WebSocketApp
+
+from services.poly_client import PolyClient, PolyConnectionError
 
 
 def home(request):
@@ -64,6 +66,7 @@ class FeedView(TemplateView):
         context["user_npub"] = user_npub
         context["user_did"] = self.request.user.username if self.request.user.is_authenticated else None
         context["relays_json"] = json.dumps(relays)
+        context["user_credentials"] = {}
 
         thread_id = self.request.GET.get("thread")
         context["thread_id"] = thread_id
@@ -134,7 +137,7 @@ def api_feed(request):
     user_pubkey = did_to_pubkey(request.user.username)
     relays = request.session.get('relays', DEFAULT_RELAYS)
 
-    filter_obj = {"kinds": [1, 7, 1063, 1111], "limit": limit}
+    filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
     if until:
         filter_obj["until"] = int(until)
 
@@ -438,14 +441,19 @@ def process_into_feed(raw_events, profiles=None, max_items=50):
     parent Kind 1 or Kind 1063 events. Injects author_name and
     author_avatar from Kind 0 profile data. Deduplicates reactions
     by pubkey per parent. Drops orphan Kind 7; allows orphan Kind 1111.
+
+    Also handles Kind 30023 (Poll Definitions) and Kind 1112 (Vote
+    Envelopes) for the Poly governance integration.
     """
     if profiles is None:
         profiles = {}
 
     kind_1 = {}
     kind_1063 = {}
+    kind_30023 = {}
     reactions = []
     comments = []
+    votes = []
 
     def enrich(item):
         pk = item.get("pubkey", "")
@@ -484,14 +492,27 @@ def process_into_feed(raw_events, profiles=None, max_items=50):
                 base["file_url"] and "127.0.0.1" in base["file_url"]
             )
             kind_1063[eid] = enrich(base)
+        elif kind == 30023:
+            base["reactions"] = []
+            base["comments"] = []
+            base["poll_options"] = [
+                tag[1] for tag in base["tags"]
+                if tag and tag[0] == "option" and len(tag) > 1
+            ]
+            base["poll_scope_geohash"] = get_tag_value(base["tags"], "geohash")
+            base["poll_scope_org"] = get_tag_value(base["tags"], "org")
+            base["poll_closes_at"] = get_tag_value(base["tags"], "expires")
+            kind_30023[eid] = enrich(base)
         elif kind == 7:
             reactions.append(base)
         elif kind == 1111:
             base["reactions"] = []
             base["comments"] = []
             comments.append(enrich(base))
+        elif kind == 1112:
+            votes.append(base)
 
-    parent_lookup = {**kind_1, **kind_1063}
+    parent_lookup = {**kind_1, **kind_1063, **kind_30023}
 
     # Group reactions under parents, deduplicate by pubkey per parent
     seen_reactions = set()
@@ -514,7 +535,13 @@ def process_into_feed(raw_events, profiles=None, max_items=50):
         else:
             orphan_comments.append(c)
 
-    feed = list(kind_1.values()) + list(kind_1063.values()) + orphan_comments
+    # Group votes under their parent poll
+    for v in votes:
+        parent_id = get_tag_value(v["tags"], "e")
+        if parent_id in parent_lookup:
+            parent_lookup[parent_id].setdefault("votes", []).append(v)
+
+    feed = list(kind_1.values()) + list(kind_1063.values()) + list(kind_30023.values()) + orphan_comments
     feed.sort(key=lambda x: x["created_at"], reverse=True)
 
     return feed[:max_items]
@@ -527,7 +554,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
     Phase 2: Fetch Kind 0 metadata for all unique pubkeys discovered.
     Returns a structured feed with author_name/author_avatar populated.
     """
-    filter_obj = {"kinds": [1, 7, 1063, 1111], "limit": limit}
+    filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
 
@@ -669,3 +696,41 @@ def did_to_npub(did):
     if hex_pubkey:
         return hex_to_npub(hex_pubkey)
     return None
+
+
+@login_required
+@csrf_exempt
+def api_cast_vote(request):
+    if request.method != "POST":
+        return JsonResponse({"valid": False, "error": "POST required"}, status=405)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest(json.dumps({"valid": False, "error": "invalid JSON"}))
+
+    voter_did = data.get("voter_did")
+    signature = data.get("signature")
+    vote_envelope = data.get("vote_envelope")
+
+    if not voter_did or not signature or not vote_envelope:
+        return JsonResponse(
+            {"valid": False, "error": "voter_did, signature, and vote_envelope required"},
+            status=400,
+        )
+
+    poll_id = vote_envelope.get("poll_id")
+
+    proxy_payload = {
+        "voter_did": voter_did,
+        "signature": signature,
+        "vote_envelope": vote_envelope,
+        "proxy": "iyou_wun",
+    }
+
+    try:
+        client = PolyClient()
+        result = client.cast_vote(poll_id, proxy_payload)
+        return JsonResponse({"valid": True, **result})
+    except PolyConnectionError as exc:
+        return JsonResponse({"valid": False, "error": str(exc)}, status=502)

@@ -282,6 +282,74 @@
                             </div>
                         </div>
                     </div>
+                    {% elif note.kind == 30023 %}
+                    <!-- KIND 30023: Poll Definition -->
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="30023" data-poll-id="{{ note.id }}">
+                        <div class="flex items-start gap-4">
+                            <div class="flex-shrink-0">
+                                {% if note.author_avatar %}
+                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-amber-300" /></a>
+                                {% else %}
+                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-amber-300">
+                                    <span class="text-amber-600 font-mono text-sm">{{ note.author_name|default:"P"|first|upper }}</span>
+                                </div></a>
+                                {% endif %}
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex items-center gap-2 mb-2">
+                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
+                                    <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Poll</span>
+                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
+                                    <div class="relative ml-auto">
+                                        <button onclick="toggleGear(event)" class="text-gray-400 hover:text-gray-600 text-lg leading-none px-1" title="Verification details">&#9881;</button>
+                                        <div class="gear-dropdown hidden absolute right-0 top-6 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-10 p-4 text-xs text-gray-600 space-y-2">
+                                            <p class="font-semibold text-gray-800 border-b pb-1 mb-1">Provenance</p>
+                                            <p><span class="font-medium">Voter DID:</span> {{ note.pubkey|truncatechars:32 }}</p>
+                                            <p><span class="font-medium">Relay Source:</span> {{ relays|first|default:"unknown" }}</p>
+                                            <p><span class="font-medium">Verification:</span> &#9200; Carrier Payload (Signature Verification Pending Bridge Hook)</p>
+                                            {% if note.poll_scope_geohash %}
+                                            <p><span class="font-medium">Scope Geohash:</span> {{ note.poll_scope_geohash }}</p>
+                                            {% endif %}
+                                            {% if note.poll_scope_org %}
+                                            <p><span class="font-medium">Scope Org:</span> {{ note.poll_scope_org }}</p>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                                <p class="text-gray-900 font-medium mb-3">{{ note.content }}</p>
+                                {% if user_pubkey %}
+                                <form class="poll-vote-form" data-poll-id="{{ note.id }}">
+                                    {% csrf_token %}
+                                    <div class="space-y-2">
+                                        {% for option in note.poll_options %}
+                                        <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">
+                                            <input type="radio" name="selection" value="{{ option }}" class="accent-amber-600">
+                                            <span class="text-sm text-gray-700">{{ option }}</span>
+                                        </label>
+                                        {% endfor %}
+                                    </div>
+                                    <button type="submit" class="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Cast Vote</button>
+                                </form>
+                                {% else %}
+                                <div class="space-y-2 opacity-60">
+                                    {% for option in note.poll_options %}
+                                    <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+                                        <span class="w-4 h-4 rounded-full border-2 border-gray-300 inline-block"></span>
+                                        <span class="text-sm text-gray-500">{{ option }}</span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <p class="mt-2 text-xs text-gray-400 italic">
+                                    Auditor Mode — voting requires
+                                    {% if note.poll_scope_geohash %}geohash <strong>{{ note.poll_scope_geohash }}</strong>{% endif %}
+                                    {% if note.poll_scope_geohash and note.poll_scope_org %} and {% endif %}
+                                    {% if note.poll_scope_org %}org <strong>{{ note.poll_scope_org }}</strong>{% endif %}
+                                    {% if not note.poll_scope_geohash and not note.poll_scope_org %}authenticated session{% endif %}
+                                </p>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
                     {% endif %}
                     {% endfor %}
                 </div>
@@ -352,6 +420,7 @@
             // State
             let tauriSocket = null;
             let pendingEvent = null;
+            let pendingVote = null;
             let isProcessing = false;
 
             // Initialize WebSocket connection to Tauri bridge
@@ -409,8 +478,16 @@
                         pendingEvent.id = signedEvent.id;
                         pendingEvent.sig = signedEvent.sig;
 
-                        // Broadcast to Nostr relays
-                        broadcastToRelays(pendingEvent);
+                        if (pendingVote) {
+                            // Vote flow: submit signed envelope to Poly engine
+                            submitSignedVote(signedEvent, pendingVote);
+                            pendingVote = null;
+                            pendingEvent = null;
+                            isProcessing = false;
+                        } else {
+                            // Standard post flow: broadcast to Nostr relays
+                            broadcastToRelays(pendingEvent);
+                        }
                     }
                 } catch (err) {
                     console.error("Error handling Tauri message:", err);
@@ -722,6 +799,7 @@
                 setButtonLoading(false);
                 isProcessing = false;
                 pendingEvent = null;
+                pendingVote = null;
             }
 
             // Load More — fetch next batch of notes
@@ -830,6 +908,99 @@
                 var div = document.createElement("div");
                 div.appendChild(document.createTextNode(str));
                 return div.innerHTML;
+            }
+
+            // Poll governance — Gear dropdown toggle
+            function toggleGear(event) {
+                event.stopPropagation();
+                var btn = event.currentTarget;
+                var dropdown = btn.parentElement.querySelector(".gear-dropdown");
+                if (!dropdown) return;
+                var isHidden = dropdown.classList.contains("hidden");
+                document.querySelectorAll(".gear-dropdown").forEach(function (d) { d.classList.add("hidden"); });
+                if (isHidden) dropdown.classList.remove("hidden");
+            }
+            document.addEventListener("click", function () {
+                document.querySelectorAll(".gear-dropdown").forEach(function (d) { d.classList.add("hidden"); });
+            });
+
+            // Poll governance — vote submission via Tauri bridge signing
+            document.addEventListener("DOMContentLoaded", function () {
+                document.querySelectorAll(".poll-vote-form").forEach(function (form) {
+                    form.addEventListener("submit", function (e) {
+                        e.preventDefault();
+                        var pollId = form.getAttribute("data-poll-id");
+                        var selected = form.querySelector("input[name='selection']:checked");
+                        if (!selected) return;
+                        if (!userPubkey || !userDid) {
+                            showToast("Authentication required. Please sign in.", true);
+                            return;
+                        }
+
+                        var btn = form.querySelector("button[type='submit']");
+                        var timestamp = Math.floor(Date.now() / 1000);
+                        var voteEnvelope = {
+                            poll_id: pollId,
+                            selection: selected.value,
+                            timestamp: timestamp
+                        };
+
+                        // Build Kind 1112 Nostr event for Tauri signing
+                        var event = {
+                            kind: 1112,
+                            content: JSON.stringify(voteEnvelope),
+                            pubkey: userPubkey,
+                            created_at: timestamp,
+                            tags: [["e", pollId]]
+                        };
+
+                        btn.disabled = true;
+                        btn.textContent = "Signing...";
+
+                        pendingVote = { pollId: pollId, selection: selected.value, timestamp: timestamp, form: form, btn: btn };
+                        sendEventToTauri(event);
+                    });
+                });
+            });
+
+            // Submit a signed vote envelope to the Poly engine
+            function submitSignedVote(signedEvent, voteMeta) {
+                var voteEnvelope = JSON.parse(signedEvent.content);
+                var proxyPackage = {
+                    voter_did: userDid,
+                    signature: signedEvent.sig,
+                    vote_envelope: voteEnvelope
+                };
+
+                fetch("/api/vote", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("wun_csrftoken") },
+                    body: JSON.stringify(proxyPackage)
+                })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var btn = voteMeta.btn;
+                    var form = voteMeta.form;
+                    if (data.valid) {
+                        btn.textContent = data.duplicate ? "Already Cast" : "Vote Cast";
+                        btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
+                        btn.classList.add("bg-green-500", "cursor-default");
+                        form.querySelectorAll("input").forEach(function (i) { i.disabled = true; });
+                    } else {
+                        btn.textContent = "Error — " + (data.error || "try again");
+                        btn.disabled = false;
+                    }
+                })
+                .catch(function () {
+                    var btn = voteMeta.btn;
+                    btn.textContent = "Network Error";
+                    btn.disabled = false;
+                });
+            }
+
+            function getCookie(name) {
+                var match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+                return match ? decodeURIComponent(match[2]) : "";
             }
 
             // Initialize on page load
