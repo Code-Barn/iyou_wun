@@ -4,7 +4,7 @@
 
 **iyou_wun** (WUN) is a Django 5.2 OIDC Relying Party (Satellite) that authenticates users via the **iyou_idp** identity provider. Users log in with their Decentralized Identifier (DID) using the OpenID Connect flow. A local `django.contrib.auth.User` is created keyed on the `sub` claim (the DID).
 
-The project is in active development. Authentication works end-to-end. Beyond the Omni-Social feed (Nostr Kind 1), WUN now includes a **Media Gallery** (Kind 1063 grid), **Sovereign Profile pages**, **XMPP Chat** via Converse.js, and **Double-Broadcast** to both local and global relays.
+The project is in active development. The root URL (`/`) immediately redirects to the **Omni-Social Feed** — no login wall. Authentication is fully delegated to `iyou_idp`; WUN acts as a public-read satellite with authenticated capabilities (posting, voting, chat). Beyond the feed (Nostr Kind 1), WUN includes a **Media Gallery** (Kind 1063 grid), **Sovereign Profile pages**, **XMPP Chat** via Converse.js, **Poly Governance polls** (Kind 30023/1112), and **Double-Broadcast** to both local and global relays.
 
 **Identity Model — Passwords are DEPRECATED.** The OIDC/DID authentication loop is the sole entry point. No username/password forms exist. Users authenticate via their iyou_idp using their Decentralized Identifier. Local `django.contrib.auth.User` records are created with `set_unusable_password()` and exist only as session anchors.
 
@@ -27,6 +27,7 @@ The project is in active development. Authentication works end-to-end. Beyond th
 | XMPP client         | Converse.js (CDN)                    |
 | Media server        | Blossom (iyou_home, port 9002)       |
 | Signing bridge      | Tauri (iyou_home, port 9001)         |
+| **Poly engine**     | **Headless calculation engine (POLY_ENGINE_URL env var)** |
 | DID conversion      | bech32 library                       |
 | Package manager     | uv                                   |
 | Container runtime   | Docker (multi-stage, python:3.12-slim) |
@@ -71,6 +72,7 @@ docker run -d --name iyou-wun \
   -e WUN_DEBUG=False \
   -e WUN_ALLOWED_HOSTS="['localhost','127.0.0.1','wun.iyou.me']" \
   -e DATABASE_URL="postgres://user:pass@host:5432/wun" \
+  -e POLY_ENGINE_URL="http://iyou-idp.identity.svc.cluster.local:8000" \
   -e OIDC_RP_CLIENT_ID="747582" \
   -e OIDC_RP_CLIENT_SECRET="<secret>" \
   iyou-wun:latest
@@ -92,6 +94,7 @@ The `config/settings.py` reads operational parameters from `WUN_`-prefixed env v
 | `WUN_DEBUG`                       | `False`                         | Django debug mode                  |
 | `WUN_ALLOWED_HOSTS`               | `['localhost', '127.0.0.1']`    | Django allowed hosts (list format) |
 | `DATABASE_URL`                    | `sqlite:///db.sqlite3`          | Database connection string (use `postgres://...` in production) |
+| `POLY_ENGINE_URL`                 | `http://127.0.0.1:8000`         | Headless calculation engine (Poly governance voting) |
 
 ### OIDC Endpoints
 
@@ -152,19 +155,19 @@ Update the IdP Client at `http://127.0.0.1:8000/admin/oidc_provider/client/`:
 ### How authentication flows
 
 ```
-User  ──GET /──>  WUN (home page: login button)
+User  ──GET /──>  WUN (redirects to /feed — no login wall)
   │
-  ├──Click "Login"──>  IdP /openid/authorize/
-  │                        │
-  │                  User authenticates at IdP
-  │                        │
-  │  <──Auth code redirect──┘
+  ├──Click "Sign In"──>  IdP /openid/authorize/?next=/feed/
+  │                           │
+  │                     User authenticates at IdP
+  │                           │
+  │  <──Auth code redirect────┘
   │
   ├──WUN exchanges code at IdP /openid/token/
   │
   ├──WUN fetches claims at IdP /openid/userinfo/
   │
-  └──User created/logged in locally ──> /dashboard
+  └──User created/logged in locally ──> /feed (with authenticated nav)
 ```
 
 The `mozilla-django-oidc` library handles the token exchange, userinfo retrieval, and local user creation automatically.
@@ -204,6 +207,7 @@ The Tauri signing bridge at `ws://127.0.0.1:9001` is a WebSocket endpoint provid
 | 1    | Short text note      | Feed             |
 | 0    | Profile metadata     | Dashboard        |
 | 1063 | Media (Blossom hash) | Feed             |
+| 1112 | Vote envelope        | Feed (poll card) |
 
 ---
 
@@ -274,10 +278,10 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
 ### How It Works Today
 
-1. `FeedView.get_context_data()` fetches a multi-kind feed: Kind 1 (text), Kind 7 (reactions), Kind 1063 (media), Kind 1111 (comments)
+1. `FeedView.get_context_data()` fetches a multi-kind feed: Kind 1 (text), Kind 7 (reactions), Kind 1063 (media), Kind 1111 (comments), Kind 30023 (poll definitions), Kind 1112 (vote envelopes)
 2. A `WebSocketApp` connects to `wss://nos.lol` and sends a NIP-01 `REQ` message
 3. `EOSE` or a 10-second timeout signals completion
-4. `process_into_feed()` groups reactions/comments under parents, injects Kind 0 profile data, and sorts reverse-chronologically
+4. `process_into_feed()` groups reactions/comments/votes under parents, injects Kind 0 profile data, and sorts reverse-chronologically
 5. **Double-Broadcast**: When posting, the signed event is sent simultaneously to:
    - `ws://127.0.0.1:9003` (local relay — triggers "Sovereign Copy Saved" toast)
    - `wss://relay.iyou.me` (project relay)
@@ -292,6 +296,62 @@ Media files are uploaded to the local Blossom server at `http://127.0.0.1:9002/<
 ### Gallery View
 
 The **Media Gallery** (`/gallery`) renders all Kind 1063 events in a responsive CSS grid with MIME-type filtering (All / Images / Video / Audio). Clicking a card opens a fullscreen modal with native `<video>`, `<audio>`, or full-resolution `<img>` playback.
+
+---
+
+## Poly Governance (Poll Definitions & Voting)
+
+**Files:**
+- `services/poly_client.py` — HTTP proxy client to the headless calculation engine
+- `apps/core/views.py` — `api_cast_vote()`, `process_into_feed()` kind 30023/1112 handling
+- `templates/feed.html` — inline poll card rendering with Gear ⚙️ dropdown
+
+WUN integrates with the Poly governance system using two dedicated Nostr event kinds:
+
+### Kind 30023 — Poll Definitions
+
+Polls appear inline in the feed with:
+- **Question text** from the event `content` field
+- **Options** extracted from `option` tags (e.g., `["option", "Yes"]`)
+- **Scope metadata** from `geohash` / `org` tags (used for Auditor Mode)
+- **Expiry** from optional `expires` tag
+
+### Kind 1112 — Vote Envelopes
+
+Vote submissions follow a cryptographically signed flow:
+
+1. **User selects** an option in the poll card and clicks "Cast Vote"
+2. **JS constructs** a kind 1112 Nostr event with `vote_envelope` as JSON content:
+   ```json
+   {"poll_id": "<event_id>", "selection": "Yes", "timestamp": 1234567890}
+   ```
+3. **Tauri bridge signs** the event via `ws://127.0.0.1:9001` — browser never touches the private key
+4. **JS packages** the signed result into the V2 Omni-Social proxy format:
+   ```json
+   {
+     "voter_did": "did:key:z6Mk...",
+     "signature": "<hex_sig_from_tauri>",
+     "vote_envelope": {"poll_id": "...", "selection": "...", "timestamp": ...}
+   }
+   ```
+5. **WUN proxies** to the headless calculation engine at `{POLY_ENGINE_URL}/api/v2/polls/{id}/cast/` with `X-Iyou-Wun-Proxy: true`
+6. **Engine validates** the signature and returns `{"valid": true, "details": {...}}`
+   - Duplicate votes (`"duplicate": true`) are treated as a success state
+
+### Auditor Mode
+
+Anonymous users see polls in **read-only Auditor Mode**:
+- Options are displayed with reduced opacity and disabled inputs
+- A status message explains what credential scope is required to vote
+- Future iterations will check Verifiable Credentials (geohash/org) against poll scope
+
+### Gear Icon (⚙️) Verification Dropdown
+
+Every poll card has a gear icon that toggles a provenance dropdown showing:
+- **Voter DID**: The poll author's pubkey
+- **Relay Source**: Which relay returned the poll event
+- **Verification Status**: `⏳ Carrier Payload (Signature Verification Pending Bridge Hook)`
+- **Scope Geohash/Org**: If present on the poll tags
 
 ---
 
@@ -345,7 +405,7 @@ All messages remain local to the :5222 XMPP server and are NEVER stored in the W
 
 | Service          | Port | Protocol | Purpose                         |
 |------------------|------|----------|---------------------------------|
-| iyou_idp         | 8000 | HTTP     | OpenID Provider                 |
+| iyou_idp / Poly  | 8000 | HTTP     | OpenID Provider + Governance engine |
 | iyou_wun (Django)| 8001 | HTTP     | This application                |
 | Tauri bridge     | 9001 | WebSocket| Nostr event signing             |
 | Blossom media    | 9002 | HTTP     | File storage (PUT/GET by hash)  |
@@ -376,7 +436,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 
 ```
 .
-├── main.py                          # CLI entry point (stub)
+├── manage.py                       # Django management entry point
 ├── pyproject.toml                   # Project metadata & dependencies
 ├── Dockerfile                       # Multi-stage production build (uv + gunicorn)
 ├── docker-entrypoint.sh             # Container init (migrate → gunicorn on :8000)
@@ -384,8 +444,11 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 ├── .env                             # Environment variables (git-ignored)
 ├── .env.example                     # Template for .env (safe to commit)
 ├── WUN_DEVELOPER_GUIDE.md           # This file
+├── services/
+│   ├── __init__.py
+│   └── poly_client.py               # PolyClient — HTTP proxy to governance engine
 ├── config/
-│   ├── settings.py                  # Django settings (OIDC, auth, apps, CSRF)
+│   ├── settings.py                  # Django settings (OIDC, auth, apps, CSRF, POLY_ENGINE_URL)
 │   ├── urls.py                      # Root URL configuration
 │   ├── wsgi.py                      # WSGI entrypoint
 │   └── asgi.py                      # ASGI entrypoint
@@ -393,7 +456,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 │   ├── __init__.py
 │   ├── apps.py                      # Django app config
 │   ├── views.py                     # home(), dashboard(), FeedView, GalleryView,
-│   │                                # ProfileView, ChatView, + Nostr helpers
+│   │                                # ProfileView, ChatView, + Nostr helpers, api_cast_vote()
 │   ├── urls.py                      # App-level URL routing
 │   ├── auth.py                      # MyOIDCAuthenticationBackend
 │   ├── models.py                    # (empty -- no models yet)
@@ -403,13 +466,12 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 │       ├── __init__.py
 │       ├── helpers.py               # Reusable test utilities (create_oidc_user, make_event, etc.)
 │       ├── test_auth.py             # 17 tests: auth backend, password rejection, OIDC enforcement
-│       ├── test_views.py            # 23 tests: home, dashboard, chat, gallery, profile
-│       └── test_feed.py             # 24 tests: process_into_feed threading integrity
+│       ├── test_views.py            # 21 tests: home redirect, dashboard, chat, gallery, profile
+│       └── test_feed.py             # 31 tests: process_into_feed threading + poll governance
 └── templates/
     ├── _nav.html                    # Shared navigation (DRY — included by all views)
-    ├── home.html                    # Landing page with login button
     ├── dashboard.html               # Dashboard + Edit Profile (Kind 0 broadcast)
-    ├── feed.html                    # Omni-Social feed (Kind 1, 1063, 1111)
+    ├── feed.html                    # Omni-Social feed (Kind 1, 1063, 1111, 30023, 1112)
     ├── gallery.html                 # Media gallery (Kind 1063 grid + modal)
     ├── profile.html                 # Sovereign profile pages
     └── chat.html                    # XMPP chat (Converse.js)
@@ -419,14 +481,17 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 
 | Path                  | View           | Auth Required | Notes                                |
 | --------------------- | -------------- | ------------- | ------------------------------------ |
-| `/`                   | `home`         | No            | Landing page                         |
+| `/`                   | `home`         | No            | Redirects to /feed                   |
 | `/dashboard`          | `dashboard`    | Yes           | DID display + Edit Profile (Kind 0)  |
-| `/feed`               | `FeedView`     | Yes           | Unified Nostr feed + thread view     |
+| `/feed`               | `FeedView`     | No            | Public unified Nostr feed + polls    |
 | `/gallery`            | `GalleryView`  | Yes           | Media grid with MIME filters + modal |
 | `/profile/<npub>/`    | `ProfileView`  | No            | Sovereign profile (Kind 0, 1, 1063)  |
 | `/chat`               | `ChatView`     | Yes           | XMPP sovereign chat                  |
 | `/admin/`             | Django admin   | —             |                                      |
 | `/oidc/`              | OIDC flow      | —             | Provided by mozilla-django-oidc      |
+| `/api/feed`           | `api_feed`     | Yes           | JSON feed endpoint (Load More)       |
+| `/api/relays`         | `api_relays`   | Yes           | GET/POST relay config                |
+| `/api/vote`           | `api_cast_vote`| Yes           | POST signed vote envelopes to Poly   |
 
 ---
 
@@ -436,27 +501,28 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 uv run python manage.py test apps.core.tests
 ```
 
-Tests cover (64 total across 3 modules):
+Tests cover (69 total across 3 modules):
 
 ### `test_auth.py` (17 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5 tests)
 - `SovereignOnboardingTest` — filter_users_by_claims, get_username, verify_claims (5 tests)
 - `PasswordRejectionTest` — OIDC users have unusable passwords, ModelBackend rejects them (4 tests)
-- `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to oidc (3 tests)
+- `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3 tests)
 
-### `test_views.py` (23 tests)
-- `HomeViewTest` — landing page rendering (3 tests)
-- `DashboardViewTest` — authenticated DID display, logout link (5 tests)
-- `ChatViewTest` — anonymous redirect, XMPP init, nav links (6 tests)
+### `test_views.py` (21 tests)
+- `HomeViewTest` — root redirect to /feed (1 test)
+- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link (5 tests)
+- `ChatViewTest` — anonymous redirect to IdP, XMPP init, nav links (6 tests)
 - `GalleryViewTest` — anonymous redirect, media heading, nav links (4 tests)
 - `ProfileViewTest` — invalid npub error, valid npub page render (2 tests)
 - `DashboardProfileTest` — profile section, publish button (2 tests)
 - `JwksConnectivityTest` — IdP JWKS endpoint integration (1 test, skips if IdP is down)
 
-### `test_feed.py` (24 tests)
-- `ProcessIntoFeedTest` — empty input, kind 1/1063/7/1111 routing, reaction grouping/dedup,
+### `test_feed.py` (31 tests)
+- `ProcessIntoFeedTest` — empty input, kind 1/1063/7/1111/30023/1112 routing, reaction grouping/dedup,
   orphan comment preservation, sovereign flag, profile enrichment, sort order,
-  max_items truncation, malformed events, missing fields, mixed kinds, npub generation
+  max_items truncation, malformed events, missing fields, mixed kinds, npub generation,
+  poll option extraction, scope tags, vote grouping under parent poll, orphan vote dropped
 
 ---
 
