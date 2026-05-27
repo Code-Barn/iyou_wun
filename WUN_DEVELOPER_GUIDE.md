@@ -29,6 +29,7 @@ The project is in active development. The root URL (`/`) immediately redirects t
 | Signing bridge      | Tauri (iyou_home, port 9001)         |
 | **Poly engine**     | **Headless calculation engine (POLY_ENGINE_URL env var)** |
 | DID conversion      | bech32 library                       |
+| VC signing          | cryptography 44+ (Ed25519)           |
 | Package manager     | uv                                   |
 | Container runtime   | Docker (multi-stage, python:3.12-slim) |
 
@@ -95,6 +96,8 @@ The `config/settings.py` reads operational parameters from `WUN_`-prefixed env v
 | `WUN_ALLOWED_HOSTS`               | `['localhost', '127.0.0.1']`    | Django allowed hosts (list format) |
 | `DATABASE_URL`                    | `sqlite:///db.sqlite3`          | Database connection string (use `postgres://...` in production) |
 | `POLY_ENGINE_URL`                 | `http://127.0.0.1:8000`         | Headless calculation engine (Poly governance voting) |
+| `NODE_DID`                        | `did:key:z6Mkdevlocal...`       | Node's own DID (used as VC issuer) |
+| `NODE_PRIVATE_KEY_HEX`            | *(derived from WUN_SECRET_KEY)*  | Ed25519 private key hex (32 bytes → 64 chars). If set, takes absolute precedence over WUN_SECRET_KEY derivation. |
 
 ### OIDC Endpoints
 
@@ -187,6 +190,8 @@ The Tauri signing bridge at `ws://127.0.0.1:9001` is a WebSocket endpoint provid
 | `sign_event`             | `signed_event`            | Sign a Nostr event (any kind)            |
 | `sign`                   | `signed_message`          | Sign an arbitrary string                 |
 | `sign_credential`        | `signed_credential`       | Sign a Verifiable Credential (VC)        |
+
+The server can also **issue** VCs directly (see [Credential Issuance API](#credential-issuance-api)).
 
 ### sign_event Flow
 
@@ -355,6 +360,74 @@ Every poll card has a gear icon that toggles a provenance dropdown showing:
 
 ---
 
+## Credential Issuance API
+
+**Files:**
+- `apps/core/did_kit.py` — Ed25519 VC signing/verification (hex `proofValue`)
+- `apps/core/models.py` — `IssuedCredential` tracking model
+- `apps/core/views.py` — `IssueCredentialView`, `node_config`
+
+WUN can issue W3C Verifiable Credentials to registered DIDs. The signing key is either provided explicitly via `NODE_PRIVATE_KEY_HEX` or derived from `WUN_SECRET_KEY` (dev fallback).
+
+### Public Discovery — `GET /api/config/`
+
+Unauthenticated endpoint that lets iyou_home discover the server's identity before requesting or verifying a credential:
+
+```json
+{
+  "node_did": "did:key:z6Mk...",
+  "node_public_key_hex": "4fde42c0f9...",
+  "supported_credentials": ["voter_credential"]
+}
+```
+
+### Issue a Credential — `POST /api/credentials/issue/`
+
+**Auth:** OIDC-authenticated user with `is_staff=True`
+
+**Payload:**
+```json
+{
+  "voter_did": "did:key:z6Mk...",
+  "credential_type": "voter_credential",
+  "fidelity_score": 85
+}
+```
+
+**Response** (201 Created):
+```json
+{
+  "@context": ["https://www.w3.org/2018/credentials/v1"],
+  "id": "urn:uuid:<uuid>",
+  "type": ["VerifiableCredential", "voter_credential"],
+  "issuer": "did:key:z6Mk...",
+  "issuanceDate": "2026-05-27T12:00:00Z",
+  "expirationDate": "2027-05-27T12:00:00Z",
+  "credentialSubject": {
+    "id": "did:key:z6Mk...",
+    "fidelity_score": 85
+  },
+  "proof": {
+    "type": "Ed25519Signature2020",
+    "created": "2026-05-27T12:00:00Z",
+    "proofPurpose": "assertionMethod",
+    "verificationMethod": "did:key:z6Mk...#keys-1",
+    "proofValue": "<hex_signature>"
+  }
+}
+```
+
+The `proofValue` is a hex-encoded Ed25519 signature (matching iyou_poly's verification convention). An `IssuedCredential` record is persisted for revocation tracking (subject_did, credential_type, vc_id, issued_at). The full VC payload is NOT stored — only the tracking metadata.
+
+### Key Hierarchy
+
+| Priority | Source | Use Case |
+|----------|--------|----------|
+| 1 (highest) | `NODE_PRIVATE_KEY_HEX` env var | Production: explicit 32-byte Ed25519 key as 64 hex chars |
+| 2 (fallback) | SHA256(`WUN_SECRET_KEY`) | Local dev: deterministic, no extra config |
+
+---
+
 ## Sovereign Profile Pages
 
 **Routes:** `/profile/<npub>/`
@@ -455,11 +528,13 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 ├── apps/core/
 │   ├── __init__.py
 │   ├── apps.py                      # Django app config
+│   ├── did_kit.py                   # Ed25519 VC signing/verification (hex proofValue)
 │   ├── views.py                     # home(), dashboard(), FeedView, GalleryView,
-│   │                                # ProfileView, ChatView, + Nostr helpers, api_cast_vote()
+│   │                                # ProfileView, ChatView, + Nostr helpers,
+│   │                                # api_cast_vote(), IssueCredentialView, node_config()
 │   ├── urls.py                      # App-level URL routing
 │   ├── auth.py                      # MyOIDCAuthenticationBackend
-│   ├── models.py                    # (empty -- no models yet)
+│   ├── models.py                    # IssuedCredential — tracks VC issuance events
 │   ├── admin.py                     # (empty -- no admin registrations)
 │   ├── conftest.py                  # pytest fixtures (OIDC claims, users, Nostr events)
 │   └── tests/
@@ -467,7 +542,8 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 │       ├── helpers.py               # Reusable test utilities (create_oidc_user, make_event, etc.)
 │       ├── test_auth.py             # 17 tests: auth backend, password rejection, OIDC enforcement
 │       ├── test_views.py            # 21 tests: home redirect, dashboard, chat, gallery, profile
-│       └── test_feed.py             # 31 tests: process_into_feed threading + poll governance
+│       ├── test_feed.py             # 31 tests: process_into_feed threading + poll governance
+│       └── test_issuance.py         # 19 tests: did_kit sign/verify + credential API (real Ed25519)
 └── templates/
     ├── _nav.html                    # Shared navigation (DRY — included by all views)
     ├── dashboard.html               # Dashboard + Edit Profile (Kind 0 broadcast)
@@ -492,6 +568,8 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 | `/api/feed`           | `api_feed`     | Yes           | JSON feed endpoint (Load More)       |
 | `/api/relays`         | `api_relays`   | Yes           | GET/POST relay config                |
 | `/api/vote`           | `api_cast_vote`| Yes           | POST signed vote envelopes to Poly   |
+| `/api/credentials/issue/` | `IssueCredentialView` | Staff (+ OIDC) | POST issue a signed Verifiable Credential |
+| `/api/config/`        | `node_config`  | No            | Public node identity discovery       |
 
 ---
 
@@ -501,7 +579,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 uv run python manage.py test apps.core.tests
 ```
 
-Tests cover (69 total across 3 modules):
+Tests cover (88 total across 4 modules):
 
 ### `test_auth.py` (17 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5 tests)
@@ -523,6 +601,10 @@ Tests cover (69 total across 3 modules):
   orphan comment preservation, sovereign flag, profile enrichment, sort order,
   max_items truncation, malformed events, missing fields, mixed kinds, npub generation,
   poll option extraction, scope tags, vote grouping under parent poll, orphan vote dropped
+
+### `test_issuance.py` (19 tests)
+- `DIDKitUnitTest` — key loading (32/64 hex), VC structure, sign/verify round-trip, wrong-key rejection, tamper detection (6 tests)
+- `IssueCredentialAPITest` — anonymous 302, non-staff 403, staff can issue, cryptographically valid response, GET returns 405, missing field validation, invalid DID, invalid JSON, fidelity score bounds, DB persistence (13 tests)
 
 ---
 
@@ -569,7 +651,7 @@ CSRF_COOKIE_NAME = 'wun_csrftoken'
 
 - `.env` was previously committed to git — now removed from tracking and gitignored. **DO NOT re-commit it.**
 - `OIDC_USERNAME_ALGO` lambda and `MyOIDCAuthenticationBackend.create_user` both derive the username from `sub` — redundant but not harmful. Clean up by choosing one approach.
-- No domain models yet (`models.py` is empty).
+- `IssuedCredential` model is not registered in Django admin yet.
 - `main.py` is a stub with unclear purpose.
 - `apps/core/admin.py` is empty — no models registered for the admin interface.
 - Tailwind CSS is loaded via CDN — consider a build step for production offline resilience.
