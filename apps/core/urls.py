@@ -26,4 +26,6 @@ urlpatterns = [
     path('api/relays', views.api_relays, name='api_relays'),
     path('api/feed', views.api_feed, name='api_feed'),
     path('api/vote', views.api_cast_vote, name='api_cast_vote'),
+    path('api/credentials/issue/', views.IssueCredentialView.as_view(), name='api_issue_credential'),
+    path('api/config/', views.node_config, name='node_config'),
 ]

@@ -15,4 +15,15 @@
 
 from django.db import models
 
-# Create your models here.
+
+class IssuedCredential(models.Model):
+    subject_did = models.CharField(max_length=512, db_index=True)
+    credential_type = models.CharField(max_length=128)
+    vc_id = models.CharField(max_length=512, unique=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-issued_at"]
+
+    def __str__(self):
+        return f"<IssuedCredential {self.vc_id} -> {self.subject_did}>"

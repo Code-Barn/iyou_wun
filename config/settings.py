@@ -248,3 +248,7 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 # Poly Governance Engine
 POLY_ENGINE_URL = env.str("POLY_ENGINE_URL", default="http://127.0.0.1:8000")
+
+# Credential Issuance — Node DID & Signing Key
+NODE_DID = env.str("NODE_DID", default="did:key:z6Mkdevlocal00000000000000000000000000000000")
+NODE_PRIVATE_KEY_HEX = env.str("NODE_PRIVATE_KEY_HEX", default="")

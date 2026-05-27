@@ -15,22 +15,30 @@
 
 import base64
 import json
+import re
 import ssl
 import threading
 import time
 from datetime import datetime
 
 import bech32
+from django.conf import settings
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from urllib.parse import urlencode
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
+from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
+from django.views import View
 from websocket import WebSocketApp
 
 from services.poly_client import PolyClient, PolyConnectionError
+
+from .did_kit import build_unsigned_vc, get_node_signing_key, get_public_key_hex, sign_vc
+from .models import IssuedCredential
 
 
 def home(request):
@@ -734,3 +742,83 @@ def api_cast_vote(request):
         return JsonResponse({"valid": True, **result})
     except PolyConnectionError as exc:
         return JsonResponse({"valid": False, "error": str(exc)}, status=502)
+
+
+DID_PATTERN = re.compile(r"^did:[a-z0-9]+:.*")
+
+
+@method_decorator(login_required, name="dispatch")
+class IssueCredentialView(View):
+    def dispatch(self, request, *args, **kwargs):
+        if not request.user.is_staff:
+            return JsonResponse(
+                {"error": "administrator privileges required"},
+                status=403,
+            )
+        return super().dispatch(request, *args, **kwargs)
+
+    def post(self, request):
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse(
+                {"error": "invalid JSON body"}, status=400
+            )
+
+        voter_did = data.get("voter_did")
+        credential_type = data.get("credential_type")
+        fidelity_score = data.get("fidelity_score")
+
+        if not voter_did or not credential_type or fidelity_score is None:
+            return JsonResponse(
+                {
+                    "error": "voter_did, credential_type, and fidelity_score are required"
+                },
+                status=400,
+            )
+
+        if not isinstance(fidelity_score, int) or not (0 <= fidelity_score <= 100):
+            return JsonResponse(
+                {"error": "fidelity_score must be an integer between 0 and 100"},
+                status=400,
+            )
+
+        if not DID_PATTERN.match(voter_did):
+            return JsonResponse(
+                {"error": f"voter_did is not a valid DID: {voter_did}"},
+                status=400,
+            )
+
+        issuer_did = settings.NODE_DID
+        signing_key = get_node_signing_key()
+        verification_method = f"{issuer_did}#keys-1"
+
+        unsigned = build_unsigned_vc(
+            subject_did=voter_did,
+            credential_type=credential_type,
+            fidelity_score=fidelity_score,
+            issuer_did=issuer_did,
+        )
+
+        signed_vc = sign_vc(unsigned, signing_key, verification_method)
+
+        IssuedCredential.objects.create(
+            subject_did=voter_did,
+            credential_type=credential_type,
+            vc_id=signed_vc["id"],
+        )
+
+        return JsonResponse(signed_vc, status=201)
+
+    def get(self, request):
+        return JsonResponse({"error": "POST required"}, status=405)
+
+
+@require_GET
+def node_config(request):
+    pubkey_hex = get_public_key_hex(get_node_signing_key())
+    return JsonResponse({
+        "node_did": settings.NODE_DID,
+        "node_public_key_hex": pubkey_hex,
+        "supported_credentials": ["voter_credential"],
+    })
