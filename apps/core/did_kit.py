@@ -101,6 +101,20 @@ def sign_vc(
     return signed_vc
 
 
+def issue_vc(
+    voter_did: str,
+    credential_type: str,
+    fidelity_score: int,
+) -> dict:
+    from django.conf import settings
+
+    issuer_did = settings.NODE_DID
+    signing_key = get_node_signing_key()
+    verification_method = f"{issuer_did}#keys-1"
+    unsigned = build_unsigned_vc(voter_did, credential_type, fidelity_score, issuer_did)
+    return sign_vc(unsigned, signing_key, verification_method)
+
+
 def verify_vc_signature(
     signed_vc: dict,
     public_key_hex: str,

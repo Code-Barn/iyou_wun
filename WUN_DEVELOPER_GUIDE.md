@@ -213,6 +213,7 @@ The server can also **issue** VCs directly (see [Credential Issuance API](#crede
 | 0    | Profile metadata     | Dashboard        |
 | 1063 | Media (Blossom hash) | Feed             |
 | 1112 | Vote envelope        | Feed (poll card) |
+| 30023| Poll definition      | Feed (poll creation modal) |
 
 ---
 
@@ -311,7 +312,7 @@ The **Media Gallery** (`/gallery`) renders all Kind 1063 events in a responsive 
 - `apps/core/views.py` — `api_cast_vote()`, `process_into_feed()` kind 30023/1112 handling
 - `templates/feed.html` — inline poll card rendering with Gear ⚙️ dropdown
 
-WUN integrates with the Poly governance system using two dedicated Nostr event kinds:
+WUN integrates with the Poly governance system using two dedicated Nostr event kinds, and now includes a front-end panel for creating polls directly from the feed:
 
 ### Kind 30023 — Poll Definitions
 
@@ -342,6 +343,34 @@ Vote submissions follow a cryptographically signed flow:
 5. **WUN proxies** to the headless calculation engine at `{POLY_ENGINE_URL}/api/v2/polls/{id}/cast/` with `X-Iyou-Wun-Proxy: true`
 6. **Engine validates** the signature and returns `{"valid": true, "details": {...}}`
    - Duplicate votes (`"duplicate": true`) are treated as a success state
+
+### Poll Creation (Kind 30023)
+
+**Files:**
+- `templates/poll_modal.html` — hidden Tailwind modal overlay
+- `templates/feed.html` — "Add Poll" button, `createPoll()` JS, Tauri handshake, direct ingest
+
+Authenticated users can create polls via the **"Add Poll"** button in the compose box. The flow:
+
+1. **Form fields**: Title (text), Description (textarea), Scope (Public / Family Scoped / Local Regional), Minimum Fidelity (1=Social, 2=Institutional, 3=Hardware), dynamic option slots (2+ with "+ Add Option")
+2. **Event construction** (`createPoll()`): Builds a Kind 30023 parameterized replaceable event with tags: `d` (UUID), `title`, `fidelity_min`, `option` (×N), `geohash`/`org` (based on scope), `expires` (+30 days)
+3. **Signing**: Passes the unsigned event to the Tauri bridge via the existing `sendEventToTauri()` WebSocket pipeline
+4. **Dual dispatch** (`handleTauriMessage()` pendingPoll branch):
+   - **Direct ingest**: Fire-and-forget `POST http://127.0.0.1:8002/api/nostr/ingest/` to iyou_poly (eliminates relay ingestion lag)
+   - **Relay broadcast**: `broadcastToRelays()` sends to all three Nostr relays for passive sync
+5. **Cleanup**: Modal closes, state resets, poll card appears in feed on successful relay acknowledgment
+
+Tag format:
+```
+["d", "<uuid_hex>"]           — parameterized replaceable identifier
+["title", "<poll title>"]
+["fidelity_min", "1|2|3"]
+["option", "Option 1"]
+["option", "Option 2"]
+["geohash", "global"]         — if scope == "Local Regional"
+["org", "iyou"]               — if scope == "Family Scoped"
+["expires", "<+30d_unix>"]
+```
 
 ### Auditor Mode
 
@@ -478,7 +507,8 @@ All messages remain local to the :5222 XMPP server and are NEVER stored in the W
 
 | Service          | Port | Protocol | Purpose                         |
 |------------------|------|----------|---------------------------------|
-| iyou_idp / Poly  | 8000 | HTTP     | OpenID Provider + Governance engine |
+| iyou_idp         | 8000 | HTTP     | OpenID Provider                     |
+| iyou_poly        | 8002 | HTTP     | Governance engine (poll intake)     |
 | iyou_wun (Django)| 8001 | HTTP     | This application                |
 | Tauri bridge     | 9001 | WebSocket| Nostr event signing             |
 | Blossom media    | 9002 | HTTP     | File storage (PUT/GET by hash)  |
@@ -535,7 +565,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 │   ├── urls.py                      # App-level URL routing
 │   ├── auth.py                      # MyOIDCAuthenticationBackend
 │   ├── models.py                    # IssuedCredential — tracks VC issuance events
-│   ├── admin.py                     # (empty -- no admin registrations)
+│   ├── admin.py                     # IssuedCredential admin registration
 │   ├── conftest.py                  # pytest fixtures (OIDC claims, users, Nostr events)
 │   └── tests/
 │       ├── __init__.py
@@ -547,7 +577,8 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 └── templates/
     ├── _nav.html                    # Shared navigation (DRY — included by all views)
     ├── dashboard.html               # Dashboard + Edit Profile (Kind 0 broadcast)
-    ├── feed.html                    # Omni-Social feed (Kind 1, 1063, 1111, 30023, 1112)
+    ├── feed.html                    # Omni-Social feed (Kind 1, 1063, 1111, 30023, 1112) + poll creation
+    ├── poll_modal.html              # Poll creation modal (Tailwind overlay)
     ├── gallery.html                 # Media gallery (Kind 1063 grid + modal)
     ├── profile.html                 # Sovereign profile pages
     └── chat.html                    # XMPP chat (Converse.js)
@@ -579,7 +610,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 uv run python manage.py test apps.core.tests
 ```
 
-Tests cover (88 total across 4 modules):
+Tests cover (89 total across 4 modules):
 
 ### `test_auth.py` (17 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5 tests)
@@ -651,8 +682,5 @@ CSRF_COOKIE_NAME = 'wun_csrftoken'
 
 - `.env` was previously committed to git — now removed from tracking and gitignored. **DO NOT re-commit it.**
 - `OIDC_USERNAME_ALGO` lambda and `MyOIDCAuthenticationBackend.create_user` both derive the username from `sub` — redundant but not harmful. Clean up by choosing one approach.
-- `IssuedCredential` model is not registered in Django admin yet.
-- `main.py` is a stub with unclear purpose.
-- `apps/core/admin.py` is empty — no models registered for the admin interface.
 - Tailwind CSS is loaded via CDN — consider a build step for production offline resilience.
 - Profile pages (`/profile/<npub>/`) are public but the feed/gallery links to them are only visible to authenticated users.

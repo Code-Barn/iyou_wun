@@ -383,6 +383,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "bech32" },
+    { name = "cryptography" },
     { name = "django", version = "5.2.13", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
     { name = "django", version = "6.0.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "django-environ" },
@@ -401,6 +402,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "bech32", specifier = ">=1.2.0" },
+    { name = "cryptography", specifier = ">=44.0.0" },
     { name = "django", specifier = ">=5.2.13" },
     { name = "django-environ", specifier = ">=0.13.0" },
     { name = "gunicorn", specifier = ">=23.0.0" },

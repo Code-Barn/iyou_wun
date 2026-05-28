@@ -1,0 +1,73 @@
+<div id="pollModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/40">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div class="flex items-center justify-between p-6 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Create a Poll</h2>
+            <button type="button" onclick="closePollModal()" class="text-gray-400 hover:text-gray-600 transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <form id="pollForm" onsubmit="event.preventDefault(); createPoll();" class="p-6 space-y-4">
+            <div>
+                <label for="pollTitle" class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+                <input type="text" id="pollTitle" required
+                    class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
+                    placeholder="What is the question?" />
+            </div>
+            <div>
+                <label for="pollDescription" class="block text-sm font-medium text-gray-700 mb-1">Description <span class="text-gray-400 text-xs">(optional)</span></label>
+                <textarea id="pollDescription"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent resize-none"
+                    rows="2" placeholder="Additional context for voters..."></textarea>
+            </div>
+            <div>
+                <label for="pollScope" class="block text-sm font-medium text-gray-700 mb-1">Scope</label>
+                <select id="pollScope"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent">
+                    <option value="public">Public</option>
+                    <option value="family">Family Scoped</option>
+                    <option value="regional">Local Regional</option>
+                </select>
+            </div>
+            <div>
+                <label for="pollFidelity" class="block text-sm font-medium text-gray-700 mb-1">Minimum Fidelity</label>
+                <select id="pollFidelity"
+                    class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent">
+                    <option value="1">1 — Social</option>
+                    <option value="2" selected>2 — Institutional</option>
+                    <option value="3">3 — Hardware</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Options</label>
+                <div id="pollOptionsContainer" class="space-y-2">
+                    <div class="option-row flex items-center gap-2">
+                        <input type="text" class="poll-option flex-1 border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent" placeholder="Option 1" required />
+                        <button type="button" onclick="removeOption(this)" class="text-red-400 hover:text-red-600 transition-colors p-1 hidden" title="Remove option">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                    <div class="option-row flex items-center gap-2">
+                        <input type="text" class="poll-option flex-1 border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent" placeholder="Option 2" required />
+                        <button type="button" onclick="removeOption(this)" class="text-red-400 hover:text-red-600 transition-colors p-1" title="Remove option">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <button type="button" onclick="addPollOption()" class="mt-2 text-sm text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    Add Option
+                </button>
+            </div>
+            <div class="flex items-center gap-3 pt-2 border-t border-gray-200">
+                <button type="button" onclick="closePollModal()"
+                    class="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">
+                    Cancel
+                </button>
+                <button type="submit" id="publishPollBtn"
+                    class="flex-1 px-4 py-2 text-sm font-medium text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    Publish Poll
+                </button>
+            </div>
+        </form>
+    </div>
+</div>

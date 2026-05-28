@@ -37,7 +37,7 @@ from websocket import WebSocketApp
 
 from services.poly_client import PolyClient, PolyConnectionError
 
-from .did_kit import build_unsigned_vc, get_node_signing_key, get_public_key_hex, sign_vc
+from .did_kit import get_public_key_hex, issue_vc
 from .models import IssuedCredential
 
 
@@ -789,18 +789,7 @@ class IssueCredentialView(View):
                 status=400,
             )
 
-        issuer_did = settings.NODE_DID
-        signing_key = get_node_signing_key()
-        verification_method = f"{issuer_did}#keys-1"
-
-        unsigned = build_unsigned_vc(
-            subject_did=voter_did,
-            credential_type=credential_type,
-            fidelity_score=fidelity_score,
-            issuer_did=issuer_did,
-        )
-
-        signed_vc = sign_vc(unsigned, signing_key, verification_method)
+        signed_vc = issue_vc(voter_did, credential_type, fidelity_score)
 
         IssuedCredential.objects.create(
             subject_did=voter_did,

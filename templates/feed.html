@@ -96,6 +96,10 @@
                                 Upload Media
                             </button>
                             <span id="uploadStatus" class="text-xs text-gray-500 hidden"></span>
+                            <button type="button" onclick="openPollModal()" class="text-sm text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1 px-3 py-2 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                                Add Poll
+                            </button>
                         </div>
                         <button
                             id="postButton"
@@ -395,6 +399,8 @@
             >
         </div>
 
+        {% include 'poll_modal.html' %}
+
         <!-- WebSocket Bridge Script -->
         <script>
             // Configuration
@@ -421,6 +427,7 @@
             let tauriSocket = null;
             let pendingEvent = null;
             let pendingVote = null;
+            let pendingPoll = false;
             let isProcessing = false;
 
             // Initialize WebSocket connection to Tauri bridge
@@ -482,6 +489,23 @@
                             // Vote flow: submit signed envelope to Poly engine
                             submitSignedVote(signedEvent, pendingVote);
                             pendingVote = null;
+                            pendingEvent = null;
+                            isProcessing = false;
+                        } else if (pendingPoll) {
+                            // Poll creation flow: direct-ingest to Poly engine, then broadcast to relays
+                            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(signedEvent)
+                            })
+                            .then(function (r) {
+                                if (!r.ok) console.error("Direct poly ingestion failed, falling back to passive relay sync.");
+                                else console.log("Success: Direct poll injection to poly dashboard verified.");
+                            })
+                            .catch(function (err) { console.error("Network error during direct poly ingestion:", err); });
+                            broadcastToRelays(pendingEvent);
+                            closePollModal();
+                            pendingPoll = false;
                             pendingEvent = null;
                             isProcessing = false;
                         } else {
@@ -800,6 +824,9 @@
                 isProcessing = false;
                 pendingEvent = null;
                 pendingVote = null;
+                pendingPoll = false;
+                var pubBtn = document.getElementById("publishPollBtn");
+                if (pubBtn) { pubBtn.disabled = false; pubBtn.textContent = "Publish Poll"; }
             }
 
             // Load More — fetch next batch of notes
@@ -995,6 +1022,90 @@
                     var btn = voteMeta.btn;
                     btn.textContent = "Network Error";
                     btn.disabled = false;
+                });
+            }
+
+            // --- Poll Creation ---
+            function openPollModal() {
+                document.getElementById("pollModal").classList.remove("hidden");
+            }
+
+            function closePollModal() {
+                document.getElementById("pollModal").classList.add("hidden");
+                document.getElementById("pollForm").reset();
+            }
+
+            function addPollOption() {
+                var container = document.getElementById("pollOptionsContainer");
+                var count = container.querySelectorAll(".option-row").length;
+                var div = document.createElement("div");
+                div.className = "option-row flex items-center gap-2";
+                div.innerHTML =
+                    '<input type="text" class="poll-option flex-1 border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent" placeholder="Option ' +
+                    (count + 1) + '" required />' +
+                    '<button type="button" onclick="removeOption(this)" class="text-red-400 hover:text-red-600 transition-colors p-1" title="Remove option">' +
+                    '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' +
+                    '</button>';
+                container.appendChild(div);
+            }
+
+            function removeOption(btn) {
+                var row = btn.closest(".option-row");
+                if (document.querySelectorAll(".option-row").length > 2) {
+                    row.remove();
+                }
+            }
+
+            function createPoll() {
+                if (!userPubkey) {
+                    showToast("Authentication required. Please sign in.", true);
+                    return;
+                }
+                var title = document.getElementById("pollTitle").value.trim();
+                var description = document.getElementById("pollDescription").value.trim();
+                var scope = document.getElementById("pollScope").value;
+                var fidelity = parseInt(document.getElementById("pollFidelity").value, 10);
+                var optionInputs = document.querySelectorAll(".poll-option");
+                var options = [];
+                optionInputs.forEach(function (inp) {
+                    var val = inp.value.trim();
+                    if (val) options.push(val);
+                });
+                if (!title) { showToast("Please enter a poll title.", true); return; }
+                if (options.length < 2) { showToast("Please provide at least 2 options.", true); return; }
+
+                var tags = [
+                    ["d", uuidv4()],
+                    ["title", title],
+                    ["fidelity_min", String(fidelity)]
+                ];
+                options.forEach(function (opt) { tags.push(["option", opt]); });
+                if (scope === "regional") {
+                    tags.push(["geohash", "global"]);
+                } else if (scope === "family") {
+                    tags.push(["org", "iyou"]);
+                }
+                var expires = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
+                tags.push(["expires", String(expires)]);
+
+                var event = {
+                    kind: 30023,
+                    content: description || title,
+                    pubkey: userPubkey,
+                    created_at: Math.floor(Date.now() / 1000),
+                    tags: tags
+                };
+
+                isProcessing = true;
+                pendingPoll = true;
+                document.getElementById("publishPollBtn").disabled = true;
+                document.getElementById("publishPollBtn").textContent = "Signing...";
+                sendEventToTauri(event);
+            }
+
+            function uuidv4() {
+                return "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".replace(/x/g, function () {
+                    return Math.floor(Math.random() * 16).toString(16);
                 });
             }
 

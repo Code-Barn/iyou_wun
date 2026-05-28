@@ -9,6 +9,7 @@ from django.urls import reverse
 from ..did_kit import (
     build_unsigned_vc,
     get_public_key_hex,
+    issue_vc,
     load_signing_key,
     sign_vc,
     verify_vc_signature,
@@ -283,3 +284,16 @@ class IssueCredentialAPITest(TestCase):
         from ..models import IssuedCredential
 
         self.assertEqual(IssuedCredential.objects.count(), 1)
+
+    def test_issue_vc_convenience_function(self):
+        signed = issue_vc(
+            voter_did="did:key:z6Mkconvenience",
+            credential_type="voter_credential",
+            fidelity_score=50,
+        )
+        self.assertIn("proof", signed)
+        self.assertEqual(signed["issuer"], "did:key:z6Mktest")
+        self.assertEqual(signed["credentialSubject"]["id"], "did:key:z6Mkconvenience")
+        self.assertEqual(signed["credentialSubject"]["fidelity_score"], 50)
+        self.assertRegex(signed["proof"]["proofValue"], r"^[0-9a-f]+$")
+        self.assertTrue(verify_vc_signature(signed, EPHEM_PUB_HEX))

@@ -15,4 +15,12 @@
 
 from django.contrib import admin
 
-# Register your models here.
+from .models import IssuedCredential
+
+
+@admin.register(IssuedCredential)
+class IssuedCredentialAdmin(admin.ModelAdmin):
+    list_display = ("vc_id", "subject_did", "credential_type", "issued_at")
+    list_filter = ("credential_type", "issued_at")
+    search_fields = ("subject_did", "vc_id")
+    readonly_fields = ("subject_did", "credential_type", "vc_id", "issued_at")
