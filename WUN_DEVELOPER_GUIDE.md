@@ -187,23 +187,56 @@ The Tauri signing bridge at `ws://127.0.0.1:9001` is a WebSocket endpoint provid
 
 | Type (client → bridge)   | Type (bridge → client)    | Purpose                                  |
 |--------------------------|---------------------------|------------------------------------------|
+| `get_profile`            | `profile_sync`            | Sovereign state handshake (see below)    |
 | `sign_event`             | `signed_event`            | Sign a Nostr event (any kind)            |
 | `sign`                   | `signed_message`          | Sign an arbitrary string                 |
 | `sign_credential`        | `signed_credential`       | Sign a Verifiable Credential (VC)        |
 
 The server can also **issue** VCs directly (see [Credential Issuance API](#credential-issuance-api)).
 
+### Sovereign State Handshake
+
+Upon WebSocket connection (`socket.onopen`), the client must immediately emit a profile sync request:
+
+```json
+{"type": "get_profile"}
+```
+
+The bridge responds with:
+
+```json
+{"type": "profile_sync", "profile": {"nostr_pubkey_hex": "<64-char-hex>", ...}}
+```
+
+The message loop dispatches this via the `profile_sync` handler, populating `window.activeProfile` with the live vault profile. This makes `nostr_pubkey_hex` available to `getEffectivePubkey()` before any signing request is issued.
+
+### Identity Resolution Guard: `getEffectivePubkey()`
+
+All event-emitting functions (`postToNostr`, `handleMediaSelected`, `castPollVote`, `createPoll`) resolve the event's `pubkey` field through this centralized async helper:
+
+1. **Priority 1** — `window.activeProfile?.nostr_pubkey_hex` (from the Tauri bridge handshake)
+2. **Priority 2** — `userPubkey` (legacy Django template variable)
+
+If neither is a valid 64-character hex string (`/^[a-fA-F0-9]{64}$/`), the helper throws:
+
+> `"Identity Synchronization Required: No valid secp256k1 pubkey found"`
+
+An additional runtime guard in `sendEventToTauri()` logs `SENDING_EVENT_WITH_PUBKEY` with the key and length, and **aborts** the WebSocket send if the pubkey is not exactly 64 characters. This ensures no malformed payload ever reaches the Rust bridge.
+
 ### sign_event Flow
 
-1. Browser sends `{"type": "sign_event", "event": {kind, content, pubkey, created_at, tags}}`
-2. Tauri bridge signs with the local key, returns `{"type": "signed_event", "event": {id, sig, ...}}`
-3. Browser copies `id` and `sig` into the pending event, then broadcasts to relays
+1. Client resolves a valid 64-char hex pubkey via `getEffectivePubkey()`
+2. Browser sends `{"type": "sign_event", "event": {kind, content, pubkey, created_at, tags}}`
+3. Tauri bridge signs with the local key, returns `{"type": "signed_event", "event": {id, sig, ...}}`
+4. Browser copies `id` and `sig` into the pending event, then broadcasts to relays
 
 ### Connection Management
 
-- The WebSocket is opened lazily on first post (`initTauriSocket()`)
-- A 5-second timeout abandons signing if the bridge is unreachable
-- The `isProcessing` flag prevents concurrent signing requests
+- A **mutex lock** (`window.feedConnectionLock`) prevents overlapping connection attempts: states are `"IDLE"` → `"CONNECTING"` → `"OPEN"`.
+- `window.activeFeedSocket` is the singleton WebSocket reference; `readyState` is checked before any new connection is spawned.
+- Immediately after `onopen`, the client sends `{"type": "get_profile"}` to populate `window.activeProfile`.
+- A 5-second timeout abandons signing if the bridge is unreachable.
+- The `isProcessing` flag prevents concurrent signing requests.
 
 ### Events Signed by the Bridge
 

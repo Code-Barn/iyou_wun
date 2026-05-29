@@ -423,6 +423,18 @@
             const userNpub = "{{ user_npub }}";
             const userDid = "{{ user_did }}";
 
+            // Resolve the effective secp256k1 pubkey: Tauri bridge profile > legacy template var
+            async function getEffectivePubkey() {
+                var bridgePk = window.activeProfile ? window.activeProfile.nostr_pubkey_hex : null;
+                var templatePk = typeof userPubkey !== "undefined" ? userPubkey : null;
+                var pk = (bridgePk && bridgePk.length === 64) ? bridgePk : templatePk;
+                if (!pk || pk.length !== 64 || !/^[a-fA-F0-9]{64}$/.test(pk)) {
+                    console.error("CRITICAL: Invalid Pubkey Resolution:", { bridgePk: bridgePk, templatePk: templatePk });
+                    throw new Error("Identity Synchronization Required: No valid secp256k1 pubkey found");
+                }
+                return pk;
+            }
+
             // State
             let pendingEvent = null;
             let pendingVote = null;
@@ -447,6 +459,8 @@
                     socket.onopen = function () {
                         window.feedConnectionLock = "OPEN";
                         console.log("Connected to Tauri signing bridge at", TAURI_SIGNING_BRIDGE);
+                        socket.send(JSON.stringify({ type: "get_profile" }));
+                        console.log("WS: Sent profile sync request to bridge.");
                     };
                     socket.onmessage = function (event) {
                         handleTauriMessage(event.data);
@@ -468,30 +482,22 @@
                 }
             }
 
-            // Utility: convert a Base64 string to lowercase hex (binary-safe via padStart)
-            function standardBase64ToHex(base64Str) {
-                var rawBinary = window.atob(base64Str);
-                var hexResult = "";
-                for (var i = 0; i < rawBinary.length; i++) {
-                    var hexByte = rawBinary.charCodeAt(i).toString(16).padStart(2, "0");
-                    hexResult += hexByte;
-                }
-                return hexResult;
-            }
-
             // Handle messages from Tauri bridge
             function handleTauriMessage(data) {
                 try {
                     var message = JSON.parse(data);
 
+                    if (message.type === "profile_sync") {
+                        window.activeProfile = message.profile;
+                        console.log("BRIDGE_SYNC_SUCCESS: Profile updated", window.activeProfile);
+                        return;
+                    }
+
                     if (message.type === "signed_event" && pendingEvent) {
                         var signedEvent = message.event;
                         console.log("Received signed event from Tauri:", signedEvent);
 
-                        // Tauri enclave always outputs Base64 — convert unconditionally to hex
-                        if (signedEvent.sig) signedEvent.sig = standardBase64ToHex(signedEvent.sig);
-                        if (signedEvent.id) signedEvent.id = standardBase64ToHex(signedEvent.id);
-
+                        // Pass the pristine enclave structure through unaltered
                         pendingEvent.id = signedEvent.id;
                         pendingEvent.sig = signedEvent.sig;
 
@@ -551,22 +557,21 @@
             }
 
             // Post a text note (Kind 1) via Tauri signing
-            function postToNostr() {
+            async function postToNostr() {
                 const content = document.getElementById("postContent").value.trim();
                 if (!content) {
                     showToast("Please enter some content to post.", true);
                     return;
                 }
-                if (!userPubkey) {
-                    showToast("User public key not available. Please refresh the page.", true);
-                    return;
-                }
+                var pk;
+                try { pk = await getEffectivePubkey(); }
+                catch (e) { showToast(e.message, true); return; }
                 setButtonLoading(true);
                 isProcessing = true;
                 const event = {
                     kind: 1,
                     content: content,
-                    pubkey: userPubkey,
+                    pubkey: pk,
                     created_at: Math.floor(Date.now() / 1000),
                     tags: [],
                 };
@@ -575,6 +580,14 @@
 
             // Generic signature pipe — sends any Nostr event kind to Tauri for signing
             function sendEventToTauri(event) {
+                var pk = event.pubkey;
+                console.log("SENDING_EVENT_WITH_PUBKEY:", pk, "LENGTH:", pk ? pk.length : 0);
+                if (!pk || pk.length !== 64) {
+                    console.error("CRITICAL: Pubkey length mismatch — aborting bridge call. Expected 64, got " + (pk ? pk.length : 0));
+                    showToast("Pubkey validation failed. Cannot sign event.", true);
+                    resetPostState();
+                    return;
+                }
                 pendingEvent = event;
                 if (!window.activeFeedSocket || window.activeFeedSocket.readyState !== WebSocket.OPEN) {
                     connectToSigningBridge();
@@ -627,11 +640,14 @@
                     });
                     if (response.status === 201) {
                         setUploadStatus("Requesting signature...");
+                        var pk;
+                        try { pk = await getEffectivePubkey(); }
+                        catch (e) { setUploadStatus(e.message); setTimeout(function () { document.getElementById("uploadStatus").classList.add("hidden"); }, 3000); return; }
                         isProcessing = true;
                         const event = {
                             kind: 1063,
                             content: "",
-                            pubkey: userPubkey,
+                            pubkey: pk,
                             created_at: Math.floor(Date.now() / 1000),
                             tags: [
                                 ["url", "http://127.0.0.1:9002/" + hash],
@@ -1037,7 +1053,7 @@
             });
 
             // Poll governance — cast a vote via Tauri bridge signing
-            function castPollVote(pollId, selectOptionIndex) {
+            async function castPollVote(pollId, selectOptionIndex) {
                 var card = document.querySelector('[data-poll-id="' + pollId + '"]');
                 if (!card) return;
                 var options = card.querySelectorAll("input[name='selection']");
@@ -1045,10 +1061,9 @@
                 var selectedInput = options[selectOptionIndex];
                 if (!selectedInput) return;
                 var selectedValue = selectedInput.value;
-                if (!userPubkey) {
-                    showToast("Authentication required. Please sign in.", true);
-                    return;
-                }
+                var pk;
+                try { pk = await getEffectivePubkey(); }
+                catch (e) { showToast(e.message, true); return; }
 
                 var pubkey = card.getAttribute("data-poll-pubkey") || "";
                 var dtag = card.getAttribute("data-poll-dtag") || "";
@@ -1072,7 +1087,7 @@
                 var event = {
                     kind: 1112,
                     content: JSON.stringify(voteEnvelope),
-                    pubkey: userPubkey,
+                    pubkey: pk,
                     created_at: timestamp,
                     tags: tags
                 };
@@ -1128,11 +1143,10 @@
                 }
             }
 
-            function createPoll() {
-                if (!userPubkey) {
-                    showToast("Authentication required. Please sign in.", true);
-                    return;
-                }
+            async function createPoll() {
+                var pk;
+                try { pk = await getEffectivePubkey(); }
+                catch (e) { showToast(e.message, true); return; }
                 var title = document.getElementById("pollTitle").value.trim();
                 var description = document.getElementById("pollDescription").value.trim();
                 var scope = document.getElementById("pollScope").value;
@@ -1163,7 +1177,7 @@
                 var event = {
                     kind: 30023,
                     content: description || title,
-                    pubkey: userPubkey,
+                    pubkey: pk,
                     created_at: Math.floor(Date.now() / 1000),
                     tags: tags
                 };
