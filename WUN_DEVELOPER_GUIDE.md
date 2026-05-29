@@ -676,6 +676,19 @@ SESSION_COOKIE_NAME = 'wun_sessionid'
 CSRF_COOKIE_NAME = 'wun_csrftoken'
 ```
 
+### Ed25519 signature validation failure on poly ingest
+
+Poll creation (Kind 30023) gets a 400 from `POST /api/nostr/ingest/` with `InvalidSignature` even though frontend hex conversion is correct.
+
+**Symptoms:**
+- Browser logs show valid 64-char `id` and 128-char `sig` hex strings in the POST body
+- iyou_poly logs `[ED25519_DIAG]` with correct-length hex for event_id, pubkey, and sig
+- Ed25519 `verify()` still raises `InvalidSignature`
+
+**Current hypothesis (WIP):** The key material or signing scheme differs between iyou_home (Ed25519 vault key) and what iyou_poly expects. iyou_home signs with its vault Ed25519 key, but iyou_poly may be verifying against the user's Nostr pubkey (which is a secp256k1 key derived from the OIDC DID). These are different key types on different curves. The fix likely lives in:
+- `iyou_home`: whether it's signing with the correct user key vs its own vault key
+- `iyou_poly`: whether verification should use Ed25519 at all, or switch to secp256k1/NIP-26 delegation
+
 ---
 
 ## Known Issues
@@ -684,3 +697,4 @@ CSRF_COOKIE_NAME = 'wun_csrftoken'
 - `OIDC_USERNAME_ALGO` lambda and `MyOIDCAuthenticationBackend.create_user` both derive the username from `sub` — redundant but not harmful. Clean up by choosing one approach.
 - Tailwind CSS is loaded via CDN — consider a build step for production offline resilience.
 - Profile pages (`/profile/<npub>/`) are public but the feed/gallery links to them are only visible to authenticated users.
+- **Ed25519 signature mismatch** between iyou_home signing and iyou_poly verification — see Troubleshooting section above.

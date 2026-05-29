@@ -288,7 +288,7 @@
                     </div>
                     {% elif note.kind == 30023 %}
                     <!-- KIND 30023: Poll Definition -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="30023" data-poll-id="{{ note.id }}">
+                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="30023" data-poll-id="{{ note.id }}" data-poll-pubkey="{{ note.pubkey }}" data-poll-dtag="{{ note.poll_d_tag }}">
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
@@ -424,70 +424,102 @@
             const userDid = "{{ user_did }}";
 
             // State
-            let tauriSocket = null;
             let pendingEvent = null;
             let pendingVote = null;
             let pendingPoll = false;
             let isProcessing = false;
 
-            // Initialize WebSocket connection to Tauri bridge
-            function initTauriSocket() {
-                if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) {
+            // Mutex-guarded singleton WebSocket connection to Tauri signing bridge
+            function connectToSigningBridge() {
+                if (window.feedConnectionLock === "CONNECTING" || window.feedConnectionLock === "OPEN") {
+                    console.log("Guard: Feed bridge connection loop is busy. Suppressing duplicate.");
                     return;
                 }
-
+                if (window.activeFeedSocket && window.activeFeedSocket.readyState <= 1) {
+                    console.log("Guard: Active feed socket reference already open. Aborting.");
+                    return;
+                }
+                window.feedConnectionLock = "CONNECTING";
+                console.log("WS: Feed connection lock claimed. Spawning socket...");
                 try {
-                    tauriSocket = new WebSocket(TAURI_SIGNING_BRIDGE);
-
-                    tauriSocket.onopen = function () {
-                        console.log(
-                            "Connected to Tauri signing bridge at",
-                            TAURI_SIGNING_BRIDGE,
-                        );
+                    var socket = new WebSocket(TAURI_SIGNING_BRIDGE);
+                    window.activeFeedSocket = socket;
+                    socket.onopen = function () {
+                        window.feedConnectionLock = "OPEN";
+                        console.log("Connected to Tauri signing bridge at", TAURI_SIGNING_BRIDGE);
                     };
-
-                    tauriSocket.onmessage = function (event) {
+                    socket.onmessage = function (event) {
                         handleTauriMessage(event.data);
                     };
-
-                    tauriSocket.onerror = function (error) {
-                        console.error("Tauri bridge connection error:", error);
-                        showToast(
-                            "Error connecting to Tauri bridge. Please ensure iYou Home is running.",
-                            true,
-                        );
+                    socket.onerror = function (err) {
+                        window.activeFeedSocket = null;
+                        window.feedConnectionLock = "IDLE";
+                        console.error("Tauri bridge connection error:", err);
+                        showToast("Error connecting to Tauri bridge. Please ensure iYou Home is running.", true);
                     };
-
-                    tauriSocket.onclose = function () {
-                        console.log(
-                            "Tauri bridge connection closed. Will retry on next post.",
-                        );
+                    socket.onclose = function (e) {
+                        console.log("WS: Feed socket dropped. Code:", e ? e.code : "unknown");
+                        window.activeFeedSocket = null;
+                        window.feedConnectionLock = "IDLE";
                     };
                 } catch (err) {
-                    console.error("Failed to create WebSocket:", err);
+                    window.feedConnectionLock = "IDLE";
+                    console.error("Critical error building feed socket:", err);
                 }
+            }
+
+            // Utility: convert a Base64 string to lowercase hex (binary-safe via padStart)
+            function standardBase64ToHex(base64Str) {
+                var rawBinary = window.atob(base64Str);
+                var hexResult = "";
+                for (var i = 0; i < rawBinary.length; i++) {
+                    var hexByte = rawBinary.charCodeAt(i).toString(16).padStart(2, "0");
+                    hexResult += hexByte;
+                }
+                return hexResult;
             }
 
             // Handle messages from Tauri bridge
             function handleTauriMessage(data) {
                 try {
-                    const message = JSON.parse(data);
+                    var message = JSON.parse(data);
 
                     if (message.type === "signed_event" && pendingEvent) {
-                        // Received signed event back from Tauri
-                        const signedEvent = message.event;
-                        console.log(
-                            "Received signed event from Tauri:",
-                            signedEvent,
-                        );
+                        var signedEvent = message.event;
+                        console.log("Received signed event from Tauri:", signedEvent);
 
-                        // Add the signature and id to our pending event
+                        // Tauri enclave always outputs Base64 — convert unconditionally to hex
+                        if (signedEvent.sig) signedEvent.sig = standardBase64ToHex(signedEvent.sig);
+                        if (signedEvent.id) signedEvent.id = standardBase64ToHex(signedEvent.id);
+
                         pendingEvent.id = signedEvent.id;
                         pendingEvent.sig = signedEvent.sig;
 
                         if (pendingVote) {
-                            // Vote flow: submit signed envelope to Poly engine
-                            submitSignedVote(signedEvent, pendingVote);
+                            // Vote flow: direct-ingest the signed envelope to Poly engine
+                            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(signedEvent)
+                            })
+                            .then(function (r) {
+                                if (r.ok) {
+                                    var btn = pendingVote.btn;
+                                    btn.textContent = "Vote Cast";
+                                    btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
+                                    btn.classList.add("bg-green-500", "cursor-default");
+                                    pendingVote.form.querySelectorAll("input").forEach(function (i) { i.disabled = true; });
+                                } else {
+                                    var btn = pendingVote.btn;
+                                    btn.textContent = "Error — try again";
+                                    btn.disabled = false;
+                                }
+                            })
+                            .catch(function () {
+                                var btn = pendingVote.btn;
+                                btn.textContent = "Network Error";
+                                btn.disabled = false;
+                            });
                             pendingVote = null;
                             pendingEvent = null;
                             isProcessing = false;
@@ -544,21 +576,21 @@
             // Generic signature pipe — sends any Nostr event kind to Tauri for signing
             function sendEventToTauri(event) {
                 pendingEvent = event;
-                if (!tauriSocket || tauriSocket.readyState !== WebSocket.OPEN) {
-                    initTauriSocket();
+                if (!window.activeFeedSocket || window.activeFeedSocket.readyState !== WebSocket.OPEN) {
+                    connectToSigningBridge();
                 }
-                const request = {
+                var request = {
                     type: "sign_event",
                     event: event,
                 };
-                const checkSocket = setInterval(() => {
-                    if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) {
+                var checkSocket = setInterval(function () {
+                    if (window.activeFeedSocket && window.activeFeedSocket.readyState === WebSocket.OPEN) {
                         clearInterval(checkSocket);
                         console.log("Sending event to Tauri for signing:", event);
-                        tauriSocket.send(JSON.stringify(request));
+                        window.activeFeedSocket.send(JSON.stringify(request));
                     }
                 }, 100);
-                setTimeout(() => {
+                setTimeout(function () {
                     if (isProcessing) {
                         clearInterval(checkSocket);
                         showToast("Timeout waiting for Tauri. Please try again.", true);
@@ -923,10 +955,63 @@
                         mediaHtml +
                         (note.content ? '<p class="text-gray-700 whitespace-pre-wrap mb-2">' + escapeHtml(note.content) + '</p>' : '') +
                         '</div></div>';
+                } else if (note.kind === 30023) {
+                    el.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
+                    el.setAttribute("data-kind", "30023");
+                    el.setAttribute("data-poll-id", note.id);
+                    el.setAttribute("data-poll-pubkey", note.pubkey || "");
+                    el.setAttribute("data-poll-dtag", note.poll_d_tag || "");
+                    var pollOptions = note.poll_options || [];
+                    var optionsHtml = "";
+                    if (userPubkey) {
+                        optionsHtml = '<form class="poll-vote-form" data-poll-id="' + escapeHtml(note.id) + '"><div class="space-y-2">';
+                        for (var oi = 0; oi < pollOptions.length; oi++) {
+                            optionsHtml += '<label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">' +
+                                '<input type="radio" name="selection" value="' + escapeHtml(pollOptions[oi]) + '" class="accent-amber-600">' +
+                                '<span class="text-sm text-gray-700">' + escapeHtml(pollOptions[oi]) + '</span></label>';
+                        }
+                        optionsHtml += '</div><button type="submit" class="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Cast Vote</button></form>';
+                    } else {
+                        optionsHtml = '<div class="space-y-2 opacity-60">';
+                        for (var oi = 0; oi < pollOptions.length; oi++) {
+                            optionsHtml += '<div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">' +
+                                '<span class="w-4 h-4 rounded-full border-2 border-gray-300 inline-block"></span>' +
+                                '<span class="text-sm text-gray-500">' + escapeHtml(pollOptions[oi]) + '</span></div>';
+                        }
+                        optionsHtml += '</div>';
+                    }
+                    el.innerHTML = '<div class="flex items-start gap-4">' +
+                        '<div class="flex-shrink-0">' +
+                        (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + (note.author_name || "") + '" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-amber-300" />' :
+                            '<div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-amber-300"><span class="text-amber-600 font-mono text-sm">P</span></div>') +
+                        '</div>' +
+                        '<div class="flex-1 min-w-0">' +
+                        '<div class="flex items-center gap-2 mb-2">' +
+                        '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + (note.author_name || npub) + '</a>' +
+                        '<span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Poll</span>' +
+                        '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
+                        '</div>' +
+                        '<p class="text-gray-900 font-medium mb-3">' + escapeHtml(note.content) + '</p>' +
+                        optionsHtml +
+                        '</div></div>';
                 }
 
                 if (el.innerHTML) {
                     container.appendChild(el);
+                    if (note.kind === 30023) {
+                        var newForm = el.querySelector(".poll-vote-form");
+                        if (newForm) {
+                            newForm.addEventListener("submit", function (ev) {
+                                ev.preventDefault();
+                                var pid = this.getAttribute("data-poll-id");
+                                var sel = this.querySelector("input[name='selection']:checked");
+                                if (!sel) return;
+                                var allInputs = this.querySelectorAll("input[name='selection']");
+                                var idx = Array.prototype.indexOf.call(allInputs, sel);
+                                castPollVote(pid, idx);
+                            });
+                        }
+                    }
                 }
             }
 
@@ -951,7 +1036,53 @@
                 document.querySelectorAll(".gear-dropdown").forEach(function (d) { d.classList.add("hidden"); });
             });
 
-            // Poll governance — vote submission via Tauri bridge signing
+            // Poll governance — cast a vote via Tauri bridge signing
+            function castPollVote(pollId, selectOptionIndex) {
+                var card = document.querySelector('[data-poll-id="' + pollId + '"]');
+                if (!card) return;
+                var options = card.querySelectorAll("input[name='selection']");
+                if (!options || selectOptionIndex < 0 || selectOptionIndex >= options.length) return;
+                var selectedInput = options[selectOptionIndex];
+                if (!selectedInput) return;
+                var selectedValue = selectedInput.value;
+                if (!userPubkey) {
+                    showToast("Authentication required. Please sign in.", true);
+                    return;
+                }
+
+                var pubkey = card.getAttribute("data-poll-pubkey") || "";
+                var dtag = card.getAttribute("data-poll-dtag") || "";
+                var form = card.querySelector(".poll-vote-form");
+                var btn = form ? form.querySelector("button[type='submit']") : null;
+                var timestamp = Math.floor(Date.now() / 1000);
+                var voteEnvelope = {
+                    poll_id: pollId,
+                    selection: selectedValue,
+                    timestamp: timestamp
+                };
+
+                var tags = [];
+                if (pubkey && dtag) {
+                    tags.push(["a", "30023:" + pubkey + ":" + dtag]);
+                } else {
+                    tags.push(["e", pollId]);
+                }
+                tags.push(["vote", selectedValue]);
+
+                var event = {
+                    kind: 1112,
+                    content: JSON.stringify(voteEnvelope),
+                    pubkey: userPubkey,
+                    created_at: timestamp,
+                    tags: tags
+                };
+
+                if (btn) { btn.disabled = true; btn.textContent = "Signing..."; }
+                pendingVote = { pollId: pollId, selection: selectedValue, timestamp: timestamp, form: form, btn: btn };
+                sendEventToTauri(event);
+            }
+
+            // Hook up poll forms to use castPollVote
             document.addEventListener("DOMContentLoaded", function () {
                 document.querySelectorAll(".poll-vote-form").forEach(function (form) {
                     form.addEventListener("submit", function (e) {
@@ -959,71 +1090,12 @@
                         var pollId = form.getAttribute("data-poll-id");
                         var selected = form.querySelector("input[name='selection']:checked");
                         if (!selected) return;
-                        if (!userPubkey || !userDid) {
-                            showToast("Authentication required. Please sign in.", true);
-                            return;
-                        }
-
-                        var btn = form.querySelector("button[type='submit']");
-                        var timestamp = Math.floor(Date.now() / 1000);
-                        var voteEnvelope = {
-                            poll_id: pollId,
-                            selection: selected.value,
-                            timestamp: timestamp
-                        };
-
-                        // Build Kind 1112 Nostr event for Tauri signing
-                        var event = {
-                            kind: 1112,
-                            content: JSON.stringify(voteEnvelope),
-                            pubkey: userPubkey,
-                            created_at: timestamp,
-                            tags: [["e", pollId]]
-                        };
-
-                        btn.disabled = true;
-                        btn.textContent = "Signing...";
-
-                        pendingVote = { pollId: pollId, selection: selected.value, timestamp: timestamp, form: form, btn: btn };
-                        sendEventToTauri(event);
+                        var allInputs = form.querySelectorAll("input[name='selection']");
+                        var index = Array.prototype.indexOf.call(allInputs, selected);
+                        castPollVote(pollId, index);
                     });
                 });
             });
-
-            // Submit a signed vote envelope to the Poly engine
-            function submitSignedVote(signedEvent, voteMeta) {
-                var voteEnvelope = JSON.parse(signedEvent.content);
-                var proxyPackage = {
-                    voter_did: userDid,
-                    signature: signedEvent.sig,
-                    vote_envelope: voteEnvelope
-                };
-
-                fetch("/api/vote", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json", "X-CSRFToken": getCookie("wun_csrftoken") },
-                    body: JSON.stringify(proxyPackage)
-                })
-                .then(function (r) { return r.json(); })
-                .then(function (data) {
-                    var btn = voteMeta.btn;
-                    var form = voteMeta.form;
-                    if (data.valid) {
-                        btn.textContent = data.duplicate ? "Already Cast" : "Vote Cast";
-                        btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
-                        btn.classList.add("bg-green-500", "cursor-default");
-                        form.querySelectorAll("input").forEach(function (i) { i.disabled = true; });
-                    } else {
-                        btn.textContent = "Error — " + (data.error || "try again");
-                        btn.disabled = false;
-                    }
-                })
-                .catch(function () {
-                    var btn = voteMeta.btn;
-                    btn.textContent = "Network Error";
-                    btn.disabled = false;
-                });
-            }
 
             // --- Poll Creation ---
             function openPollModal() {
@@ -1116,7 +1188,7 @@
 
             // Initialize on page load
             document.addEventListener("DOMContentLoaded", function () {
-                initTauriSocket();
+                connectToSigningBridge();
                 loadRelaysFromStorage();
             });
         </script>

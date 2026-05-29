@@ -507,6 +507,7 @@ def process_into_feed(raw_events, profiles=None, max_items=50):
                 tag[1] for tag in base["tags"]
                 if tag and tag[0] == "option" and len(tag) > 1
             ]
+            base["poll_d_tag"] = get_tag_value(base["tags"], "d")
             base["poll_scope_geohash"] = get_tag_value(base["tags"], "geohash")
             base["poll_scope_org"] = get_tag_value(base["tags"], "org")
             base["poll_closes_at"] = get_tag_value(base["tags"], "expires")
