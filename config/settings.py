@@ -103,6 +103,7 @@ LOGGING = {
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -175,6 +176,20 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Production static-file compression / fingerprinting via WhiteNoise
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": (
+            "whitenoise.storage.CompressedManifestStaticFilesStorage"
+            if not DEBUG
+            else "django.contrib.staticfiles.storage.StaticFilesStorage"
+        ),
+    },
+}
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
@@ -238,7 +253,7 @@ OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET")
 # Redirects
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
-LOGIN_URL = "http://127.0.0.1:8000/openid/authorize/"
+LOGIN_URL = env.str("OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://idp.iyou.me/openid/authorize/")
 
 # This ensures the 'sub' (the DID) from the IdP is used as the local username
 OIDC_USERNAME_ALGO = lambda claims: claims.get("sub")

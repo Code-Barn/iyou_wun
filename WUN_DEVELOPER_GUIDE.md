@@ -30,6 +30,7 @@ The project is in active development. The root URL (`/`) immediately redirects t
 | **Poly engine**     | **Headless calculation engine (POLY_ENGINE_URL env var)** |
 | DID conversion      | bech32 library                       |
 | VC signing          | cryptography 44+ (Ed25519)           |
+| Static file serving | WhiteNoise 6.12+ (CompressedManifestStaticFilesStorage in production) |
 | Package manager     | uv                                   |
 | Container runtime   | Docker (multi-stage, python:3.12-slim) |
 
@@ -63,7 +64,7 @@ uv run python manage.py runserver 8001
 ### Production (Docker)
 
 ```bash
-# Build the production image (multi-stage, uv-compiled)
+# Build the production image (multi-stage, uv-compiled, collectstatic runs at build time)
 docker build -t iyou-wun:latest .
 
 # Run with required env vars
@@ -112,6 +113,7 @@ The following variables connect to the iyou_idp. Fallback defaults target the cl
 | `OIDC_RP_CLIENT_ID`                 | *(required — no default)*       | Client ID registered with the IdP                |
 | `OIDC_RP_CLIENT_SECRET`             | *(required — no default)*       | Client secret registered with the IdP            |
 | `OIDC_RP_CALLBACK_URL`              | `http://127.0.0.1:8001/oidc/callback/` | OIDC callback URL                          |
+| `OIDC_OP_AUTHORIZATION_ENDPOINT`    | —                                      | Also controls `LOGIN_URL` (Django redirect for unauthenticated users) |
 
 Current iyou_idp development values (localhost):
 

@@ -140,7 +140,10 @@ class OIDCBackendEnforcementTest(TestCase):
         )
 
     def test_login_url_points_to_idp(self):
-        self.assertEqual(settings.LOGIN_URL, "http://127.0.0.1:8000/openid/authorize/")
+        self.assertEqual(
+            settings.LOGIN_URL,
+            settings.OIDC_OP_AUTHORIZATION_ENDPOINT,
+        )
 
     def test_oidc_backend_creates_user_with_unusable_password(self):
         backend = MyOIDCAuthenticationBackend()
