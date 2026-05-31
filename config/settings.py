@@ -215,7 +215,7 @@ OIDC_RP_SIGN_ALGO = "RS256"
 # OIDC endpoints — default fallbacks target cluster-internal DNS routing
 # Authorization endpoint is browser-facing; token/userinfo/jwks use back-channel
 OIDC_OP_AUTHORIZATION_ENDPOINT = env.str(
-    "OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://idp.iyou.me/openid/authorize/"
+    "OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://iyou.me/openid/authorize/"
 )
 OIDC_OP_TOKEN_ENDPOINT = env.str(
     "OIDC_OP_TOKEN_ENDPOINT",
@@ -246,14 +246,14 @@ OIDC_RP_CALLBACK_URL = env.str(
 OIDC_RP_REQUIRED_CLAIMS = []
 OIDC_VERIFY_KID = False
 
-# Client credentials — must be set via env, no defaults
-OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID")
+# Client credentials — must be set via env, with production-seeded default
+OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID", default="wun-satellite-client")
 OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET")
 
 # Redirects
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
-LOGIN_URL = env.str("OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://idp.iyou.me/openid/authorize/")
+LOGIN_URL = env.str("OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://iyou.me/openid/authorize/")
 
 # This ensures the 'sub' (the DID) from the IdP is used as the local username
 OIDC_USERNAME_ALGO = lambda claims: claims.get("sub")
