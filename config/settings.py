@@ -124,6 +124,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "apps.core.context_processors.satellite_urls",
             ],
         },
     },
@@ -255,9 +256,6 @@ LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
 LOGIN_URL = env.str("OIDC_OP_AUTHORIZATION_ENDPOINT", default="https://iyou.me/openid/authorize/")
 
-# This ensures the 'sub' (the DID) from the IdP is used as the local username
-OIDC_USERNAME_ALGO = lambda claims: claims.get("sub")
-
 # Required for collectstatic in production
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
@@ -267,3 +265,11 @@ POLY_ENGINE_URL = env.str("POLY_ENGINE_URL", default="http://127.0.0.1:8000")
 # Credential Issuance — Node DID & Signing Key
 NODE_DID = env.str("NODE_DID", default="did:key:z6Mkdevlocal00000000000000000000000000000000")
 NODE_PRIVATE_KEY_HEX = env.str("NODE_PRIVATE_KEY_HEX", default="")
+
+# iyou_home Satellite Service URLs (injected into all template contexts)
+IDP_HOME_URL = env.str("IDP_HOME_URL", default="https://home.iyou.me/")
+IDP_HOME_WS_URL = env.str("IDP_HOME_WS_URL", default="wss://home.iyou.me:9001/")
+
+# XMPP Chat Server
+XMPP_DOMAIN = env.str("XMPP_DOMAIN", default="127.0.0.1")
+XMPP_WS_URL = env.str("XMPP_WS_URL", default="ws://127.0.0.1:5222")

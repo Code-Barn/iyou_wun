@@ -404,7 +404,7 @@
         <!-- WebSocket Bridge Script -->
         <script>
             // Configuration
-            const TAURI_SIGNING_BRIDGE = "ws://127.0.0.1:9001";
+            const TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url }}";
             const DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
             let NOSTR_RELAYS = DEFAULT_RELAYS;
 

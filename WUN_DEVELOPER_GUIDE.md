@@ -99,6 +99,10 @@ The `config/settings.py` reads operational parameters from `WUN_`-prefixed env v
 | `POLY_ENGINE_URL`                 | `http://127.0.0.1:8000`         | Headless calculation engine (Poly governance voting) |
 | `NODE_DID`                        | `did:key:z6Mkdevlocal...`       | Node's own DID (used as VC issuer) |
 | `NODE_PRIVATE_KEY_HEX`            | *(derived from WUN_SECRET_KEY)*  | Ed25519 private key hex (32 bytes → 64 chars). If set, takes absolute precedence over WUN_SECRET_KEY derivation. |
+| `IDP_HOME_URL`                    | `https://home.iyou.me/`         | iyou_home HTTP endpoint (mesh badge health check) |
+| `IDP_HOME_WS_URL`                 | `wss://home.iyou.me:9001/`      | iyou_home Tauri signing bridge WebSocket |
+| `XMPP_DOMAIN`                     | `127.0.0.1`                    | XMPP chat server domain for JID construction |
+| `XMPP_WS_URL`                     | `ws://127.0.0.1:5222`          | XMPP WebSocket endpoint (Converse.js) |
 
 ### OIDC Endpoints
 
@@ -729,7 +733,6 @@ Poll creation (Kind 30023) gets a 400 from `POST /api/nostr/ingest/` with `Inval
 ## Known Issues
 
 - `.env` was previously committed to git — now removed from tracking and gitignored. **DO NOT re-commit it.**
-- `OIDC_USERNAME_ALGO` lambda and `MyOIDCAuthenticationBackend.create_user` both derive the username from `sub` — redundant but not harmful. Clean up by choosing one approach.
 - Tailwind CSS is loaded via CDN — consider a build step for production offline resilience.
 - Profile pages (`/profile/<npub>/`) are public but the feed/gallery links to them are only visible to authenticated users.
 - **Ed25519 signature mismatch** between iyou_home signing and iyou_poly verification — see Troubleshooting section above.

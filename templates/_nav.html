@@ -64,7 +64,7 @@
     document.addEventListener("DOMContentLoaded", function () {
         var badge = document.getElementById("meshBadge");
         if (!badge) return;
-        fetch("http://127.0.0.1:9001/", { signal: AbortSignal.timeout(300) })
+        fetch("{{ idp_home_url }}", { signal: AbortSignal.timeout(300) })
             .then(function (r) {
                 if (r.ok) badge.classList.remove("hidden");
             })

@@ -14,11 +14,11 @@
     <div id="conversejs"></div>
     <script src="https://cdn.conversejs.org/dist/converse.min.js"></script>
     <script>
-        var userJid = "{{ user_pubkey }}@127.0.0.1";
+        var userJid = "{{ user_pubkey }}@{{ xmpp_domain }}";
         var userPassword = "{{ user_pubkey }}";
 
         converse.initialize({
-            websocket_url: 'ws://127.0.0.1:5222',
+            websocket_url: '{{ xmpp_ws_url }}',
             jid: userJid,
             password: userPassword,
             view_mode: 'fullscreen',
