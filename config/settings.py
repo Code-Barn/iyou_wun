@@ -277,6 +277,7 @@ IDP_HOME_WS_URL = env.str("IDP_HOME_WS_URL", default="wss://home.iyou.me:9001/")
 # XMPP Chat Server — defaults used by context processor; overridden per-level in ChatView
 XMPP_DOMAIN = env.str("XMPP_DOMAIN", default="127.0.0.1")
 XMPP_WS_URL = env.str("XMPP_WS_URL", default="ws://127.0.0.1:5222")
+XMPP_PASSWORD = env.str("XMPP_PASSWORD", default="")
 
 # User infrastructure level: "1" = Managed (cluster), "2" = Sovereign (local enclave)
 WUN_USER_LEVEL = env.str("WUN_USER_LEVEL", default="2")

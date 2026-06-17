@@ -130,6 +130,8 @@ class ChatView(LoginRequiredMixin, TemplateView):
         else:
             context["xmpp_domain"] = "127.0.0.1"
             context["xmpp_ws_url"] = "wss://home.iyou.me:5222/xmpp-websocket"
+
+        context["xmpp_password"] = settings.XMPP_PASSWORD or user_pubkey
         return context
 
 

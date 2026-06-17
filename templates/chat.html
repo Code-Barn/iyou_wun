@@ -14,14 +14,12 @@
     <div id="conversejs"></div>
     <script src="https://cdn.conversejs.org/dist/converse.min.js"></script>
     <script>
-        var userJid = "{{ user_did }}@{{ xmpp_domain }}";
-        var userPassword = "{{ user_pubkey }}";
-
         converse.initialize({
             bosh_service_url: undefined,
             websocket_url: '{{ xmpp_ws_url }}',
-            jid: userJid,
-            password: userPassword,
+            jid: '{{ user_did }}@{{ xmpp_domain }}',
+            password: '{{ xmpp_password }}',
+            authentication: 'login',
             view_mode: 'fullscreen',
             auto_login: true,
             allow_registration: false,
