@@ -251,6 +251,10 @@ OIDC_VERIFY_KID = False
 OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID", default="wun-satellite-client")
 OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET")
 
+# Local dev OIDC redirect endpoints (front-channel, loopback-bound)
+OIDC_WUN_REDIRECT_URI = env.str("OIDC_WUN_REDIRECT_URI", default="http://127.0.0.1:8001/oauth/callback/")
+OIDC_WUN_LOGOUT_URI = env.str("OIDC_WUN_LOGOUT_URI", default="http://127.0.0.1:8001/accounts/logout/")
+
 # Redirects
 LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/"
