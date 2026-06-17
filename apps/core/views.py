@@ -121,6 +121,15 @@ class ChatView(LoginRequiredMixin, TemplateView):
         user_pubkey = did_to_pubkey(self.request.user.username)
         context["user_pubkey"] = user_pubkey
         context["user_did"] = self.request.user.username
+
+        level = settings.WUN_USER_LEVEL
+        context["user_level"] = level
+        if level == "1":
+            context["xmpp_domain"] = "iyou.me"
+            context["xmpp_ws_url"] = "wss://xmpp.iyou.me:5222/xmpp-websocket"
+        else:
+            context["xmpp_domain"] = "127.0.0.1"
+            context["xmpp_ws_url"] = "wss://home.iyou.me:5222/xmpp-websocket"
         return context
 
 

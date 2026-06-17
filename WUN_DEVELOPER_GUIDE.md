@@ -103,6 +103,7 @@ The `config/settings.py` reads operational parameters from `WUN_`-prefixed env v
 | `IDP_HOME_WS_URL`                 | `wss://home.iyou.me:9001/`      | iyou_home Tauri signing bridge WebSocket |
 | `XMPP_DOMAIN`                     | `127.0.0.1`                    | XMPP chat server domain for JID construction |
 | `XMPP_WS_URL`                     | `ws://127.0.0.1:5222`          | XMPP WebSocket endpoint (Converse.js) |
+| `WUN_USER_LEVEL`                  | `2`                            | User infrastructure level: `1` = Managed (cluster), `2` = Sovereign (local enclave) |
 
 ### OIDC Endpoints
 
@@ -529,12 +530,19 @@ Authenticated users can publish a Kind 0 profile event from the Dashboard:
 
 **File:** `templates/chat.html`
 
-A minimal sovereign chat interface using [Converse.js](https://conversejs.org/) loaded via CDN:
-- **WebSocket endpoint**: `ws://127.0.0.1:5222`
-- **JID format**: `{nostr_hex_pubkey}@127.0.0.1`
-- **Password**: `{nostr_hex_pubkey}` (same as JID user part)
+A minimal sovereign chat interface using [Converse.js](https://conversejs.org/) loaded via CDN.
+The XMPP endpoint is selected dynamically based on `WUN_USER_LEVEL`:
+
+| Level | Mode | XMPP Domain | WebSocket Endpoint |
+|---|---|---|---|
+| `1` | Managed (cluster) | `iyou.me` | `wss://xmpp.iyou.me:5222/xmpp-websocket` |
+| `2` | Sovereign (local enclave) | `127.0.0.1` | `wss://home.iyou.me:5222/xmpp-websocket` |
+
+- **JID format**: `{user_did}@{domain}` (user's Decentralized Identifier as local part)
+- **Password**: `{nostr_hex_pubkey}` (derived from the DID)
 - **Fullscreen mode**: Converse.js fills the viewport below the nav bar
 - **Auto-login**: Connects on page load using the derived credentials
+- **Discovery disabled**: `discoverConnectionMethods: false` eliminates host-meta loops
 
 All messages remain local to the :5222 XMPP server and are NEVER stored in the WUN database.
 

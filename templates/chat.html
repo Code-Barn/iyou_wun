@@ -14,7 +14,7 @@
     <div id="conversejs"></div>
     <script src="https://cdn.conversejs.org/dist/converse.min.js"></script>
     <script>
-        var userJid = "{{ user_pubkey }}@{{ xmpp_domain }}";
+        var userJid = "{{ user_did }}@{{ xmpp_domain }}";
         var userPassword = "{{ user_pubkey }}";
 
         converse.initialize({
@@ -24,6 +24,7 @@
             view_mode: 'fullscreen',
             auto_login: true,
             allow_registration: false,
+            discoverConnectionMethods: false,
             theme: 'light',
             show_controlbox_by_default: true,
             hide_muc_panel: true,

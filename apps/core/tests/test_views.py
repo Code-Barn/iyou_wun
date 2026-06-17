@@ -106,7 +106,7 @@ class ChatViewTest(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("chat"))
         self.assertContains(response, "converse.initialize")
-        self.assertContains(response, "127.0.0.1:5222")
+        self.assertContains(response, "home.iyou.me:5222")
 
     def test_chat_shows_nav(self):
         user = User.objects.create_user(username="did:key:z6Mknav")
