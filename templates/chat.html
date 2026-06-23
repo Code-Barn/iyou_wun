@@ -10,6 +10,8 @@
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen">
+    {% include 'includes/_ecosystem_bar.html' %}
+    {% include 'includes/_standard_header.html' %}
     {% include '_nav.html' %}
     <div id="conversejs"></div>
     <script src="https://cdn.conversejs.org/dist/converse.min.js"></script>
@@ -17,9 +19,11 @@
         converse.initialize({
             bosh_service_url: undefined,
             websocket_url: '{{ xmpp_ws_url }}',
-            jid: '{{ user_did }}@{{ xmpp_domain }}',
+            jid: '{{ user_pubkey }}@{{ xmpp_domain }}',
             password: '{{ xmpp_password }}',
             authentication: 'login',
+            keepalive: false,
+            persistent_store: 'session',
             view_mode: 'fullscreen',
             auto_login: true,
             allow_registration: false,

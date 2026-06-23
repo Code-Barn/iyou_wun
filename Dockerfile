@@ -20,7 +20,8 @@ RUN uv sync --no-dev
 
 COPY . .
 ENV DJANGO_SETTINGS_MODULE=config.settings
-RUN uv run python manage.py collectstatic --noinput
+RUN OIDC_RP_CLIENT_ID=builder OIDC_RP_CLIENT_SECRET=builder OIDC_RP_CALLBACK_URL=builder \
+    uv run python manage.py collectstatic --noinput
 
 # Stage 2: Hardened Execution Runtime
 FROM python:3.12-slim
