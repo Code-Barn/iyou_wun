@@ -3,6 +3,15 @@
     <head>
         <title>Feed - iyou_wun</title>
         <script src="https://cdn.tailwindcss.com"></script>
+        <script>
+            tailwind.config = {
+                theme: {
+                    extend: {
+                        screens: { xs: '360px' }
+                    }
+                }
+            }
+        </script>
         <style>
             .toast {
                 animation: slideIn 0.3s ease-out;
@@ -196,10 +205,10 @@
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
                                 {% if note.author_avatar %}
-                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-purple-300" /></a>
+                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-violet-300" /></a>
                                 {% else %}
-                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-purple-300">
-                                    <span class="text-purple-600 font-mono text-sm">{{ note.author_name|default:"M"|first|upper }}</span>
+                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-violet-300">
+                                    <span class="text-violet-600 font-mono text-sm">{{ note.author_name|default:"M"|first|upper }}</span>
                                 </div></a>
                                 {% endif %}
                             </div>
@@ -766,8 +775,8 @@
                     noteElement.innerHTML = `
                         <div class="flex items-start gap-4">
                             <div class="flex-shrink-0">
-                                <div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center">
-                                    <span class="text-purple-600 font-mono text-sm">MEDIA</span>
+                                <div class="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
+                                    <span class="text-violet-600 font-mono text-sm">MEDIA</span>
                                 </div>
                             </div>
                             <div class="flex-1 min-w-0">
@@ -962,7 +971,7 @@
                     el.innerHTML = '<div class="flex items-start gap-4">' +
                         '<div class="flex-shrink-0">' +
                         (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + note.author_name + '" class="w-10 h-10 rounded-full object-cover" />' :
-                            '<div class="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center"><span class="text-purple-600 font-mono text-sm">M</span></div>') +
+                            '<div class="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center"><span class="text-violet-600 font-mono text-sm">M</span></div>') +
                         '</div>' +
                         '<div class="flex-1 min-w-0">' +
                         '<div class="flex items-center gap-2 mb-2">' +

@@ -3,6 +3,15 @@
 <head>
     <title>Chat - iyou_wun</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    screens: { xs: '360px' }
+                }
+            }
+        }
+    </script>
     <link rel="stylesheet" type="text/css" href="https://cdn.conversejs.org/dist/converse.min.css">
     <style>
         #conversejs { height: calc(100vh - 57px); }

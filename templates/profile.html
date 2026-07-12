@@ -3,6 +3,15 @@
 <head>
     <title>{% if profile.name %}{{ profile.name }}{% else %}{{ npub|truncatechars:20 }}{% endif %} - Profile</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    screens: { xs: '360px' }
+                }
+            }
+        }
+    </script>
     <style>
 
     </style>
@@ -86,7 +95,7 @@
                             <span class="absolute text-white text-3xl opacity-80">&#9654;</span>
                         </div>
                         {% elif item.mime_type and item.mime_type|slice:":5" == "audio" %}
-                        <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center">
+                        <div class="aspect-square bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center">
                             <span class="text-3xl">&#127925;</span>
                         </div>
                         {% else %}

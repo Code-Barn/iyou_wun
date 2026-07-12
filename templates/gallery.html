@@ -3,6 +3,15 @@
 <head>
     <title>Media Gallery - iyou_wun</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    screens: { xs: '360px' }
+                }
+            }
+        }
+    </script>
     <style>
         .modal-open { overflow: hidden; }
         #mediaModal {
@@ -54,7 +63,7 @@
                     </div>
                 {% elif mime and "audio" in mime %}
                 <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="audio">
-                    <div class="aspect-square bg-gradient-to-br from-purple-100 to-indigo-100 flex items-center justify-center cursor-pointer" onclick="openModal('{{ note.file_url }}', 'audio', '{{ note.alt_text|addslashes }}')">
+                    <div class="aspect-square bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center cursor-pointer" onclick="openModal('{{ note.file_url }}', 'audio', '{{ note.alt_text|addslashes }}')">
                         <span class="text-5xl">&#127925;</span>
                     </div>
                 {% else %}
