@@ -61,7 +61,7 @@ class PKCEOIDCAuthenticationRequestView(OIDCAuthenticationRequestView):
         return HttpResponseRedirect(redirect_url)
 
     def get_next_url(self, request, redirect_field_name):
-        from mozilla_django_oidc.utils import get_next_url
+        from mozilla_django_oidc.views import get_next_url
         return get_next_url(request, redirect_field_name)
 
 
