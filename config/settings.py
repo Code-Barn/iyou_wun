@@ -201,7 +201,7 @@ AUTH_USER_MODEL = "auth.User"
 # AUTHENTICATION CONFIGURATION
 # ------------------------------------------------------------------------------
 AUTHENTICATION_BACKENDS = [
-    "apps.core.auth.MyOIDCAuthenticationBackend",
+    "apps.core.auth_pkce.PKCEAuthenticationBackend",
     "django.contrib.auth.backends.ModelBackend",
 ]
 
@@ -216,7 +216,7 @@ IDP_BASE_PUBLIC_URL = env.str("IDP_BASE_PUBLIC_URL", default="https://iyou.me")
 
 # OIDC Relying Party — all values purely from environment
 OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID")
-OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET")
+OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET", default="")
 OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_VERIFY_KID = False
 OIDC_RP_CALLBACK_URL = env.str("OIDC_RP_CALLBACK_URL")

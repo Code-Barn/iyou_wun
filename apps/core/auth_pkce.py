@@ -1,16 +1,16 @@
-import base64
-import hashlib
 import logging
 import secrets
 
+from django.http import HttpResponseRedirect
 from django.urls import reverse
+from mozilla_django_oidc.utils import absolutify, import_from_settings
 from mozilla_django_oidc.views import (
     OIDCAuthenticationCallbackView,
     OIDCAuthenticationRequestView,
     add_state_and_verifier_and_nonce_to_session,
     generate_code_challenge,
 )
-from mozilla_django_oidc.utils import absolutify, import_from_settings
+from urllib.parse import urlencode
 
 from apps.core.auth import MyOIDCAuthenticationBackend
 
@@ -55,9 +55,6 @@ class PKCEOIDCAuthenticationRequestView(OIDCAuthenticationRequestView):
 
         request.session["oidc_login_next"] = self.get_next_url(request, redirect_field_name)
 
-        from urllib.parse import urlencode
-        from django.http import HttpResponseRedirect
-
         redirect_url = "{url}?{query}".format(
             url=self.OIDC_OP_AUTH_ENDPOINT, query=urlencode(params)
         )
@@ -69,20 +66,23 @@ class PKCEOIDCAuthenticationRequestView(OIDCAuthenticationRequestView):
 
 
 class PKCEOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
-    def get(self, request):
+    def get_backend_kwargs(self, request, **kwargs):
+        kwargs = super().get_backend_kwargs(request, **kwargs)
         code_verifier = request.session.pop("pkce_code_verifier", None)
-        return super().get(request)
+        if code_verifier:
+            kwargs["code_verifier"] = code_verifier
+        return kwargs
 
 
 class PKCEAuthenticationBackend(MyOIDCAuthenticationBackend):
-    def __init__(self, *args, **kwargs):
-        self.OIDC_OP_TOKEN_ENDPOINT = self.get_settings("OIDC_OP_TOKEN_ENDPOINT")
-        self.OIDC_OP_USER_ENDPOINT = self.get_settings("OIDC_OP_USER_ENDPOINT")
-        self.OIDC_OP_JWKS_ENDPOINT = self.get_settings("OIDC_OP_JWKS_ENDPOINT", None)
-        self.OIDC_RP_CLIENT_ID = self.get_settings("OIDC_RP_CLIENT_ID")
-        self.OIDC_RP_CLIENT_SECRET = self.get_settings("OIDC_RP_CLIENT_SECRET", "")
-        self.OIDC_RP_SIGN_ALGO = self.get_settings("OIDC_RP_SIGN_ALGO", "HS256")
-        self.OIDC_RP_IDP_SIGN_KEY = self.get_settings("OIDC_RP_IDP_SIGN_KEY", None)
+    def authenticate(self, request, **kwargs):
+        code_verifier = kwargs.pop("code_verifier", None)
+        if code_verifier:
+            request.session["pkce_code_verifier"] = code_verifier
+        return super().authenticate(request, **kwargs)
 
-        from django.contrib.auth import get_user_model
-        self.UserModel = get_user_model()
+    def get_token(self, payload, **kwargs):
+        code_verifier = kwargs.pop("code_verifier", None)
+        if code_verifier:
+            payload["code_verifier"] = code_verifier
+        return super().get_token(payload, **kwargs)

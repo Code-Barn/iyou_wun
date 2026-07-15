@@ -32,8 +32,14 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.core.auth_pkce import (
+    PKCEOIDCAuthenticationCallbackView,
+    PKCEOIDCAuthenticationRequestView,
+)
+
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('oidc/', include('mozilla_django_oidc.urls')),
+    path('oidc/authenticate/', PKCEOIDCAuthenticationRequestView.as_view(), name='oidc_authentication_init'),
+    path('oidc/callback/', PKCEOIDCAuthenticationCallbackView.as_view(), name='oidc_authentication_callback'),
     path('', include('apps.core.urls')),
 ]

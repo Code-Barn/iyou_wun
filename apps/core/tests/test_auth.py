@@ -135,15 +135,12 @@ class OIDCBackendEnforcementTest(TestCase):
     def test_oidc_backend_is_configured(self):
         backends = settings.AUTHENTICATION_BACKENDS
         self.assertIn(
-            "apps.core.auth.MyOIDCAuthenticationBackend",
+            "apps.core.auth_pkce.PKCEAuthenticationBackend",
             backends,
         )
 
     def test_login_url_points_to_idp(self):
-        self.assertEqual(
-            settings.LOGIN_URL,
-            settings.OIDC_OP_AUTHORIZATION_ENDPOINT,
-        )
+        self.assertEqual(settings.LOGIN_URL, "oidc_authentication_init")
 
     def test_oidc_backend_creates_user_with_unusable_password(self):
         backend = MyOIDCAuthenticationBackend()

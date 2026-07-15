@@ -40,7 +40,7 @@ class DashboardViewTest(TestCase):
 
     def test_dashboard_redirects_to_idp_login(self):
         response = self.client.get("/dashboard")
-        self.assertIn(settings.OIDC_OP_AUTHORIZATION_ENDPOINT, response.url)
+        self.assertIn("/oidc/authenticate/", response.url)
 
     def test_authenticated_user_sees_did(self):
         user = User.objects.create_user(username="did:iyou:0xabc123")
@@ -92,7 +92,7 @@ class ChatViewTest(TestCase):
 
     def test_redirects_to_idp_login(self):
         response = self.client.get(reverse("chat"))
-        self.assertIn(settings.OIDC_OP_AUTHORIZATION_ENDPOINT, response.url)
+        self.assertIn("/oidc/authenticate/", response.url)
 
     def test_authenticated_user_sees_chat(self):
         user = User.objects.create_user(username="did:key:z6Mkchat123")
