@@ -78,11 +78,11 @@ class PKCEAuthenticationBackend(MyOIDCAuthenticationBackend):
     def authenticate(self, request, **kwargs):
         code_verifier = kwargs.pop("code_verifier", None)
         if code_verifier:
-            request.session["pkce_code_verifier"] = code_verifier
+            self.pkce_code_verifier = code_verifier
         return super().authenticate(request, **kwargs)
 
     def get_token(self, payload, **kwargs):
-        code_verifier = kwargs.pop("code_verifier", None)
+        code_verifier = getattr(self, "pkce_code_verifier", None)
         if code_verifier:
             payload["code_verifier"] = code_verifier
         return super().get_token(payload, **kwargs)

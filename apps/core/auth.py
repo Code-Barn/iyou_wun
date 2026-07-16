@@ -15,12 +15,11 @@
 
 import logging
 
-import environ
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 from django.contrib.auth.models import User
+from django.conf import settings
 
 logger = logging.getLogger(__name__)
-env = environ.Env()
 
 class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
     def authenticate(self, request, **kwargs):
@@ -50,7 +49,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             user.save()
             logger.info(f"User created: {user.username}")
             print(f"DEBUG: User created in create_user: {user.username}, ID: {user.id}, Authenticated: {user.is_authenticated}")
-            return self._evaluate_admin_elevation(user)
+            return self._evaluate_admin_elevation(user, claims)
         except Exception as e:
             logger.error(f"Error creating user: {e}")
             raise
@@ -94,7 +93,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 print(f"DEBUG: OIDC Back-channel successful for DID: {did}")
 
             # 3. Apply admin elevation
-            self._evaluate_admin_elevation(user)
+            self._evaluate_admin_elevation(user, claims)
 
             # 4. Return the QuerySet
             return User.objects.filter(id=user.id)
@@ -114,19 +113,13 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         return 'sub' in claims
 
     def get_username(self, claims):
-        """
-        Use the DID as the Django username.
-        """
-        did = claims.get('sub')
-        print(f"DEBUG: Mapping DID to username: {did}")
-        return did
+        return claims.get("sub")
 
-    def _evaluate_admin_elevation(self, user):
+    def _evaluate_admin_elevation(self, user, claims=None):
         if not user or user.is_anonymous:
             return user
-        master_admin_did = env.str("ADMIN_DID", default="")
-        if master_admin_did and user.username == master_admin_did:
+        if user.username == getattr(settings, "ADMIN_DID", None):
             user.is_staff = True
             user.is_superuser = True
-        user.save()
+            user.save()
         return user

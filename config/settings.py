@@ -47,6 +47,7 @@ DEBUG = env.bool("WUN_DEBUG", default=False)
 ALLOWED_HOSTS = env.list("WUN_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 
 # Session isolation via app prefix
 APP_NAME_PREFIX = env.str("APP_NAME_PREFIX", default="wun")
@@ -219,6 +220,7 @@ OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID")
 OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET", default="")
 OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_VERIFY_KID = False
+OIDC_RP_SCOPES = "openid"
 OIDC_RP_CALLBACK_URL = env.str("OIDC_RP_CALLBACK_URL")
 
 OIDC_OP_AUTHORIZATION_ENDPOINT = f"{IDP_BASE_PUBLIC_URL}/openid/authorize/"
@@ -244,6 +246,9 @@ POLY_ENGINE_URL = env.str("POLY_ENGINE_URL", default="http://127.0.0.1:8000")
 # Credential Issuance — Node DID & Signing Key
 NODE_DID = env.str("NODE_DID", default="did:key:z6Mkdevlocal00000000000000000000000000000000")
 NODE_PRIVATE_KEY_HEX = env.str("NODE_PRIVATE_KEY_HEX", default="")
+
+# Platform administration DID — centralizes env lookup for admin elevation
+ADMIN_DID = env.str("ADMIN_DID", default="")
 
 # iyou_home Satellite Service URLs (injected into all template contexts)
 IDP_HOME_URL = env.str("IDP_HOME_URL", default="https://home.iyou.me/")
