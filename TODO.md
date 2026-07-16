@@ -15,7 +15,7 @@
 
 ## Layer 1 — PKCE / Auth
 
-- [ ]
+- [x] Relying Party Hardening: fixed library method boundary data drop using Instance State Relay pattern (`get_backend_kwargs()` override); anchored username lookups to `sub` claim DID strings; centralized `ADMIN_DID` evaluation via `os.environ.get()` — **Done 2026-07-13**
 
 ## Layer 2 — App-Specific
 
