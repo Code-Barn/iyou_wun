@@ -4,6 +4,9 @@ set -e
 echo "Executing Database Migrations for the Social Feed Layer..."
 python manage.py migrate --noinput
 
+echo "Collecting Static Files..."
+python manage.py collectstatic --noinput
+
 echo "Spawning Gunicorn Web Server Application Engine on Core Port 8000..."
 exec gunicorn config.wsgi:application \
     --bind 0.0.0.0:8000 \
