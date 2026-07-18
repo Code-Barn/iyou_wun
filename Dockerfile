@@ -32,16 +32,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /app/.venv /app/.venv
-COPY --from=builder /app/.uv-python /app/.uv-python
-COPY . .
+RUN groupadd --system --gid 1001 appgroup && \
+    adduser --system --uid 1001 --gid 1001 --no-create-home appuser
+
+COPY --from=builder --chown=appuser:appgroup /app /app
 
 ENV PATH="/app/.venv/bin:$PATH" \
     DJANGO_SETTINGS_MODULE=config.settings \
     PYTHONUNBUFFERED=1
 
-COPY --from=builder /app/staticfiles /app/staticfiles
-
-COPY docker-entrypoint.sh /
+COPY --chown=appuser:appgroup docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
+
+USER appuser
 ENTRYPOINT ["/docker-entrypoint.sh"]
