@@ -1,10 +1,11 @@
+{% load static %}
 <!doctype html>
 <html>
 <head>
     <title>{% if profile.name %}{{ profile.name }}{% else %}{{ npub|truncatechars:20 }}{% endif %} - Profile</title>
     <!-- REPLACE WITH STATIC TAILWIND CSS - Rule 7 compliance -->
     <!-- <script src="https://cdn.tailwindcss.com"></script> -->
-    <link rel="stylesheet" href="{% static 'css/output.css %}">
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <script>
         // Prevent script execution crashes if runtime tailwind variables are unresolved
         if (typeof tailwind !== 'undefined') {
@@ -34,33 +35,57 @@
         {% else %}
 
         <!-- Profile Hero -->
-        <div class="bg-white rounded-lg shadow-md p-8 mb-6">
-            <div class="flex items-start gap-6">
-                <div class="flex-shrink-0">
-                    {% if profile.picture %}
-                    <img src="{{ profile.picture }}" alt="" class="w-24 h-24 rounded-full object-cover border-2 border-gray-200">
-                    {% else %}
-                    <div class="w-24 h-24 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200">
-                        <span class="text-indigo-600 text-2xl font-bold">{{ profile.name|default:"?"|first }}</span>
+        <div class="bg-white rounded-lg shadow-md mb-6 overflow-hidden">
+            <!-- Banner -->
+            {% if profile.banner %}
+            <div class="h-40 sm:h-52 bg-cover bg-center" style="background-image: url('{{ profile.banner|escape }}');"></div>
+            {% else %}
+            <div class="h-40 sm:h-52 bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-600"></div>
+            {% endif %}
+
+            <div class="px-8 pb-8">
+                <div class="flex items-end gap-5 -mt-12 relative z-10">
+                    <div class="flex-shrink-0">
+                        {% if profile.picture %}
+                        <img src="{{ profile.picture }}" alt="" class="w-28 h-28 rounded-full object-cover border-4 border-white shadow-lg">
+                        {% else %}
+                        <div class="w-28 h-28 bg-indigo-100 rounded-full flex items-center justify-center border-4 border-white shadow-lg">
+                            <span class="text-indigo-600 text-3xl font-bold">{{ profile.name|default:"?"|first }}</span>
+                        </div>
+                        {% endif %}
                     </div>
-                    {% endif %}
-                </div>
-                <div class="flex-1 min-w-0">
-                    <h1 class="text-2xl font-bold text-gray-900">{{ profile.name|default:"Anonymous" }}</h1>
-                    {% if profile.nip05 %}
-                    <p class="text-sm text-indigo-600">{{ profile.nip05 }}</p>
-                    {% endif %}
-                    <p class="text-xs font-mono text-gray-500 mt-1 break-all">{{ npub }}</p>
-                    {% if profile.about %}
-                    <p class="text-sm text-gray-600 mt-3 whitespace-pre-wrap">{{ profile.about }}</p>
-                    {% endif %}
-                </div>
-                <div class="flex-shrink-0 text-center">
-                    <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-                        <p class="text-2xl font-bold text-amber-700">{{ sovereign_score }}</p>
-                        <p class="text-xs text-amber-600 font-medium">Sovereign<br>Score</p>
+                    <div class="flex-1 min-w-0 pb-1">
+                        <h1 class="text-2xl font-bold text-gray-900 leading-tight">{{ profile.name|default:"Anonymous" }}</h1>
+                        {% if profile.nip05 %}
+                        <p class="text-sm text-indigo-600 font-medium flex items-center gap-1.5 mt-0.5">
+                            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                            {{ profile.nip05 }}
+                        </p>
+                        {% endif %}
+                    </div>
+                    <div class="flex-shrink-0 pb-1">
+                        <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-center">
+                            <p class="text-2xl font-bold text-amber-700">{{ sovereign_score }}</p>
+                            <p class="text-xs text-amber-600 font-medium">Sovereign<br>Score</p>
+                        </div>
                     </div>
                 </div>
+
+                <div class="mt-4">
+                    <p class="text-xs font-mono text-gray-500 break-all">{{ npub }}</p>
+                </div>
+
+                {% if profile.about %}
+                <p class="text-sm text-gray-600 mt-3 whitespace-pre-wrap leading-relaxed">{{ profile.about }}</p>
+                {% endif %}
+
+                {% if profile.lud16 %}
+                <div class="mt-4 flex items-center gap-3">
+                    <a href="lightning:{{ profile.lud16 }}" class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
+                        <span class="text-lg">&#9834;</span> Tip {{ profile.lud16 }}
+                    </a>
+                </div>
+                {% endif %}
             </div>
         </div>
 

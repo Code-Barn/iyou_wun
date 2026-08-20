@@ -80,9 +80,12 @@ class FeedView(TemplateView):
         context["thread_id"] = thread_id
 
         if thread_id:
-            notes = fetch_thread(thread_id, relay_urls=relays)
+            thread_data = fetch_thread(thread_id, relay_urls=relays)
             context["thread_mode"] = True
             context["feed_mode"] = "thread"
+            context["notes"] = thread_data["roots"]
+            context["thread_replies"] = thread_data["replies"]
+            context["thread_reply_count"] = thread_data["total_replies"]
         else:
             mode = self.request.GET.get("mode", "network")
             context["feed_mode"] = mode
@@ -90,13 +93,15 @@ class FeedView(TemplateView):
             if mode == "network" and user_pubkey:
                 contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
                 if contacts:
-                    notes = fetch_unified_feed(authors=contacts, relay_urls=relays)
+                    feed_data = fetch_unified_feed(authors=contacts, relay_urls=relays)
                 else:
-                    notes = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
+                    feed_data = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
             else:
-                notes = fetch_unified_feed(relay_urls=relays)
+                feed_data = fetch_unified_feed(relay_urls=relays)
 
-        context["notes"] = notes
+            context["notes"] = feed_data["roots"]
+            context["thread_replies"] = feed_data["replies"]
+            context["thread_reply_count"] = feed_data["total_replies"]
 
         return context
 
@@ -191,18 +196,32 @@ def api_feed(request):
             except json.JSONDecodeError:
                 profiles[pk] = {}
 
-    notes = process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data = process_into_feed(raw_events, profiles, max_items=limit)
 
     def _serialize(note):
         result = dict(note)
         result["created_at"] = note["created_at"].timestamp()
-        if note.get("comments"):
-            result["comments"] = [_serialize(c) for c in note["comments"]]
+        if note.get("votes"):
+            result["votes"] = [dict(v) for v in note["votes"]]
         if note.get("reactions"):
             result["reactions"] = [{"id": r["id"], "pubkey": r["pubkey"], "content": r["content"]} for r in note["reactions"]]
+        if note.get("replies"):
+            result["replies"] = [_serialize(r) for r in note["replies"]]
+            result["reply_count"] = note.get("reply_count", 0)
         return result
 
-    return JsonResponse({"notes": [_serialize(n) for n in notes]})
+    roots = [_serialize(n) for n in feed_data["roots"]]
+
+    # Serialize the flat reply map for JS client-side assembly
+    replies_serialized = {}
+    for pid, replies in feed_data.get("replies", {}).items():
+        replies_serialized[pid] = [_serialize(r) for r in replies]
+
+    return JsonResponse({
+        "notes": roots,
+        "replies": replies_serialized,
+        "total_replies": feed_data["total_replies"],
+    })
 
 
 def npub_to_hex(npub_str):
@@ -231,10 +250,52 @@ def fetch_profile_data(hex_pubkey, relay_urls=None):
             "name": content.get("display_name") or content.get("name", ""),
             "about": content.get("about", ""),
             "picture": content.get("picture", ""),
+            "banner": content.get("banner", ""),
             "nip05": content.get("nip05", ""),
             "lud16": content.get("lud16", ""),
         }
     return {}
+
+
+MEDIA_CATEGORIES = {
+    "image": {
+        "mime_prefixes": ("image/",),
+        "extensions": (".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".bmp", ".tiff"),
+    },
+    "video": {
+        "mime_prefixes": ("video/",),
+        "extensions": (".mp4", ".webm", ".mov", ".m4v", ".avi", ".mkv"),
+    },
+    "audio": {
+        "mime_prefixes": ("audio/",),
+        "extensions": (".mp3", ".ogg", ".wav", ".m4a", ".flac", ".aac", ".wma"),
+    },
+}
+
+
+def categorize_media(note):
+    """Classify a media note into image/video/audio/other by MIME and extension."""
+    mime = (note.get("mime_type") or "").lower()
+    url = (note.get("file_url") or "").lower()
+
+    for cat, spec in MEDIA_CATEGORIES.items():
+        for prefix in spec["mime_prefixes"]:
+            if mime.startswith(prefix):
+                return cat
+        for ext in spec["extensions"]:
+            if url.endswith(ext):
+                return cat
+    return "other"
+
+
+def _extract_nip94_tags(tags):
+    """Extract extended NIP-94 metadata from a Kind 1063 event's tags."""
+    return {
+        "duration": get_tag_value(tags, "duration"),
+        "blossom_hash": get_tag_value(tags, "x"),
+        "blurhash": get_tag_value(tags, "blurhash"),
+        "summary": get_tag_value(tags, "summary"),
+    }
 
 
 def fetch_media_assets(authors=None, limit=50, relay_urls=None):
@@ -270,7 +331,8 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
         npub_val = hex_to_npub(pk) if pk else ""
         profile = profiles.get(pk, {})
         file_url = get_tag_value(tags, "url")
-        result.append({
+        nip94 = _extract_nip94_tags(tags)
+        note = {
             "id": e.get("id", ""),
             "kind": 1063,
             "pubkey": pk,
@@ -282,11 +344,17 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
             "mime_type": get_tag_value(tags, "m"),
             "dimensions": get_tag_value(tags, "dim"),
             "thumbnail_url": get_tag_value(tags, "thumb"),
-            "alt_text": get_tag_value(tags, "alt"),
+            "alt_text": get_tag_value(tags, "alt") or get_tag_value(tags, "summary") or "",
             "is_sovereign": bool(file_url and "127.0.0.1" in file_url),
             "author_name": profile.get("display_name") or profile.get("name") or "",
             "author_avatar": profile.get("picture", ""),
-        })
+            "duration": nip94["duration"],
+            "blossom_hash": nip94["blossom_hash"],
+            "blurhash": nip94["blurhash"],
+            "summary": nip94["summary"],
+        }
+        note["media_type"] = categorize_media(note)
+        result.append(note)
 
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return result[:limit]
@@ -340,10 +408,10 @@ def fetch_text_notes(authors=None, limit=20, relay_urls=None):
 
 
 def fetch_thread(parent_id, relay_urls=None):
-    """Fetch a parent event and its comments, return structured feed list."""
+    """Fetch a parent event and its replies, return threaded feed dict."""
     parent_raw = relay_req({"ids": [parent_id], "limit": 1}, relay_urls=relay_urls)
     if not parent_raw:
-        return []
+        return {"roots": [], "replies": {}, "total_replies": 0, "flat": []}
 
     comments_raw = relay_req({"#e": [parent_id], "kinds": [1111], "limit": 50}, relay_urls=relay_urls)
 
@@ -377,8 +445,6 @@ def get_tag_value(tags, tag_name, index=1, default=""):
             return tag[index]
     return default
 
-
-RELAY_URL = "wss://nos.lol"
 
 DEFAULT_RELAYS = ["wss://nos.lol", "wss://relay.iyou.me", "ws://127.0.0.1:9003"]
 
@@ -453,118 +519,139 @@ def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None):
     return {}
 
 
-def process_into_feed(raw_events, profiles=None, max_items=50):
-    """Convert raw Nostr events into a structured, grouped feed.
+def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=True):
+    """Convert raw Nostr events into a structured, threaded feed.
 
-    Groups Kind 7 (reactions) and Kind 1111 (comments) under their
-    parent Kind 1 or Kind 1063 events. Injects author_name and
-    author_avatar from Kind 0 profile data. Deduplicates reactions
-    by pubkey per parent. Drops orphan Kind 7; allows orphan Kind 1111.
+    When use_thread_tree=True (default), delegates to the NIP-10 thread
+    tree builder for proper threaded display. Reactions and votes are
+    still attached in a flat pass. Falls back to flat grouping when
+    use_thread_tree=False.
 
-    Also handles Kind 30023 (Poll Definitions) and Kind 1112 (Vote
-    Envelopes) for the Poly governance integration.
+    Returns a dict:
+        {
+          "roots":       [ note, ... ],
+          "replies":     { parent_id: [note, ...] },
+          "total_replies": int,
+          "flat":        [ note, ... ],   # legacy flat list (deprecated)
+        }
     """
     if profiles is None:
         profiles = {}
 
+    from .nip10 import build_thread_tree, parse_nip10_tags
+    from datetime import datetime
+
+    def _ts_to_dt(ts):
+        if isinstance(ts, datetime):
+            return ts
+        return datetime.fromtimestamp(ts or 0)
+
+    def enrich_item(pk):
+        prof = profiles.get(pk, {})
+        return {
+            "author_name": prof.get("display_name") or prof.get("name") or "",
+            "author_avatar": prof.get("picture", ""),
+        }
+
+    # Classify events by kind
     kind_1 = {}
     kind_1063 = {}
     kind_30023 = {}
     reactions = []
-    comments = []
+    kind_1111_events = {}
     votes = []
-
-    def enrich(item):
-        pk = item.get("pubkey", "")
-        profile = profiles.get(pk, {})
-        item["author_name"] = profile.get("display_name") or profile.get("name") or ""
-        item["author_avatar"] = profile.get("picture", "")
-        return item
 
     for eid, e in raw_events.items():
         kind = e.get("kind")
-        pubkey = e.get("pubkey", "")
-        npub = hex_to_npub(pubkey) if pubkey else ""
-        base = {
-            "id": eid,
-            "kind": kind,
-            "pubkey": pubkey,
-            "npub": npub,
-            "content": e.get("content", ""),
-            "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
-            "tags": e.get("tags", []),
-        }
-
         if kind == 1:
-            base["reactions"] = []
-            base["comments"] = []
-            kind_1[eid] = enrich(base)
+            kind_1[eid] = e
         elif kind == 1063:
-            base["reactions"] = []
-            base["comments"] = []
-            base["file_url"] = get_tag_value(base["tags"], "url")
-            base["mime_type"] = get_tag_value(base["tags"], "m")
-            base["dimensions"] = get_tag_value(base["tags"], "dim")
-            base["thumbnail_url"] = get_tag_value(base["tags"], "thumb")
-            base["alt_text"] = get_tag_value(base["tags"], "alt")
-            base["is_sovereign"] = bool(
-                base["file_url"] and "127.0.0.1" in base["file_url"]
-            )
-            kind_1063[eid] = enrich(base)
+            kind_1063[eid] = e
         elif kind == 30023:
-            base["reactions"] = []
-            base["comments"] = []
-            base["poll_options"] = [
-                tag[1] for tag in base["tags"]
-                if tag and tag[0] == "option" and len(tag) > 1
-            ]
-            base["poll_d_tag"] = get_tag_value(base["tags"], "d")
-            base["poll_scope_geohash"] = get_tag_value(base["tags"], "geohash")
-            base["poll_scope_org"] = get_tag_value(base["tags"], "org")
-            base["poll_closes_at"] = get_tag_value(base["tags"], "expires")
-            kind_30023[eid] = enrich(base)
+            kind_30023[eid] = e
         elif kind == 7:
-            reactions.append(base)
+            reactions.append(e)
         elif kind == 1111:
-            base["reactions"] = []
-            base["comments"] = []
-            comments.append(enrich(base))
+            kind_1111_events[eid] = e
         elif kind == 1112:
-            votes.append(base)
+            votes.append(e)
 
-    parent_lookup = {**kind_1, **kind_1063, **kind_30023}
+    # Build thread tree from Kind 1111 replies + root events
+    all_thread_events = {}
+    all_thread_events.update(kind_1)
+    all_thread_events.update(kind_1063)
+    all_thread_events.update(kind_30023)
+    all_thread_events.update(kind_1111_events)
 
-    # Group reactions under parents, deduplicate by pubkey per parent
+    tree = build_thread_tree(all_thread_events, profiles)
+    roots = tree["roots"]
+    reply_map = tree["replies_by_parent"]
+
+    # Attach reactions to all root events (deduplicated by pubkey)
     seen_reactions = set()
-    for r in reactions:
-        parent_id = get_tag_value(r["tags"], "e")
-        if parent_id not in parent_lookup:
-            continue
-        key = (parent_id, r["pubkey"])
-        if key in seen_reactions:
-            continue
-        seen_reactions.add(key)
-        parent_lookup[parent_id]["reactions"].append(r)
+    root_by_id = {r["id"]: r for r in roots}
 
-    # Group comments under parents; allow orphans as standalone items
-    orphan_comments = []
-    for c in comments:
-        parent_id = get_tag_value(c["tags"], "e")
-        if parent_id in parent_lookup:
-            parent_lookup[parent_id]["comments"].append(c)
-        else:
-            orphan_comments.append(c)
+    # Also index non-thread roots (Kind 1, 1063, 30023 that have no
+    # replies but are still root-level content)
+    for kind_dict in (kind_1, kind_1063, kind_30023):
+        for eid, e in kind_dict.items():
+            if eid not in root_by_id:
+                from .nip10 import _enrich_root
+                r = _enrich_root(e, e.get("kind"), profiles, _ts_to_dt)
+                root_by_id[eid] = r
+                roots.append(r)
 
-    # Group votes under their parent poll
-    for v in votes:
-        parent_id = get_tag_value(v["tags"], "e")
-        if parent_id in parent_lookup:
-            parent_lookup[parent_id].setdefault("votes", []).append(v)
+    for r_raw in reactions:
+        tags = r_raw.get("tags", [])
+        parent_id = get_tag_value(tags, "e")
+        if parent_id in root_by_id:
+            pk = r_raw.get("pubkey", "")
+            key = (parent_id, pk)
+            if key in seen_reactions:
+                continue
+            seen_reactions.add(key)
+            item = {
+                "id": r_raw.get("id", ""),
+                "kind": 7,
+                "pubkey": pk,
+                "content": r_raw.get("content", ""),
+                "created_at": _ts_to_dt(r_raw.get("created_at", 0)),
+            }
+            item.update(enrich_item(pk))
+            root_by_id[parent_id].setdefault("reactions", []).append(item)
 
-    feed = list(kind_1.values()) + list(kind_1063.values()) + list(kind_30023.values()) + orphan_comments
-    feed.sort(key=lambda x: x["created_at"], reverse=True)
+    # Attach votes to root polls
+    for v_raw in votes:
+        tags = v_raw.get("tags", [])
+        parent_id = get_tag_value(tags, "e")
+        if parent_id in root_by_id:
+            item = {
+                "id": v_raw.get("id", ""),
+                "kind": 1112,
+                "pubkey": v_raw.get("pubkey", ""),
+                "content": v_raw.get("content", ""),
+                "created_at": _ts_to_dt(v_raw.get("created_at", 0)),
+            }
+            root_by_id[parent_id].setdefault("votes", []).append(item)
 
-    return feed[:max_items]
+    # Add orphan Kind 1111 replies as standalone root items
+    for pid, replies in reply_map.items():
+        if pid not in root_by_id:
+            for reply_note in replies:
+                reply_note["reactions"] = []
+                reply_note["reply_count"] = 0
+                reply_note["replies"] = []
+                root_by_id[reply_note["id"]] = reply_note
+                roots.append(reply_note)
+
+    roots.sort(key=lambda x: x["created_at"], reverse=True)
+
+    return {
+        "roots": roots[:max_items],
+        "replies": reply_map,
+        "total_replies": tree["total_reply_count"],
+        "flat": [],  # deprecated — kept for backward compat with /api/feed serializer
+    }
 
 
 def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
@@ -614,21 +701,39 @@ def fetch_contact_pubkeys(user_pubkey, relay_urls=None):
     return []
 
 
-class GalleryView(LoginRequiredMixin, TemplateView):
+class GalleryView(TemplateView):
     template_name = "gallery.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        user_pubkey = did_to_pubkey(self.request.user.username)
+        user_pubkey = did_to_pubkey(self.request.user.username) if self.request.user.is_authenticated else ""
         relays = self.request.session.get("relays", DEFAULT_RELAYS)
         context["user_pubkey"] = user_pubkey
-        context["user_did"] = self.request.user.username
+        context["user_did"] = self.request.user.username if self.request.user.is_authenticated else ""
 
         filter_pubkey = self.request.GET.get("pubkey")
+        media_type = self.request.GET.get("type", "all")
         authors = [filter_pubkey] if filter_pubkey else None
         notes = fetch_media_assets(authors=authors, relay_urls=relays)
+
+        images = [n for n in notes if n["media_type"] == "image"]
+        videos = [n for n in notes if n["media_type"] == "video"]
+        audio = [n for n in notes if n["media_type"] == "audio"]
+        other = [n for n in notes if n["media_type"] == "other"]
+
         context["notes"] = notes
+        context["images"] = images
+        context["videos"] = videos
+        context["audio_items"] = audio
+        context["other_items"] = other
         context["filter_pubkey"] = filter_pubkey
+        context["active_type"] = media_type
+        context["counts"] = {
+            "all": len(notes),
+            "images": len(images),
+            "videos": len(videos),
+            "audio": len(audio),
+        }
         return context
 
 

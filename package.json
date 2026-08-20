@@ -1,0 +1,22 @@
+{
+  "name": "iyou_wun",
+  "version": "1.0.0",
+  "description": "Django 5.2 OIDC Relying Party (Satellite) — authenticates users via the **iyou_idp** identity provider using their Decentralized Identifier (DID). Sovereign social features: Nostr feed with double-broadcast, media gallery, profile pages, and XMPP chat.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "build:css": "npx tailwindcss -i ./static/css/input.css -o ./static/css/output.css --minify",
+    "watch:css": "npx tailwindcss -i ./static/css/input.css -o ./static/css/output.css --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "autoprefixer": "^10.5.4",
+    "postcss": "^8.5.26",
+    "tailwindcss": "^3.4.19"
+  }
+}

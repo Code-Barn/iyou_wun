@@ -1,21 +1,9 @@
+{% load static %}
 <!DOCTYPE html>
 <html>
 <head>
     <title>Dashboard - iyou_wun</title>
-    <!-- REPLACE WITH STATIC TAILWIND CSS - Rule 7 compliance -->
-    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
-    <link rel="stylesheet" href="{% static 'css/output.css %}">
-    <script>
-        // Prevent script execution crashes if runtime tailwind variables are unresolved
-        if (typeof tailwind !== 'undefined') {
-            tailwind.config = {
-            theme: {
-                extend: {
-                    screens: { xs: '360px' }
-                }
-            }
-        }
-    </script>
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
         .toast { animation: slideIn 0.3s ease-out; }
         @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
@@ -33,7 +21,6 @@
             <div class="bg-white rounded-lg shadow-md p-8 mb-6">
                 <h1 class="text-2xl font-bold mb-2">Dashboard</h1>
                 <p class="text-gray-500 mb-6">You are authenticated with iyou_wun.</p>
-
                 <div class="bg-gray-50 border border-gray-200 rounded-lg p-6">
                     <p class="text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Decentralized Identifier</p>
                     <p class="text-lg font-mono font-semibold text-indigo-600 break-all">{{ user_did }}</p>
@@ -41,45 +28,47 @@
                     <p class="text-xs font-mono text-gray-400 mt-1 break-all">{{ user_npub }}</p>
                     {% endif %}
                 </div>
-
                 {% if user_npub %}
                 <div class="mt-4">
-                    <a href="{% url 'profile' npub=user_npub %}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
-                        View My Sovereign Profile
-                    </a>
+                    <a href="{% url 'profile' npub=user_npub %}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">View My Sovereign Profile</a>
                 </div>
                 {% endif %}
             </div>
 
-            <!-- Tab Bar -->
             <div class="bg-white rounded-lg shadow-md p-8 mb-6">
                 <div class="flex border-b border-gray-200 mb-6">
-                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors" data-tab="profile" onclick="switchTab('profile')">
-                        Profile
-                    </button>
-                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="settings" onclick="switchTab('settings')">
-                        Settings
-                    </button>
+                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors" data-tab="profile" onclick="switchTab('profile')">Profile</button>
+                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="settings" onclick="switchTab('settings')">Settings</button>
                 </div>
 
-                <!-- Profile Tab -->
                 <div id="tab-profile" class="tab-panel">
                     <h2 class="text-lg font-semibold mb-4">Sovereign Profile</h2>
-
-                    <div class="flex items-start gap-4 mb-6">
-                        {% if profile.picture %}
-                        <img src="{{ profile.picture }}" alt="" class="w-16 h-16 rounded-full object-cover border-2 border-gray-200">
-                        {% else %}
-                        <div class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200">
-                            <span class="text-indigo-600 text-xl font-bold">{{ profile.name|default:"?"|first }}</span>
-                        </div>
-                        {% endif %}
-                        <div>
-                            <p class="font-semibold text-gray-900">{{ profile.name|default:"No display name set" }}</p>
-                            <p class="text-sm text-gray-500">{{ profile.about|default:"No bio"|truncatechars:100 }}</p>
-                            {% if profile.nip05 %}
-                            <p class="text-xs text-indigo-600 mt-1">{{ profile.nip05 }}</p>
-                            {% endif %}
+                    <div id="profilePreview" class="mb-6">
+                        <div id="previewBanner" class="h-32 rounded-t-lg bg-gradient-to-r from-indigo-500 to-violet-500 bg-cover bg-center" style="display:none;"></div>
+                        <div class="{% if profile.banner %}rounded-b-lg border border-t-0 border-gray-200{% else %}rounded-lg{% endif %} bg-gray-50 p-4">
+                            <div class="flex items-start gap-4">
+                                {% if profile.picture %}
+                                <img id="previewAvatar" src="{{ profile.picture }}" alt="" class="w-16 h-16 rounded-full object-cover border-2 border-gray-200 -mt-8 relative z-10">
+                                {% else %}
+                                <div id="previewAvatarPlaceholder" class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200 -mt-8 relative z-10">
+                                    <span id="previewAvatarLetter" class="text-indigo-600 text-xl font-bold">{{ profile.name|default:"?"|first }}</span>
+                                </div>
+                                {% endif %}
+                                <div class="flex-1 min-w-0 pt-2">
+                                    <p id="previewName" class="font-semibold text-gray-900">{{ profile.name|default:"No display name set" }}</p>
+                                    {% if profile.nip05 %}
+                                    <p id="previewNip05" class="text-xs text-indigo-600 mt-0.5">{{ profile.nip05 }}</p>
+                                    {% else %}
+                                    <p id="previewNip05" class="text-xs text-indigo-600 mt-0.5 hidden"></p>
+                                    {% endif %}
+                                    <p id="previewAbout" class="text-sm text-gray-500 mt-1">{{ profile.about|default:"No bio"|truncatechars:100 }}</p>
+                                    {% if profile.lud16 %}
+                                    <p id="previewLud16" class="text-xs text-amber-600 mt-1">&#9834; {{ profile.lud16 }}</p>
+                                    {% else %}
+                                    <p id="previewLud16" class="text-xs text-amber-600 mt-1 hidden">&#9834; </p>
+                                    {% endif %}
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -88,16 +77,30 @@
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
                             <div>
                                 <label class="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
-                                <input type="text" id="profileName" value="{{ profile.name }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                                <input type="text" id="profileName" value="{{ profile.name|escape }}" maxlength="100" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" oninput="updatePreview()">
                             </div>
                             <div>
                                 <label class="block text-xs font-medium text-gray-600 mb-1">Picture URL</label>
-                                <input type="url" id="profilePicture" value="{{ profile.picture }}" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                                <input type="url" id="profilePicture" value="{{ profile.picture|escape }}" maxlength="2048" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="https://example.com/avatar.jpg" oninput="updatePreview()">
                             </div>
                         </div>
                         <div class="mb-4">
                             <label class="block text-xs font-medium text-gray-600 mb-1">Bio / About</label>
-                            <textarea id="profileAbout" rows="3" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">{{ profile.about }}</textarea>
+                            <textarea id="profileAbout" rows="3" maxlength="500" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" oninput="updatePreview()">{{ profile.about|escape }}</textarea>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">Banner URL</label>
+                                <input type="url" id="profileBanner" value="{{ profile.banner|escape }}" maxlength="2048" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="https://example.com/banner.jpg" oninput="updatePreview()">
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">NIP-05 Identifier</label>
+                                <input type="text" id="profileNip05" value="{{ profile.nip05|escape }}" maxlength="300" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="user@iyou.me" oninput="updatePreview()">
+                            </div>
+                        </div>
+                        <div class="mb-4">
+                            <label class="block text-xs font-medium text-gray-600 mb-1">Lightning Address (lud16)</label>
+                            <input type="text" id="profileLud16" value="{{ profile.lud16|escape }}" maxlength="300" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="user@getalby.com" oninput="updatePreview()">
                         </div>
                         <div class="flex items-center gap-3">
                             <button type="submit" id="profileSaveBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
@@ -109,159 +112,101 @@
                     </form>
                 </div>
 
-                <!-- Settings Tab -->
                 <div id="tab-settings" class="tab-panel hidden">
                     <h2 class="text-lg font-semibold mb-4">Sovereign Switchboard</h2>
                     <p class="text-sm text-gray-500 mb-4">Manage your Nostr relay connections. Events are broadcast to all active relays.</p>
-
-                    <div id="relayList" class="space-y-2 mb-4">
-                    </div>
-
+                    <div id="relayList" class="space-y-2 mb-4"></div>
                     <div class="flex items-center gap-2 mb-4">
                         <input type="text" id="relayInput" placeholder="wss://example.com" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                        <button type="button" onclick="addRelay()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-gray-300">
-                            Add Relay
-                        </button>
+                        <button type="button" onclick="addRelay()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-gray-300">Add Relay</button>
                     </div>
-
                     <div class="flex items-center gap-3">
-                        <button type="button" onclick="saveRelays()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
-                            Save Relays
-                        </button>
+                        <button type="button" onclick="saveRelays()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">Save Relays</button>
                         <span id="relayStatus" class="text-xs text-gray-500 hidden"></span>
                     </div>
                 </div>
             </div>
 
-            <!-- Session Info -->
             <div class="bg-white rounded-lg shadow-md p-8">
                 <h2 class="text-lg font-semibold mb-2">Session</h2>
                 <dl class="divide-y">
-                    <div class="py-2 flex">
-                        <dt class="w-32 text-sm text-gray-500">Username</dt>
-                        <dd class="text-sm font-mono">{{ user.username }}</dd>
-                    </div>
-                    <div class="py-2 flex">
-                        <dt class="w-32 text-sm text-gray-500">Email</dt>
-                        <dd class="text-sm">{{ user.email|default:"—" }}</dd>
-                    </div>
-                    <div class="py-2 flex">
-                        <dt class="w-32 text-sm text-gray-500">Joined</dt>
-                        <dd class="text-sm">{{ user.date_joined|date:"Y-m-d H:i" }}</dd>
-                    </div>
+                    <div class="py-2 flex"><dt class="w-32 text-sm text-gray-500">Username</dt><dd class="text-sm font-mono">{{ user.username }}</dd></div>
+                    <div class="py-2 flex"><dt class="w-32 text-sm text-gray-500">Email</dt><dd class="text-sm">{{ user.email|default:"—" }}</dd></div>
+                    <div class="py-2 flex"><dt class="w-32 text-sm text-gray-500">Joined</dt><dd class="text-sm">{{ user.date_joined|date:"Y-m-d H:i" }}</dd></div>
                 </dl>
             </div>
         {% else %}
             <div class="bg-white rounded-lg shadow-md p-8 text-center">
                 <p class="text-red-500 mb-4">You are not authenticated.</p>
-                <a href="{% url 'home' %}" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">
-                    Go to Home
-                </a>
+                <a href="{% url 'home' %}" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Go to Home</a>
             </div>
         {% endif %}
     </main>
 
-    <!-- Toast -->
-    <div id="toast" class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide" role="alert">
-        <span class="font-medium">Profile updated successfully.</span>
+    <div id="fallbackModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-gray-900">Signing Bridge Unavailable</h3>
+                    <button type="button" onclick="bridgeClient.closeFallbackModal()" class="text-gray-400 hover:text-gray-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">The Tauri signing bridge could not be reached. You can manually sign the event below using an external tool, then paste the signed JSON.</p>
+            </div>
+            <div class="p-6">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Unsigned Event JSON</label>
+                <textarea id="fallbackUnsigned" rows="8" readonly class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-600 bg-gray-50 resize-none"></textarea>
+                <label class="block text-xs font-medium text-gray-600 mb-1 mt-4">Paste Signed Event JSON</label>
+                <textarea id="fallbackSigned" rows="8" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none" placeholder='{"id":"...","sig":"...","kind":0,...}'></textarea>
+            </div>
+            <div class="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+                <button type="button" onclick="bridgeClient.closeFallbackModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+                <button type="button" onclick="bridgeClient.submitSignedEvent()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">Broadcast Signed Event</button>
+            </div>
+        </div>
     </div>
 
+    <div id="toast" class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide" role="alert"><span class="font-medium">Profile updated successfully.</span></div>
+
+    <script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ idp_home_ws_url|escapejs }}"></script>
     <script>
-        const TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url }}";
-        const userPubkey = "{{ user_pubkey }}";
-
-        let tauriSocket = null;
-        let pendingEvent = null;
-        let isProcessing = false;
-
-        const DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me"];
-        let userRelays = [];
-
-        function getRelays() {
-            const stored = localStorage.getItem("wun_relays");
-            if (stored) {
-                try { return JSON.parse(stored); } catch (e) {}
-            }
-            return DEFAULT_RELAYS;
-        }
-
-        function initTauriSocket() {
-            if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) return;
-            try {
-                tauriSocket = new WebSocket(TAURI_SIGNING_BRIDGE);
-                tauriSocket.onopen = function () { console.log("Connected to Tauri bridge"); };
-                tauriSocket.onmessage = function (event) { handleTauriMessage(event.data); };
-                tauriSocket.onerror = function () {
-                    showToast("Error connecting to Tauri bridge. Please ensure iYou Home is running.", true);
-                };
-                tauriSocket.onclose = function () { console.log("Tauri bridge closed"); };
-            } catch (err) {
-                console.error("Failed to create WebSocket:", err);
-            }
-        }
-
-        function handleTauriMessage(data) {
-            try {
-                const message = JSON.parse(data);
-                if (message.type === "signed_event" && pendingEvent) {
-                    pendingEvent.id = message.event.id;
-                    pendingEvent.sig = message.event.sig;
-                    broadcastProfile(pendingEvent);
-                }
-            } catch (err) {
-                console.error("Error handling Tauri message:", err);
-            }
-        }
-
-        function sendEventToTauri(event) {
-            pendingEvent = event;
-            if (!tauriSocket || tauriSocket.readyState !== WebSocket.OPEN) {
-                initTauriSocket();
-            }
-            const request = { type: "sign_event", event: event };
-            const checkSocket = setInterval(function () {
-                if (tauriSocket && tauriSocket.readyState === WebSocket.OPEN) {
-                    clearInterval(checkSocket);
-                    tauriSocket.send(JSON.stringify(request));
-                }
-            }, 100);
-            setTimeout(function () {
-                if (isProcessing) {
-                    clearInterval(checkSocket);
-                    showToast("Timeout waiting for Tauri. Please try again.", true);
-                    resetState();
-                }
-            }, 5000);
-        }
+        var userPubkey = "{{ user_pubkey|default:""|escapejs }}";
+        window.userPubkey = userPubkey;
+        var pendingEvent = null;
+        var isProcessing = false;
+        var pendingSignedPayload = null;
 
         function broadcastProfile(signedEvent) {
-            const relays = getRelays();
-            let remaining = relays.length;
-            let anySuccess = false;
-
+            var relays = getRelays();
+            var remaining = relays.length;
+            var anySuccess = false;
+            if (remaining === 0) {
+                showToast("No relays configured. Profile saved locally.", true);
+                applyOptimisticRefresh(signedEvent);
+                resetState();
+                return;
+            }
             relays.forEach(function (relayUrl) {
-                let finished = false;
-                const done = function () {
+                var finished = false;
+                var done = function () {
                     if (finished) return;
                     finished = true;
                     remaining--;
                     if (remaining === 0) {
                         if (anySuccess) {
-                            showToast("Profile published successfully.");
+                            applyOptimisticRefresh(signedEvent);
+                            showToast("Profile updated & broadcasted.");
                         } else {
-                            showToast("Failed to broadcast profile. Try again.", true);
+                            showToast("Broadcast failed on all relays. Saving locally.", true);
+                            applyOptimisticRefresh(signedEvent);
                         }
                         resetState();
                     }
                 };
                 try {
-                    const ws = new WebSocket(relayUrl);
+                    var ws = new WebSocket(relayUrl);
                     ws.onopen = function () { ws.send(JSON.stringify(["EVENT", signedEvent])); };
                     ws.onmessage = function (e) {
-                        try {
-                            const msg = JSON.parse(e.data);
-                            if (msg[0] === "OK") anySuccess = true;
-                        } catch (x) {}
+                        try { var msg = JSON.parse(e.data); if (msg[0] === "OK") anySuccess = true; } catch (x) {}
                         try { ws.close(); } catch (x) {}
                         done();
                     };
@@ -272,27 +217,67 @@
             });
         }
 
+        function handleTauriMessage(data) {
+            try {
+                var message = JSON.parse(data);
+                if (message.type === "profile_sync") { window.activeProfile = message.profile; return; }
+                if (message.type === "signed_event" && pendingEvent) {
+                    var signedEvent = message.event;
+                    pendingEvent.id = signedEvent.id;
+                    pendingEvent.sig = signedEvent.sig;
+                    broadcastProfile(pendingEvent);
+                }
+            } catch (err) {
+                console.error("Error handling Tauri message:", err);
+                showToast("Error processing bridge response.", true);
+                resetState();
+            }
+        }
+
+        function applyOptimisticRefresh(signedEvent) {
+            try {
+                var content = JSON.parse(signedEvent.content);
+                var nameEl = document.getElementById("previewName");
+                var aboutEl = document.getElementById("previewAbout");
+                var nip05El = document.getElementById("previewNip05");
+                var lud16El = document.getElementById("previewLud16");
+                var bannerEl = document.getElementById("previewBanner");
+                if (nameEl) nameEl.textContent = content.display_name || content.name || "Anonymous";
+                if (aboutEl) aboutEl.textContent = content.about || "No bio";
+                if (content.nip05) { nip05El.textContent = content.nip05; nip05El.classList.remove("hidden"); } else { nip05El.classList.add("hidden"); }
+                if (content.lud16) { lud16El.innerHTML = "&#9834; " + escapeHtml(content.lud16); lud16El.classList.remove("hidden"); } else { lud16El.classList.add("hidden"); }
+                if (content.banner) { bannerEl.style.backgroundImage = "url(" + escapeAttr(content.banner) + ")"; bannerEl.style.display = "block"; }
+                if (content.picture) {
+                    var existingImg = document.getElementById("previewAvatar");
+                    var placeholder = document.getElementById("previewAvatarPlaceholder");
+                    if (!existingImg && placeholder) {
+                        var img = document.createElement("img"); img.id = "previewAvatar"; img.src = content.picture; img.alt = "";
+                        img.className = "w-16 h-16 rounded-full object-cover border-2 border-gray-200 -mt-8 relative z-10";
+                        placeholder.parentNode.replaceChild(img, placeholder);
+                    } else if (existingImg) { existingImg.src = content.picture; }
+                }
+            } catch (e) { console.error("Optimistic refresh failed:", e); }
+        }
+
         function editProfile(event) {
             event.preventDefault();
-            if (!userPubkey) {
-                showToast("User public key not available.", true);
-                return false;
-            }
+            if (!userPubkey || userPubkey.length !== 64) { showToast("User public key not available or invalid.", true); return false; }
+            var contentObj = {
+                name: document.getElementById("profileName").value.trim(),
+                display_name: document.getElementById("profileName").value.trim(),
+                about: document.getElementById("profileAbout").value.trim(),
+                picture: document.getElementById("profilePicture").value.trim(),
+            };
+            var banner = document.getElementById("profileBanner").value.trim();
+            var nip05 = document.getElementById("profileNip05").value.trim();
+            var lud16 = document.getElementById("profileLud16").value.trim();
+            if (banner) contentObj.banner = banner;
+            if (nip05) contentObj.nip05 = nip05;
+            if (lud16) contentObj.lud16 = lud16;
 
-            const name = document.getElementById("profileName").value.trim();
-            const about = document.getElementById("profileAbout").value.trim();
-            const picture = document.getElementById("profilePicture").value.trim();
-
-            const content = JSON.stringify({
-                name: name,
-                display_name: name,
-                about: about,
-                picture: picture,
-            });
-
-            const profileEvent = {
+            pendingEvent = {
                 kind: 0,
-                content: content,
+                content: JSON.stringify(contentObj),
                 pubkey: userPubkey,
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [],
@@ -303,18 +288,38 @@
             document.getElementById("profileBtnLoading").classList.remove("hidden");
             document.getElementById("profileSaveBtn").disabled = true;
 
-            sendEventToTauri(profileEvent);
+            bridgeClient.connect(handleTauriMessage);
+            var checkSocket = setInterval(function () {
+                if (bridgeClient.socket && bridgeClient.socket.readyState === WebSocket.OPEN) {
+                    clearInterval(checkSocket);
+                    try {
+                        bridgeClient.socket.send(JSON.stringify({ type: "sign_event", event: pendingEvent }));
+                    } catch (err) {
+                        clearInterval(checkSocket);
+                        bridgeClient.showFallbackModal();
+                    }
+                }
+            }, 100);
+            setTimeout(function () { if (isProcessing) { clearInterval(checkSocket); bridgeClient.showFallbackModal(); } }, 6000);
             return false;
         }
 
-        function showToast(message, isError) {
-            const toast = document.getElementById("toast");
-            const span = toast.querySelector("span");
-            span.textContent = message;
-            toast.className = "fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg toast" +
-                (isError ? " bg-red-500 text-white" : " bg-green-500 text-white");
-            toast.classList.remove("hide");
-            setTimeout(function () { toast.classList.add("hide"); }, 3000);
+        function updatePreview() {
+            var name = document.getElementById("profileName").value.trim();
+            var about = document.getElementById("profileAbout").value.trim();
+            var nip05 = document.getElementById("profileNip05").value.trim();
+            var lud16 = document.getElementById("profileLud16").value.trim();
+            var banner = document.getElementById("profileBanner").value.trim();
+            var nameEl = document.getElementById("previewName");
+            var aboutEl = document.getElementById("previewAbout");
+            var nip05El = document.getElementById("previewNip05");
+            var lud16El = document.getElementById("previewLud16");
+            var bannerEl = document.getElementById("previewBanner");
+            nameEl.textContent = name || "No display name set";
+            aboutEl.textContent = about || "No bio";
+            if (nip05) { nip05El.textContent = nip05; nip05El.classList.remove("hidden"); } else { nip05El.classList.add("hidden"); }
+            if (lud16) { lud16El.innerHTML = "&#9834; " + escapeHtml(lud16); lud16El.classList.remove("hidden"); } else { lud16El.classList.add("hidden"); }
+            if (banner) { bannerEl.style.backgroundImage = "url(" + escapeAttr(banner) + ")"; bannerEl.style.display = "block"; } else { bannerEl.style.display = "none"; }
         }
 
         function resetState() {
@@ -325,69 +330,38 @@
             document.getElementById("profileSaveBtn").disabled = false;
         }
 
-        function switchTab(name) {
-            document.querySelectorAll(".tab-panel").forEach(function (el) {
-                el.classList.add("hidden");
-            });
-            document.getElementById("tab-" + name).classList.remove("hidden");
-            document.querySelectorAll(".tab-btn").forEach(function (btn) {
-                btn.classList.remove("text-indigo-600", "border-indigo-600");
-                btn.classList.add("text-gray-500", "border-transparent");
-            });
-            var active = document.querySelector('.tab-btn[data-tab="' + name + '"]');
-            if (active) {
-                active.classList.remove("text-gray-500", "border-transparent");
-                active.classList.add("text-indigo-600", "border-indigo-600");
-            }
-        }
-
+        // --- Relay Management ---
+        var userRelays = [];
         function renderRelayList() {
             var list = document.getElementById("relayList");
             list.innerHTML = "";
             userRelays.forEach(function (url, i) {
                 var div = document.createElement("div");
                 div.className = "flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-4 py-2";
-                div.innerHTML = '<span class="text-sm font-mono text-gray-700 break-all">' + url + '</span>' +
-                    '<button type="button" onclick="removeRelay(' + i + ')" class="text-red-500 hover:text-red-700 text-sm font-medium ml-2 flex-shrink-0">Remove</button>';
+                div.innerHTML = '<span class="text-sm font-mono text-gray-700 break-all">' + escapeHtml(url) + '</span><button type="button" onclick="removeRelay(' + i + ')" class="text-red-500 hover:text-red-700 text-sm font-medium ml-2 flex-shrink-0">Remove</button>';
                 list.appendChild(div);
             });
         }
-
         function addRelay() {
             var input = document.getElementById("relayInput");
             var url = input.value.trim();
             if (!url) return;
-            if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
-                showRelayStatus("Relay URL must start with ws:// or wss://", true);
-                return;
-            }
-            if (userRelays.indexOf(url) !== -1) {
-                showRelayStatus("Relay already in list", true);
-                return;
-            }
+            if (!url.startsWith("ws://") && !url.startsWith("wss://")) { showRelayStatus("Relay URL must start with ws:// or wss://", true); return; }
+            if (userRelays.indexOf(url) !== -1) { showRelayStatus("Relay already in list", true); return; }
             userRelays.push(url);
             input.value = "";
             renderRelayList();
         }
-
-        function removeRelay(index) {
-            userRelays.splice(index, 1);
-            renderRelayList();
-        }
-
+        function removeRelay(index) { userRelays.splice(index, 1); renderRelayList(); }
         function saveRelays() {
             localStorage.setItem("wun_relays", JSON.stringify(userRelays));
             fetch("/api/relays", {
                 method: "POST",
-                headers: { "Content-Type": "application/json", "X-CSRFToken": "{{ csrf_token }}" },
+                headers: { "Content-Type": "application/json", "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
                 body: JSON.stringify({ relays: userRelays }),
-            }).then(function (r) { return r.json(); }).then(function () {
-                showRelayStatus("Relays saved successfully.");
-            }).catch(function () {
-                showRelayStatus("Saved locally. Server sync failed.", true);
-            });
+            }).then(function (r) { return r.json(); }).then(function () { showRelayStatus("Relays saved successfully."); })
+            .catch(function () { showRelayStatus("Saved locally. Server sync failed.", true); });
         }
-
         function showRelayStatus(message, isError) {
             var el = document.getElementById("relayStatus");
             el.textContent = message;
@@ -395,22 +369,18 @@
             el.classList.remove("hidden");
             setTimeout(function () { el.classList.add("hidden"); }, 3000);
         }
-
         function loadRelays() {
             fetch("/api/relays").then(function (r) { return r.json(); }).then(function (data) {
-                userRelays = data.relays || DEFAULT_RELAYS;
+                userRelays = data.relays || getRelays();
                 localStorage.setItem("wun_relays", JSON.stringify(userRelays));
                 renderRelayList();
-            }).catch(function () {
-                userRelays = getRelays();
-                renderRelayList();
-            });
+            }).catch(function () { userRelays = getRelays(); renderRelayList(); });
         }
 
         document.addEventListener("DOMContentLoaded", function () {
-            initTauriSocket();
             switchTab("profile");
             loadRelays();
+            updatePreview();
         });
     </script>
 </body>

@@ -1,1225 +1,159 @@
+{% load static %}
 <!doctype html>
 <html>
-    <head>
-        <title>Feed - iyou_wun</title>
-        <!-- REPLACE WITH STATIC TAILWIND CSS - Rule 7 compliance -->
-    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
-    <link rel="stylesheet" href="{% static 'css/output.css %}">
-        <script>
-            // Prevent script execution crashes if runtime tailwind variables are unresolved
-        if (typeof tailwind !== 'undefined') {
-            tailwind.config = {
-                theme: {
-                    extend: {
-                        screens: { xs: '360px' }
-                    }
-                }
-            }
-        </script>
-        <style>
-            .toast {
-                animation: slideIn 0.3s ease-out;
-            }
-            @keyframes slideIn {
-                from {
-                    transform: translateX(100%);
-                    opacity: 0;
-                }
-                to {
-                    transform: translateX(0);
-                    opacity: 1;
-                }
-            }
-            .toast.hide {
-                animation: slideOut 0.3s ease-out forwards;
-            }
-            @keyframes slideOut {
-                from {
-                    transform: translateX(0);
-                    opacity: 1;
-                }
-                to {
-                    transform: translateX(100%);
-                    opacity: 0;
-                }
-            }
-        </style>
-    </head>
-    <body class="bg-gray-100 min-h-screen">
-        {% include 'includes/_ecosystem_bar.html' %}
-        {% include 'includes/_standard_header.html' %}
-        {% include '_nav.html' %}
+<head>
+    <title>Feed - iyou_wun</title>
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
+    <style>
+        .toast { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .toast.hide { animation: slideOut 0.3s ease-out forwards; }
+        @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    {% include 'includes/_ecosystem_bar.html' %}
+    {% include 'includes/_standard_header.html' %}
+    {% include '_nav.html' %}
 
-        <main class="max-w-4xl mx-auto px-4 py-10">
-            {% if messages %} {% for message in messages %}
-            <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
-                <div class="flex">
-                    <div class="flex-shrink-0">
-                        <svg
-                            class="h-5 w-5 text-green-400"
-                            xmlns="http://www.w3.org/2000/svg"
-                            viewBox="0 0 20 20"
-                            fill="currentColor"
-                        >
-                            <path
-                                fill-rule="evenodd"
-                                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                                clip-rule="evenodd"
-                            />
-                        </svg>
-                    </div>
-                    <div class="ml-3">
-                        <p class="text-sm text-green-700">{{ message }}</p>
-                    </div>
-                </div>
+    <main class="max-w-4xl mx-auto px-4 py-10">
+        {% if messages %} {% for message in messages %}
+        <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
+            <div class="flex">
+                <div class="flex-shrink-0"><svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg></div>
+                <div class="ml-3"><p class="text-sm text-green-700">{{ message }}</p></div>
             </div>
-            {% endfor %} {% endif %}
+        </div>
+        {% endfor %} {% endif %}
 
-            <div class="bg-white rounded-lg shadow-md p-8">
-                <h1 class="text-2xl font-bold mb-2">Omni-Social Feed</h1>
-                <p class="text-gray-500 mb-6">
-                    {% if feed_mode == "network" %}Your network on the Nostr protocol{% else %}Global firehose from the Nostr network{% endif %}
-                </p>
+        <div class="bg-white rounded-lg shadow-md p-8">
+            <h1 class="text-2xl font-bold mb-2">Omni-Social Feed</h1>
+            <p class="text-gray-500 mb-6">{% if feed_mode == "network" %}Your network on the Nostr protocol{% else %}Global firehose from the Nostr network{% endif %}</p>
 
-                <!-- FEED TOGGLE: Network / Global / Thread -->
-                <div class="flex items-center gap-2 mb-6 border-b border-gray-200 pb-4">
-                    {% if thread_mode %}
-                    <a href="{% url 'feed' %}" class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-indigo-600 hover:bg-gray-200">&larr; Back to Feed</a>
-                    <span class="text-sm text-gray-400">|</span>
-                    <span class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white">Thread View</span>
-                    {% else %}
-                    <a href="/feed" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode != "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Network</a>
-                    <a href="/feed?mode=global" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode == "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Global</a>
-                    {% endif %}
-                </div>
+            <div class="flex items-center gap-2 mb-6 border-b border-gray-200 pb-4">
+                {% if thread_mode %}
+                <a href="{% url 'feed' %}" class="px-4 py-2 text-sm font-medium rounded-lg bg-gray-100 text-indigo-600 hover:bg-gray-200">&larr; Back to Feed</a>
+                <span class="text-sm text-gray-400">|</span>
+                <span class="px-4 py-2 text-sm font-medium rounded-lg bg-indigo-600 text-white">Thread View</span>
+                {% else %}
+                <a href="/feed" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode != "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Network</a>
+                <a href="/feed?mode=global" class="px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 {% if feed_mode == "global" %}bg-indigo-600 text-white{% else %}bg-gray-100 text-gray-600 hover:bg-gray-200{% endif %}">Global</a>
+                {% endif %}
+            </div>
 
-                <!-- POST COMPONENT -->
-                {% if user_pubkey %}
-                <div class="mb-8 border border-gray-200 rounded-lg p-6">
-                    <h2 class="text-lg font-semibold mb-4">Post to Nostr</h2>
-                    <textarea
-                        id="postContent"
-                        class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                        rows="3"
-                        placeholder="What's on your mind?"
-                    ></textarea>
-                    <div class="mt-4 flex items-center gap-3 justify-between">
-                        <div class="flex items-center gap-3">
-                            <input type="file" id="mediaInput" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
-                            <button type="button" id="uploadButton" onclick="document.getElementById('mediaInput').click()" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 px-3 py-2 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
-                                Upload Media
-                            </button>
-                            <span id="uploadStatus" class="text-xs text-gray-500 hidden"></span>
-                            <button type="button" onclick="openPollModal()" class="text-sm text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1 px-3 py-2 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                                Add Poll
-                            </button>
-                        </div>
-                        <button
-                            id="postButton"
-                            class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                            onclick="postToNostr()"
-                        >
-                            <span id="postButtonText">Post to Nostr</span>
-                            <span id="postButtonLoading" class="hidden">
-                                <svg
-                                    class="animate-spin -ml-1 h-4 w-4 text-white inline-block"
-                                    xmlns="http://www.w3.org/2000/svg"
-                                    fill="none"
-                                    viewBox="0 0 24 24"
-                                >
-                                    <circle
-                                        class="opacity-25"
-                                        cx="12"
-                                        cy="12"
-                                        r="10"
-                                        stroke="currentColor"
-                                        stroke-width="4"
-                                    ></circle>
-                                    <path
-                                        class="opacity-75"
-                                        fill="currentColor"
-                                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                                    ></path>
-                                </svg>
-                                Waiting for Signature...
-                            </span>
+            {% if user_pubkey %}
+            <div class="mb-8 border border-gray-200 rounded-lg p-6">
+                <h2 class="text-lg font-semibold mb-4">Post to Nostr</h2>
+                <textarea id="postContent" class="w-full border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none" rows="3" placeholder="What's on your mind?"></textarea>
+                <div class="mt-4 flex items-center gap-3 justify-between">
+                    <div class="flex items-center gap-3">
+                        <input type="file" id="mediaInput" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
+                        <button type="button" id="uploadButton" onclick="document.getElementById('mediaInput').click()" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium flex items-center gap-1 px-3 py-2 border border-indigo-200 rounded-lg hover:bg-indigo-50 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                            Upload Media
+                        </button>
+                        <span id="uploadStatus" class="text-xs text-gray-500 hidden"></span>
+                        <button type="button" onclick="openPollModal()" class="text-sm text-amber-600 hover:text-amber-800 font-medium flex items-center gap-1 px-3 py-2 border border-amber-200 rounded-lg hover:bg-amber-50 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-3-3v6m-7 4h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
+                            Add Poll
                         </button>
                     </div>
+                    <button id="postButton" class="bg-indigo-600 hover:bg-indigo-700 text-white font-medium px-6 py-2 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed" onclick="postToNostr()">
+                        <span id="postButtonText">Post to Nostr</span>
+                        <span id="postButtonLoading" class="hidden"><svg class="animate-spin -ml-1 h-4 w-4 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Waiting for Signature...</span>
+                    </button>
                 </div>
-                {% endif %}
+            </div>
+            {% endif %}
 
-                <!-- FEED -->
-                {% if notes %}
-                <div id="feedContainer" class="space-y-6">
-                    {% for note in notes %}
-                    {% if note.kind == 1 %}
-                    <!-- KIND 1: Text Note -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1" data-note-id="{{ forloop.counter }}" data-created-at="{{ note.created_at|date:'U' }}">
-                        <div class="flex items-start gap-4">
-                            <div class="flex-shrink-0">
-                                {% if note.author_avatar %}
-                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-indigo-300" /></a>
-                                {% else %}
-                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-indigo-300">
-                                    <span class="text-indigo-600 font-mono text-sm">{{ note.author_name|default:"N"|first|upper }}</span>
-                                </div></a>
-                                {% endif %}
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
-                                    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
-                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
-                                </div>
-                                <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaksbr }}</p>
-                                {% if note.reactions or note.comments %}
-                                <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
-                                    {% if note.reactions %}
-                                    <span class="flex items-center gap-1 text-sm text-pink-600">❤️ {{ note.reactions|length }}</span>
-                                    {% endif %}
-                                    {% if note.comments %}
-                                    <span class="flex items-center gap-1 text-sm text-gray-500">💬 {{ note.comments|length }}</span>
-                                    {% endif %}
-                                </div>
-                                {% endif %}
-                                {% if note.comments %}
-                                <div class="mt-4 space-y-3 pl-4 border-l-2 border-gray-200">
-                                    {% for comment in note.comments %}
-                                    <div class="bg-gray-50 rounded-lg p-3">
-                                        <div class="flex items-center gap-2 mb-1">
-                                            <span class="text-xs font-mono text-gray-600">{{ comment.npub|truncatechars:12 }}</span>
-                                            <span class="text-xs text-gray-400">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
-                                        </div>
-                                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content|linebreaksbr }}</p>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                                {% endif %}
-                                {% if note.comments|length > 0 %}
-                                <a href="/feed?thread={{ note.id }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">View Thread &rarr;</a>
-                                {% endif %}
-                            </div>
-                        </div>
+            {% if notes %}
+            <div id="feedContainer" class="space-y-6">
+                {% for note in notes %}
+                <div class="thread-root border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
+                     data-kind="{{ note.kind }}" data-note-id="{{ note.id }}" data-pubkey="{{ note.pubkey }}" data-created-at="{{ note.created_at|date:'U' }}">
+                    {% include "includes/_thread_post.html" with note=note show_thread_border=False %}
+                </div>
+                {% if note.replies %}
+                <div class="thread-replies ml-6 pl-4 border-l-2 border-indigo-200 space-y-4" data-parent-id="{{ note.id }}" id="replies-{{ note.id }}">
+                    {% for reply in note.replies %}
+                    <div class="thread-reply" data-kind="1111" data-note-id="{{ reply.id }}" data-pubkey="{{ reply.pubkey }}" data-parent-id="{{ note.id }}">
+                        {% include "includes/_thread_post.html" with note=reply show_thread_border=False %}
                     </div>
-                    {% elif note.kind == 1063 %}
-                    <!-- KIND 1063: Media Entry -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1063" data-created-at="{{ note.created_at|date:'U' }}">
-                        <div class="flex items-start gap-4">
-                            <div class="flex-shrink-0">
-                                {% if note.author_avatar %}
-                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-violet-300" /></a>
-                                {% else %}
-                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-violet-300">
-                                    <span class="text-violet-600 font-mono text-sm">{{ note.author_name|default:"M"|first|upper }}</span>
-                                </div></a>
-                                {% endif %}
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
-                                    {% if note.is_sovereign %}
-                                    <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>
-                                    {% else %}
-                                    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
-                                    {% endif %}
-                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
-                                </div>
-                                {% with mime=note.mime_type|lower %}
-                                {% if mime and "image" in mime %}
-                                <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
-                                    <img src="{{ note.file_url }}" alt="{{ note.alt_text|default:note.content }}" class="w-full h-auto max-h-96 object-contain" loading="lazy" />
-                                </div>
-                                {% elif mime and "video" in mime %}
-                                <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
-                                    <video src="{{ note.file_url }}" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video>
-                                </div>
-                                {% elif mime and "audio" in mime %}
-                                <div class="mb-3">
-                                    <audio src="{{ note.file_url }}" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio>
-                                </div>
-                                {% else %}
-                                <div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                                    <a href="{{ note.file_url }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 {{ note.file_url }}</a>
-                                </div>
-                                {% endif %}
-                                {% endwith %}
-                                {% if note.content %}
-                                <p class="text-gray-700 whitespace-pre-wrap mb-2">{{ note.content }}</p>
-                                {% endif %}
-                                {% if note.reactions or note.comments %}
-                                <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
-                                    {% if note.reactions %}
-                                    <span class="flex items-center gap-1 text-sm text-pink-600">❤️ {{ note.reactions|length }}</span>
-                                    {% endif %}
-                                    {% if note.comments %}
-                                    <span class="flex items-center gap-1 text-sm text-gray-500">💬 {{ note.comments|length }}</span>
-                                    {% endif %}
-                                </div>
-                                {% endif %}
-                                {% if note.comments %}
-                                <div class="mt-4 space-y-3 pl-4 border-l-2 border-gray-200">
-                                    {% for comment in note.comments %}
-                                    <div class="bg-gray-50 rounded-lg p-3">
-                                        <div class="flex items-center gap-2 mb-1">
-                                            <span class="text-xs font-mono text-gray-600">{{ comment.npub|truncatechars:12 }}</span>
-                                            <span class="text-xs text-gray-400">{{ comment.created_at|date:"Y-m-d H:i" }}</span>
-                                        </div>
-                                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ comment.content|linebreaksbr }}</p>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                                {% endif %}
-                                {% if note.comments|length > 0 %}
-                                <a href="/feed?thread={{ note.id }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">View Thread &rarr;</a>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    {% elif note.kind == 1111 %}
-                    <!-- ORPHAN KIND 1111: Standalone Threaded Comment -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="1111" data-note-id="{{ forloop.counter }}" data-created-at="{{ note.created_at|date:'U' }}">
-                        <div class="flex items-start gap-4">
-                            <div class="flex-shrink-0">
-                                {% if note.author_avatar %}
-                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-orange-300" /></a>
-                                {% else %}
-                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-orange-300">
-                                    <span class="text-orange-600 font-mono text-sm">{{ note.author_name|default:"C"|first|upper }}</span>
-                                </div></a>
-                                {% endif %}
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
-                                    <span class="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">Comment</span>
-                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
-                                </div>
-                                <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaksbr }}</p>
-                                {% for t in note.tags %}{% if t.0 == 'e' %}<a href="/feed?thread={{ t.1 }}" class="text-xs text-indigo-600 hover:text-indigo-800 font-medium mt-2 inline-block">View Thread &rarr;</a>{% endif %}{% endfor %}
-                            </div>
-                        </div>
-                    </div>
-                    {% elif note.kind == 30023 %}
-                    <!-- KIND 30023: Poll Definition -->
-                    <div class="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow" data-kind="30023" data-poll-id="{{ note.id }}" data-poll-pubkey="{{ note.pubkey }}" data-poll-dtag="{{ note.poll_d_tag }}">
-                        <div class="flex items-start gap-4">
-                            <div class="flex-shrink-0">
-                                {% if note.author_avatar %}
-                                <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-amber-300" /></a>
-                                {% else %}
-                                <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-amber-300">
-                                    <span class="text-amber-600 font-mono text-sm">{{ note.author_name|default:"P"|first|upper }}</span>
-                                </div></a>
-                                {% endif %}
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
-                                    <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Poll</span>
-                                    <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
-                                    <div class="relative ml-auto">
-                                        <button onclick="toggleGear(event)" class="text-gray-400 hover:text-gray-600 text-lg leading-none px-1" title="Verification details">&#9881;</button>
-                                        <div class="gear-dropdown hidden absolute right-0 top-6 w-72 bg-white border border-gray-200 rounded-lg shadow-lg z-10 p-4 text-xs text-gray-600 space-y-2">
-                                            <p class="font-semibold text-gray-800 border-b pb-1 mb-1">Provenance</p>
-                                            <p><span class="font-medium">Voter DID:</span> {{ note.pubkey|truncatechars:32 }}</p>
-                                            <p><span class="font-medium">Relay Source:</span> {{ relays|first|default:"unknown" }}</p>
-                                            <p><span class="font-medium">Verification:</span> &#9200; Carrier Payload (Signature Verification Pending Bridge Hook)</p>
-                                            {% if note.poll_scope_geohash %}
-                                            <p><span class="font-medium">Scope Geohash:</span> {{ note.poll_scope_geohash }}</p>
-                                            {% endif %}
-                                            {% if note.poll_scope_org %}
-                                            <p><span class="font-medium">Scope Org:</span> {{ note.poll_scope_org }}</p>
-                                            {% endif %}
-                                        </div>
-                                    </div>
-                                </div>
-                                <p class="text-gray-900 font-medium mb-3">{{ note.content }}</p>
-                                {% if user_pubkey %}
-                                <form class="poll-vote-form" data-poll-id="{{ note.id }}">
-                                    {% csrf_token %}
-                                    <div class="space-y-2">
-                                        {% for option in note.poll_options %}
-                                        <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">
-                                            <input type="radio" name="selection" value="{{ option }}" class="accent-amber-600">
-                                            <span class="text-sm text-gray-700">{{ option }}</span>
-                                        </label>
-                                        {% endfor %}
-                                    </div>
-                                    <button type="submit" class="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Cast Vote</button>
-                                </form>
-                                {% else %}
-                                <div class="space-y-2 opacity-60">
-                                    {% for option in note.poll_options %}
-                                    <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
-                                        <span class="w-4 h-4 rounded-full border-2 border-gray-300 inline-block"></span>
-                                        <span class="text-sm text-gray-500">{{ option }}</span>
-                                    </div>
-                                    {% endfor %}
-                                </div>
-                                <p class="mt-2 text-xs text-gray-400 italic">
-                                    Auditor Mode — voting requires
-                                    {% if note.poll_scope_geohash %}geohash <strong>{{ note.poll_scope_geohash }}</strong>{% endif %}
-                                    {% if note.poll_scope_geohash and note.poll_scope_org %} and {% endif %}
-                                    {% if note.poll_scope_org %}org <strong>{{ note.poll_scope_org }}</strong>{% endif %}
-                                    {% if not note.poll_scope_geohash and not note.poll_scope_org %}authenticated session{% endif %}
-                                </p>
-                                {% endif %}
-                            </div>
-                        </div>
-                    </div>
-                    {% endif %}
                     {% endfor %}
                 </div>
-                {% else %}
-                <div class="text-center py-12">
-                    <p class="text-gray-500 mb-4">Loading unified feed from Nostr network...</p>
-                    <p class="text-sm text-gray-400">Connecting to relays — fetching notes, media, reactions, and comments</p>
+                {% elif note.reply_count %}
+                <div class="ml-6 pl-4 border-l-2 border-indigo-200">
+                    <button onclick="toggleReplies('{{ note.id }}')" class="text-sm text-indigo-600 hover:text-indigo-800 font-medium transition-colors" id="toggle-replies-{{ note.id }}">Show {{ note.reply_count }} repl{{ note.reply_count|pluralize:"y,ies" }}</button>
                 </div>
                 {% endif %}
-
-                {% if notes %}
-                <div class="mt-6 text-center">
-                    <button id="loadMoreBtn" onclick="loadMoreNotes()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-8 py-3 rounded-lg transition-colors">
-                        Load More
-                    </button>
-                    <div id="loadMoreSpinner" class="hidden mt-4">
-                        <svg class="animate-spin h-6 w-6 text-indigo-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
+                <div class="ml-6 pl-4 border-l-2 border-transparent" id="reply-editor-wrap-{{ note.id }}">
+                    <div class="flex items-start gap-3 hidden" id="reply-editor-{{ note.id }}">
+                        <div class="flex-shrink-0 mt-2"><div class="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center"><span class="text-indigo-600 font-mono text-xs">Y</span></div></div>
+                        <div class="flex-1">
+                            <textarea id="reply-content-{{ note.id }}" class="w-full border border-gray-300 rounded-lg px-4 py-3 text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none text-sm" rows="2" placeholder="Write a reply..."></textarea>
+                            <div class="flex items-center gap-2 mt-2">
+                                <button onclick="cancelReply('{{ note.id }}')" class="text-xs text-gray-500 hover:text-gray-700 transition-colors">Cancel</button>
+                                <button onclick="submitReply('{{ note.id }}', '{{ note.pubkey }}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors" id="reply-btn-{{ note.id }}">Reply</button>
+                            </div>
+                        </div>
                     </div>
-                    <p id="loadMoreEnd" class="text-sm text-gray-400 hidden mt-4">No more notes to load.</p>
+                    <button onclick="showReplyEditor('{{ note.id }}')" class="text-xs text-gray-500 hover:text-indigo-600 font-medium transition-colors mt-1" id="reply-trigger-{{ note.id }}">&#8617; Reply</button>
                 </div>
-                {% endif %}
+                {% endfor %}
             </div>
-        </main>
-
-        <!-- Toast Notifications -->
-        <div
-            id="sovereignToast"
-            class="fixed top-4 right-4 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg toast hide"
-            role="alert"
-        >
-            <span class="font-medium">Sovereign Copy Saved.</span>
+            <div class="mt-6 text-center">
+                <button id="loadMoreBtn" onclick="loadMoreNotes()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-8 py-3 rounded-lg transition-colors">Load More</button>
+                <div id="loadMoreSpinner" class="hidden mt-4"><svg class="animate-spin h-6 w-6 text-indigo-600 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg></div>
+                <p id="loadMoreEnd" class="text-sm text-gray-400 hidden mt-4">No more notes to load.</p>
+            </div>
+            {% else %}
+            <div class="text-center py-12">
+                <p class="text-gray-500 mb-4">Loading unified feed from Nostr network...</p>
+                <p class="text-sm text-gray-400">Connecting to relays — fetching notes, media, reactions, and comments</p>
+            </div>
+            {% endif %}
         </div>
-        <div
-            id="toast"
-            class="fixed top-20 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide"
-            role="alert"
-        >
-            <span class="font-medium"
-                >Sovereign Event Broadcasted Successfully.</span
-            >
+    </main>
+
+    <div id="sovereignToast" class="fixed top-4 right-4 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg toast hide" role="alert"><span class="font-medium">Sovereign Copy Saved.</span></div>
+    <div id="toast" class="fixed top-20 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide" role="alert"><span class="font-medium">Sovereign Event Broadcasted Successfully.</span></div>
+
+    {% include 'poll_modal.html' %}
+
+    <div id="fallbackModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-gray-900">Signing Bridge Unavailable</h3>
+                    <button type="button" onclick="bridgeClient.closeFallbackModal()" class="text-gray-400 hover:text-gray-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">The Tauri signing bridge could not be reached. You can manually sign the event below using an external tool, then paste the signed JSON.</p>
+            </div>
+            <div class="p-6">
+                <label class="block text-xs font-medium text-gray-600 mb-1">Unsigned Event JSON</label>
+                <textarea id="fallbackUnsigned" rows="8" readonly class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-600 bg-gray-50 resize-none"></textarea>
+                <label class="block text-xs font-medium text-gray-600 mb-1 mt-4">Paste Signed Event JSON</label>
+                <textarea id="fallbackSigned" rows="8" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none" placeholder='{"id":"...","sig":"...","kind":1,...}'></textarea>
+            </div>
+            <div class="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+                <button type="button" onclick="bridgeClient.closeFallbackModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+                <button type="button" onclick="bridgeClient.submitSignedEvent()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">Broadcast Signed Event</button>
+            </div>
         </div>
+    </div>
 
-        {% include 'poll_modal.html' %}
-
-        <!-- WebSocket Bridge Script -->
-        <script>
-            // Configuration
-            const TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url }}";
-            const DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me", "wss://nos.lol"];
-            let NOSTR_RELAYS = DEFAULT_RELAYS;
-
-            function loadRelaysFromStorage() {
-                var stored = localStorage.getItem("wun_relays");
-                if (stored) {
-                    try { NOSTR_RELAYS = JSON.parse(stored); } catch (e) { NOSTR_RELAYS = DEFAULT_RELAYS; }
-                } else {
-                    NOSTR_RELAYS = DEFAULT_RELAYS;
-                }
-            }
-            loadRelaysFromStorage();
-
-            // User data from Django template
-            const userPubkey = "{{ user_pubkey }}";
-            const userNpub = "{{ user_npub }}";
-            const userDid = "{{ user_did }}";
-
-            // Resolve the effective secp256k1 pubkey: Tauri bridge profile > legacy template var
-            async function getEffectivePubkey() {
-                var bridgePk = window.activeProfile ? window.activeProfile.nostr_pubkey_hex : null;
-                var templatePk = typeof userPubkey !== "undefined" ? userPubkey : null;
-                var pk = (bridgePk && bridgePk.length === 64) ? bridgePk : templatePk;
-                if (!pk || pk.length !== 64 || !/^[a-fA-F0-9]{64}$/.test(pk)) {
-                    console.error("CRITICAL: Invalid Pubkey Resolution:", { bridgePk: bridgePk, templatePk: templatePk });
-                    throw new Error("Identity Synchronization Required: No valid secp256k1 pubkey found");
-                }
-                return pk;
-            }
-
-            // State
-            let pendingEvent = null;
-            let pendingVote = null;
-            let pendingPoll = false;
-            let isProcessing = false;
-
-            // Mutex-guarded singleton WebSocket connection to Tauri signing bridge
-            function connectToSigningBridge() {
-                if (window.feedConnectionLock === "CONNECTING" || window.feedConnectionLock === "OPEN") {
-                    console.log("Guard: Feed bridge connection loop is busy. Suppressing duplicate.");
-                    return;
-                }
-                if (window.activeFeedSocket && window.activeFeedSocket.readyState <= 1) {
-                    console.log("Guard: Active feed socket reference already open. Aborting.");
-                    return;
-                }
-                window.feedConnectionLock = "CONNECTING";
-                console.log("WS: Feed connection lock claimed. Spawning socket...");
-                try {
-                    var socket = new WebSocket(TAURI_SIGNING_BRIDGE);
-                    window.activeFeedSocket = socket;
-                    socket.onopen = function () {
-                        window.feedConnectionLock = "OPEN";
-                        console.log("Connected to Tauri signing bridge at", TAURI_SIGNING_BRIDGE);
-                        socket.send(JSON.stringify({ type: "get_profile" }));
-                        console.log("WS: Sent profile sync request to bridge.");
-                    };
-                    socket.onmessage = function (event) {
-                        handleTauriMessage(event.data);
-                    };
-                    socket.onerror = function (err) {
-                        window.activeFeedSocket = null;
-                        window.feedConnectionLock = "IDLE";
-                        console.error("Tauri bridge connection error:", err);
-                        showToast("Error connecting to Tauri bridge. Please ensure iYou Home is running.", true);
-                    };
-                    socket.onclose = function (e) {
-                        console.log("WS: Feed socket dropped. Code:", e ? e.code : "unknown");
-                        window.activeFeedSocket = null;
-                        window.feedConnectionLock = "IDLE";
-                    };
-                } catch (err) {
-                    window.feedConnectionLock = "IDLE";
-                    console.error("Critical error building feed socket:", err);
-                }
-            }
-
-            // Handle messages from Tauri bridge
-            function handleTauriMessage(data) {
-                try {
-                    var message = JSON.parse(data);
-
-                    if (message.type === "profile_sync") {
-                        window.activeProfile = message.profile;
-                        console.log("BRIDGE_SYNC_SUCCESS: Profile updated", window.activeProfile);
-                        return;
-                    }
-
-                    if (message.type === "signed_event" && pendingEvent) {
-                        var signedEvent = message.event;
-                        console.log("Received signed event from Tauri:", signedEvent);
-
-                        // Pass the pristine enclave structure through unaltered
-                        pendingEvent.id = signedEvent.id;
-                        pendingEvent.sig = signedEvent.sig;
-
-                        if (pendingVote) {
-                            // Vote flow: direct-ingest the signed envelope to Poly engine
-                            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify(signedEvent)
-                            })
-                            .then(function (r) {
-                                if (r.ok) {
-                                    var btn = pendingVote.btn;
-                                    btn.textContent = "Vote Cast";
-                                    btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
-                                    btn.classList.add("bg-green-500", "cursor-default");
-                                    pendingVote.form.querySelectorAll("input").forEach(function (i) { i.disabled = true; });
-                                } else {
-                                    var btn = pendingVote.btn;
-                                    btn.textContent = "Error — try again";
-                                    btn.disabled = false;
-                                }
-                            })
-                            .catch(function () {
-                                var btn = pendingVote.btn;
-                                btn.textContent = "Network Error";
-                                btn.disabled = false;
-                            });
-                            pendingVote = null;
-                            pendingEvent = null;
-                            isProcessing = false;
-                        } else if (pendingPoll) {
-                            // Poll creation flow: direct-ingest to Poly engine, then broadcast to relays
-                            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify(signedEvent)
-                            })
-                            .then(function (r) {
-                                if (!r.ok) console.error("Direct poly ingestion failed, falling back to passive relay sync.");
-                                else console.log("Success: Direct poll injection to poly dashboard verified.");
-                            })
-                            .catch(function (err) { console.error("Network error during direct poly ingestion:", err); });
-                            broadcastToRelays(pendingEvent);
-                            closePollModal();
-                            pendingPoll = false;
-                            pendingEvent = null;
-                            isProcessing = false;
-                        } else {
-                            // Standard post flow: broadcast to Nostr relays
-                            broadcastToRelays(pendingEvent);
-                        }
-                    }
-                } catch (err) {
-                    console.error("Error handling Tauri message:", err);
-                }
-            }
-
-            // Post a text note (Kind 1) via Tauri signing
-            async function postToNostr() {
-                const content = document.getElementById("postContent").value.trim();
-                if (!content) {
-                    showToast("Please enter some content to post.", true);
-                    return;
-                }
-                var pk;
-                try { pk = await getEffectivePubkey(); }
-                catch (e) { showToast(e.message, true); return; }
-                setButtonLoading(true);
-                isProcessing = true;
-                const event = {
-                    kind: 1,
-                    content: content,
-                    pubkey: pk,
-                    created_at: Math.floor(Date.now() / 1000),
-                    tags: [],
-                };
-                sendEventToTauri(event);
-            }
-
-            // Generic signature pipe — sends any Nostr event kind to Tauri for signing
-            function sendEventToTauri(event) {
-                var pk = event.pubkey;
-                console.log("SENDING_EVENT_WITH_PUBKEY:", pk, "LENGTH:", pk ? pk.length : 0);
-                if (!pk || pk.length !== 64) {
-                    console.error("CRITICAL: Pubkey length mismatch — aborting bridge call. Expected 64, got " + (pk ? pk.length : 0));
-                    showToast("Pubkey validation failed. Cannot sign event.", true);
-                    resetPostState();
-                    return;
-                }
-                pendingEvent = event;
-                if (!window.activeFeedSocket || window.activeFeedSocket.readyState !== WebSocket.OPEN) {
-                    connectToSigningBridge();
-                }
-                var request = {
-                    type: "sign_event",
-                    event: event,
-                };
-                var checkSocket = setInterval(function () {
-                    if (window.activeFeedSocket && window.activeFeedSocket.readyState === WebSocket.OPEN) {
-                        clearInterval(checkSocket);
-                        console.log("Sending event to Tauri for signing:", event);
-                        window.activeFeedSocket.send(JSON.stringify(request));
-                    }
-                }, 100);
-                setTimeout(function () {
-                    if (isProcessing) {
-                        clearInterval(checkSocket);
-                        showToast("Timeout waiting for Tauri. Please try again.", true);
-                        resetPostState();
-                    }
-                }, 5000);
-            }
-
-            // SHA-256 hash via Web Crypto API
-            async function sha256Hex(data) {
-                const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                return hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
-            }
-
-            // Show upload status
-            function setUploadStatus(text) {
-                const el = document.getElementById("uploadStatus");
-                el.textContent = text;
-                el.classList.remove("hidden");
-            }
-
-            // Handle file selection: upload to Blossom, then sign Kind 1063
-            async function handleMediaSelected(file) {
-                if (!file) return;
-                setUploadStatus("Hashing...");
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    const hash = await sha256Hex(arrayBuffer);
-                    setUploadStatus("Uploading to Blossom...");
-                    const response = await fetch("http://127.0.0.1:9002/" + hash, {
-                        method: "PUT",
-                        body: arrayBuffer,
-                    });
-                    if (response.status === 201) {
-                        setUploadStatus("Requesting signature...");
-                        var pk;
-                        try { pk = await getEffectivePubkey(); }
-                        catch (e) { setUploadStatus(e.message); setTimeout(function () { document.getElementById("uploadStatus").classList.add("hidden"); }, 3000); return; }
-                        isProcessing = true;
-                        const event = {
-                            kind: 1063,
-                            content: "",
-                            pubkey: pk,
-                            created_at: Math.floor(Date.now() / 1000),
-                            tags: [
-                                ["url", "http://127.0.0.1:9002/" + hash],
-                                ["x", hash],
-                                ["m", file.type],
-                            ],
-                        };
-                        sendEventToTauri(event);
-                    } else {
-                        setUploadStatus("Upload failed (" + response.status + ")");
-                        console.error("Blossom upload error:", response.status);
-                        setTimeout(() => document.getElementById("uploadStatus").classList.add("hidden"), 3000);
-                    }
-                } catch (err) {
-                    setUploadStatus("Error: " + err.message);
-                    console.error("Upload error:", err);
-                    setTimeout(() => document.getElementById("uploadStatus").classList.add("hidden"), 3000);
-                }
-            }
-
-            // Broadcast signed event to ALL Nostr relays in parallel
-            function broadcastToRelays(signedEvent) {
-                console.log(
-                    "Broadcasting signed event to relays:",
-                    signedEvent,
-                );
-
-                let localRelaySuccess = false;
-                let anyGlobalSuccess = false;
-                let remaining = NOSTR_RELAYS.length;
-
-                function checkDone() {
-                    if (remaining > 0) return;
-                    if (localRelaySuccess) {
-                        showSovereignToast("Sovereign Copy Saved.");
-                    }
-                    if (anyGlobalSuccess) {
-                        showToast("Sovereign Event Broadcasted Successfully.");
-                        addNoteToFeed(signedEvent);
-                    } else if (!localRelaySuccess) {
-                        showToast(
-                            "Failed to broadcast to all relays. Event may not be visible.",
-                            true,
-                        );
-                    }
-                    resetPostState();
-                }
-
-                NOSTR_RELAYS.forEach(function (relayUrl) {
-                    const isLocal = relayUrl.startsWith("ws://127.0.0.1:9003");
-                    let finished = false;
-                    const done = function () {
-                        if (finished) return;
-                        finished = true;
-                        remaining--;
-                        checkDone();
-                    };
-
-                    try {
-                        const ws = new WebSocket(relayUrl);
-                        ws.onopen = function () {
-                            ws.send(JSON.stringify(["EVENT", signedEvent]));
-                        };
-                        ws.onmessage = function (event) {
-                            try {
-                                const msg = JSON.parse(event.data);
-                                if (msg[0] === "OK") {
-                                    if (isLocal) localRelaySuccess = true;
-                                    else anyGlobalSuccess = true;
-                                }
-                            } catch (e) {}
-                            try { ws.close(); } catch (e) {}
-                            done();
-                        };
-                        ws.onerror = function () { done(); };
-                        ws.onclose = function () { done(); };
-                        setTimeout(function () {
-                            try { ws.close(); } catch (e) {}
-                            done();
-                        }, 3000);
-                    } catch (err) {
-                        done();
-                    }
-                });
-            }
-
-            // Add event to feed optimistically (handles Kind 1 and Kind 1063)
-            function addNoteToFeed(event) {
-                const container = document.getElementById("feedContainer");
-                if (!container) return;
-
-                const noteElement = document.createElement("div");
-                const date = new Date(event.created_at * 1000);
-                const formattedDate = date.toLocaleString();
-                const npub = userNpub || userPubkey.substring(0, 12) + "...";
-
-                if (event.kind === 1063) {
-                    noteElement.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
-                    const tags = event.tags || [];
-                    const urlTag = tags.find(t => t[0] === "url");
-                    const mimeTag = tags.find(t => t[0] === "m");
-                    const url = urlTag ? urlTag[1] : "";
-                    const mime = mimeTag ? mimeTag[1] : "";
-                    let mediaHtml = "";
-                    if (mime.startsWith("image/")) {
-                        mediaHtml = `<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><img src="${url}" alt="" class="w-full h-auto max-h-96 object-contain" loading="lazy" /></div>`;
-                    } else if (mime.startsWith("video/")) {
-                        mediaHtml = `<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><video src="${url}" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video></div>`;
-                    } else if (mime.startsWith("audio/")) {
-                        mediaHtml = `<div class="mb-3"><audio src="${url}" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio></div>`;
-                    } else {
-                        mediaHtml = `<div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200"><a href="${url}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 ${url}</a></div>`;
-                    }
-                    noteElement.innerHTML = `
-                        <div class="flex items-start gap-4">
-                            <div class="flex-shrink-0">
-                                <div class="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center">
-                                    <span class="text-violet-600 font-mono text-sm">MEDIA</span>
-                                </div>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <span class="font-semibold text-gray-900">${npub}</span>
-                                    <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>
-                                    <span class="text-xs text-gray-500">${formattedDate}</span>
-                                </div>
-                                ${mediaHtml}
-                                ${event.content ? `<p class="text-gray-700 whitespace-pre-wrap mb-2">${event.content}</p>` : ""}
-                            </div>
-                        </div>
-                    `;
-                } else {
-                    noteElement.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
-                    noteElement.innerHTML = `
-                        <div class="flex items-start gap-4">
-                            <div class="flex-shrink-0">
-                                <div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center">
-                                    <span class="text-indigo-600 font-mono text-sm">NPUB</span>
-                                </div>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex items-center gap-2 mb-2">
-                                    <span class="font-semibold text-gray-900">${npub}</span>
-                                    <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
-                                    <span class="text-xs text-gray-500">${formattedDate}</span>
-                                </div>
-                                <p class="text-gray-700 whitespace-pre-wrap">${event.content}</p>
-                            </div>
-                        </div>
-                    `;
-                }
-
-                if (container.firstChild) {
-                    container.insertBefore(noteElement, container.firstChild);
-                } else {
-                    container.appendChild(noteElement);
-                }
-
-                document.getElementById("postContent").value = "";
-                const uploadStatus = document.getElementById("uploadStatus");
-                if (uploadStatus) uploadStatus.classList.add("hidden");
-            }
-
-            // Show toast notification
-            function showToast(message, isError = false) {
-                const toast = document.getElementById("toast");
-                const toastText = toast.querySelector("span");
-
-                toastText.textContent = message;
-
-                if (isError) {
-                    toast.className =
-                        "fixed top-20 right-4 bg-red-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
-                } else {
-                    toast.className =
-                        "fixed top-20 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast";
-                }
-
-                // Show toast
-                toast.classList.remove("hide");
-
-                // Hide after 3 seconds
-                setTimeout(() => {
-                    toast.classList.add("hide");
-                }, 3000);
-            }
-
-            // Show sovereign copy toast
-            function showSovereignToast(message) {
-                const toast = document.getElementById("sovereignToast");
-                const toastText = toast.querySelector("span");
-                toastText.textContent = message;
-                toast.className =
-                    "fixed top-4 right-4 bg-emerald-600 text-white px-6 py-3 rounded-lg shadow-lg toast";
-                toast.classList.remove("hide");
-                setTimeout(function () {
-                    toast.classList.add("hide");
-                }, 3000);
-            }
-
-            // Set button loading state
-            function setButtonLoading(loading) {
-                const button = document.getElementById("postButton");
-                const textSpan = document.getElementById("postButtonText");
-                const loadingSpan =
-                    document.getElementById("postButtonLoading");
-
-                if (loading) {
-                    button.disabled = true;
-                    textSpan.classList.add("hidden");
-                    loadingSpan.classList.remove("hidden");
-                } else {
-                    button.disabled = false;
-                    textSpan.classList.remove("hidden");
-                    loadingSpan.classList.add("hidden");
-                }
-            }
-
-            // Reset post state
-            function resetPostState() {
-                setButtonLoading(false);
-                isProcessing = false;
-                pendingEvent = null;
-                pendingVote = null;
-                pendingPoll = false;
-                var pubBtn = document.getElementById("publishPollBtn");
-                if (pubBtn) { pubBtn.disabled = false; pubBtn.textContent = "Publish Poll"; }
-            }
-
-            // Load More — fetch next batch of notes
-            function loadMoreNotes() {
-                var container = document.getElementById("feedContainer");
-                if (!container) return;
-                var notes = container.querySelectorAll('[data-note-id]');
-                if (notes.length === 0) return;
-                var lastNote = notes[notes.length - 1];
-                var until = lastNote.getAttribute('data-created-at');
-                if (!until) return;
-
-                var btn = document.getElementById("loadMoreBtn");
-                var spinner = document.getElementById("loadMoreSpinner");
-                var endMsg = document.getElementById("loadMoreEnd");
-                btn.classList.add("hidden");
-                spinner.classList.remove("hidden");
-
-                var mode = new URLSearchParams(window.location.search).get("mode") || "network";
-                fetch("/api/feed?until=" + until + "&mode=" + mode)
-                    .then(function (r) { return r.json(); })
-                    .then(function (data) {
-                        spinner.classList.add("hidden");
-                        var newNotes = data.notes || [];
-                        if (newNotes.length === 0) {
-                            endMsg.classList.remove("hidden");
-                            return;
-                        }
-                        newNotes.forEach(function (note) { appendNoteToFeed(note, container); });
-                        btn.classList.remove("hidden");
-                    })
-                    .catch(function () {
-                        spinner.classList.add("hidden");
-                        btn.classList.remove("hidden");
-                    });
-            }
-
-            // Append a single note (from JSON API) to the feed container
-            function appendNoteToFeed(note, container) {
-                var el = document.createElement("div");
-                var date = new Date(note.created_at * 1000);
-                var formattedDate = date.toLocaleString();
-                var npub = note.npub || note.pubkey.substring(0, 12) + "...";
-
-                if (note.kind === 1) {
-                    el.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
-                    el.setAttribute("data-kind", "1");
-                    el.setAttribute("data-note-id", Date.now());
-                    el.setAttribute("data-created-at", Math.floor(note.created_at));
-                    el.innerHTML = '<div class="flex items-start gap-4">' +
-                        '<div class="flex-shrink-0">' +
-                        (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + note.author_name + '" class="w-10 h-10 rounded-full object-cover" />' :
-                            '<div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center"><span class="text-indigo-600 font-mono text-sm">' + (note.author_name || "N").charAt(0).toUpperCase() + '</span></div>') +
-                        '</div>' +
-                        '<div class="flex-1 min-w-0">' +
-                        '<div class="flex items-center gap-2 mb-2">' +
-                        '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + (note.author_name || npub) + '</a>' +
-                        '<span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>' +
-                        '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
-                        '</div>' +
-                        '<p class="text-gray-700 whitespace-pre-wrap">' + escapeHtml(note.content) + '</p>' +
-                        (note.reactions && note.reactions.length ? '<div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100"><span class="flex items-center gap-1 text-sm text-pink-600">❤️ ' + note.reactions.length + '</span></div>' : '') +
-                        (note.comments && note.comments.length ? '<div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100"><span class="flex items-center gap-1 text-sm text-gray-500">💬 ' + note.comments.length + '</span></div>' : '') +
-                        '</div></div>';
-                } else if (note.kind === 1063) {
-                    el.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
-                    el.setAttribute("data-kind", "1063");
-                    el.setAttribute("data-note-id", Date.now());
-                    el.setAttribute("data-created-at", Math.floor(note.created_at));
-                    var mime = (note.mime_type || "").toLowerCase();
-                    var mediaHtml = "";
-                    if (mime.indexOf("image") !== -1) {
-                        mediaHtml = '<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><img src="' + note.file_url + '" alt="" class="w-full h-auto max-h-96 object-contain" loading="lazy" /></div>';
-                    } else if (mime.indexOf("video") !== -1) {
-                        mediaHtml = '<div class="mb-3 rounded-lg overflow-hidden bg-gray-100"><video src="' + note.file_url + '" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video></div>';
-                    } else if (mime.indexOf("audio") !== -1) {
-                        mediaHtml = '<div class="mb-3"><audio src="' + note.file_url + '" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio></div>';
-                    } else {
-                        mediaHtml = '<div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200"><a href="' + note.file_url + '" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 ' + note.file_url + '</a></div>';
-                    }
-                    var badge = note.is_sovereign ? 'Sovereign' : 'Verified';
-                    var badgeClass = note.is_sovereign ? 'bg-amber-100 text-amber-800' : 'bg-green-100 text-green-800';
-                    el.innerHTML = '<div class="flex items-start gap-4">' +
-                        '<div class="flex-shrink-0">' +
-                        (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + note.author_name + '" class="w-10 h-10 rounded-full object-cover" />' :
-                            '<div class="w-10 h-10 bg-violet-100 rounded-full flex items-center justify-center"><span class="text-violet-600 font-mono text-sm">M</span></div>') +
-                        '</div>' +
-                        '<div class="flex-1 min-w-0">' +
-                        '<div class="flex items-center gap-2 mb-2">' +
-                        '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + (note.author_name || npub) + '</a>' +
-                        '<span class="' + badgeClass + ' text-xs font-medium px-2 py-0.5 rounded-full">' + badge + '</span>' +
-                        '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
-                        '</div>' +
-                        mediaHtml +
-                        (note.content ? '<p class="text-gray-700 whitespace-pre-wrap mb-2">' + escapeHtml(note.content) + '</p>' : '') +
-                        '</div></div>';
-                } else if (note.kind === 30023) {
-                    el.className = "border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow";
-                    el.setAttribute("data-kind", "30023");
-                    el.setAttribute("data-poll-id", note.id);
-                    el.setAttribute("data-poll-pubkey", note.pubkey || "");
-                    el.setAttribute("data-poll-dtag", note.poll_d_tag || "");
-                    var pollOptions = note.poll_options || [];
-                    var optionsHtml = "";
-                    if (userPubkey) {
-                        optionsHtml = '<form class="poll-vote-form" data-poll-id="' + escapeHtml(note.id) + '"><div class="space-y-2">';
-                        for (var oi = 0; oi < pollOptions.length; oi++) {
-                            optionsHtml += '<label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">' +
-                                '<input type="radio" name="selection" value="' + escapeHtml(pollOptions[oi]) + '" class="accent-amber-600">' +
-                                '<span class="text-sm text-gray-700">' + escapeHtml(pollOptions[oi]) + '</span></label>';
-                        }
-                        optionsHtml += '</div><button type="submit" class="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Cast Vote</button></form>';
-                    } else {
-                        optionsHtml = '<div class="space-y-2 opacity-60">';
-                        for (var oi = 0; oi < pollOptions.length; oi++) {
-                            optionsHtml += '<div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">' +
-                                '<span class="w-4 h-4 rounded-full border-2 border-gray-300 inline-block"></span>' +
-                                '<span class="text-sm text-gray-500">' + escapeHtml(pollOptions[oi]) + '</span></div>';
-                        }
-                        optionsHtml += '</div>';
-                    }
-                    el.innerHTML = '<div class="flex items-start gap-4">' +
-                        '<div class="flex-shrink-0">' +
-                        (note.author_avatar ? '<img src="' + note.author_avatar + '" alt="' + (note.author_name || "") + '" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-amber-300" />' :
-                            '<div class="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-amber-300"><span class="text-amber-600 font-mono text-sm">P</span></div>') +
-                        '</div>' +
-                        '<div class="flex-1 min-w-0">' +
-                        '<div class="flex items-center gap-2 mb-2">' +
-                        '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + (note.author_name || npub) + '</a>' +
-                        '<span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Poll</span>' +
-                        '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
-                        '</div>' +
-                        '<p class="text-gray-900 font-medium mb-3">' + escapeHtml(note.content) + '</p>' +
-                        optionsHtml +
-                        '</div></div>';
-                }
-
-                if (el.innerHTML) {
-                    container.appendChild(el);
-                    if (note.kind === 30023) {
-                        var newForm = el.querySelector(".poll-vote-form");
-                        if (newForm) {
-                            newForm.addEventListener("submit", function (ev) {
-                                ev.preventDefault();
-                                var pid = this.getAttribute("data-poll-id");
-                                var sel = this.querySelector("input[name='selection']:checked");
-                                if (!sel) return;
-                                var allInputs = this.querySelectorAll("input[name='selection']");
-                                var idx = Array.prototype.indexOf.call(allInputs, sel);
-                                castPollVote(pid, idx);
-                            });
-                        }
-                    }
-                }
-            }
-
-            function escapeHtml(str) {
-                if (!str) return "";
-                var div = document.createElement("div");
-                div.appendChild(document.createTextNode(str));
-                return div.innerHTML;
-            }
-
-            // Poll governance — Gear dropdown toggle
-            function toggleGear(event) {
-                event.stopPropagation();
-                var btn = event.currentTarget;
-                var dropdown = btn.parentElement.querySelector(".gear-dropdown");
-                if (!dropdown) return;
-                var isHidden = dropdown.classList.contains("hidden");
-                document.querySelectorAll(".gear-dropdown").forEach(function (d) { d.classList.add("hidden"); });
-                if (isHidden) dropdown.classList.remove("hidden");
-            }
-            document.addEventListener("click", function () {
-                document.querySelectorAll(".gear-dropdown").forEach(function (d) { d.classList.add("hidden"); });
-            });
-
-            // Poll governance — cast a vote via Tauri bridge signing
-            async function castPollVote(pollId, selectOptionIndex) {
-                var card = document.querySelector('[data-poll-id="' + pollId + '"]');
-                if (!card) return;
-                var options = card.querySelectorAll("input[name='selection']");
-                if (!options || selectOptionIndex < 0 || selectOptionIndex >= options.length) return;
-                var selectedInput = options[selectOptionIndex];
-                if (!selectedInput) return;
-                var selectedValue = selectedInput.value;
-                var pk;
-                try { pk = await getEffectivePubkey(); }
-                catch (e) { showToast(e.message, true); return; }
-
-                var pubkey = card.getAttribute("data-poll-pubkey") || "";
-                var dtag = card.getAttribute("data-poll-dtag") || "";
-                var form = card.querySelector(".poll-vote-form");
-                var btn = form ? form.querySelector("button[type='submit']") : null;
-                var timestamp = Math.floor(Date.now() / 1000);
-                var voteEnvelope = {
-                    poll_id: pollId,
-                    selection: selectedValue,
-                    timestamp: timestamp
-                };
-
-                var tags = [];
-                if (pubkey && dtag) {
-                    tags.push(["a", "30023:" + pubkey + ":" + dtag]);
-                } else {
-                    tags.push(["e", pollId]);
-                }
-                tags.push(["vote", selectedValue]);
-
-                var event = {
-                    kind: 1112,
-                    content: JSON.stringify(voteEnvelope),
-                    pubkey: pk,
-                    created_at: timestamp,
-                    tags: tags
-                };
-
-                if (btn) { btn.disabled = true; btn.textContent = "Signing..."; }
-                pendingVote = { pollId: pollId, selection: selectedValue, timestamp: timestamp, form: form, btn: btn };
-                sendEventToTauri(event);
-            }
-
-            // Hook up poll forms to use castPollVote
-            document.addEventListener("DOMContentLoaded", function () {
-                document.querySelectorAll(".poll-vote-form").forEach(function (form) {
-                    form.addEventListener("submit", function (e) {
-                        e.preventDefault();
-                        var pollId = form.getAttribute("data-poll-id");
-                        var selected = form.querySelector("input[name='selection']:checked");
-                        if (!selected) return;
-                        var allInputs = form.querySelectorAll("input[name='selection']");
-                        var index = Array.prototype.indexOf.call(allInputs, selected);
-                        castPollVote(pollId, index);
-                    });
-                });
-            });
-
-            // --- Poll Creation ---
-            function openPollModal() {
-                document.getElementById("pollModal").classList.remove("hidden");
-            }
-
-            function closePollModal() {
-                document.getElementById("pollModal").classList.add("hidden");
-                document.getElementById("pollForm").reset();
-            }
-
-            function addPollOption() {
-                var container = document.getElementById("pollOptionsContainer");
-                var count = container.querySelectorAll(".option-row").length;
-                var div = document.createElement("div");
-                div.className = "option-row flex items-center gap-2";
-                div.innerHTML =
-                    '<input type="text" class="poll-option flex-1 border border-gray-300 rounded-lg px-4 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent" placeholder="Option ' +
-                    (count + 1) + '" required />' +
-                    '<button type="button" onclick="removeOption(this)" class="text-red-400 hover:text-red-600 transition-colors p-1" title="Remove option">' +
-                    '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>' +
-                    '</button>';
-                container.appendChild(div);
-            }
-
-            function removeOption(btn) {
-                var row = btn.closest(".option-row");
-                if (document.querySelectorAll(".option-row").length > 2) {
-                    row.remove();
-                }
-            }
-
-            async function createPoll() {
-                var pk;
-                try { pk = await getEffectivePubkey(); }
-                catch (e) { showToast(e.message, true); return; }
-                var title = document.getElementById("pollTitle").value.trim();
-                var description = document.getElementById("pollDescription").value.trim();
-                var scope = document.getElementById("pollScope").value;
-                var fidelity = parseInt(document.getElementById("pollFidelity").value, 10);
-                var optionInputs = document.querySelectorAll(".poll-option");
-                var options = [];
-                optionInputs.forEach(function (inp) {
-                    var val = inp.value.trim();
-                    if (val) options.push(val);
-                });
-                if (!title) { showToast("Please enter a poll title.", true); return; }
-                if (options.length < 2) { showToast("Please provide at least 2 options.", true); return; }
-
-                var tags = [
-                    ["d", uuidv4()],
-                    ["title", title],
-                    ["fidelity_min", String(fidelity)]
-                ];
-                options.forEach(function (opt) { tags.push(["option", opt]); });
-                if (scope === "regional") {
-                    tags.push(["geohash", "global"]);
-                } else if (scope === "family") {
-                    tags.push(["org", "iyou"]);
-                }
-                var expires = Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60;
-                tags.push(["expires", String(expires)]);
-
-                var event = {
-                    kind: 30023,
-                    content: description || title,
-                    pubkey: pk,
-                    created_at: Math.floor(Date.now() / 1000),
-                    tags: tags
-                };
-
-                isProcessing = true;
-                pendingPoll = true;
-                document.getElementById("publishPollBtn").disabled = true;
-                document.getElementById("publishPollBtn").textContent = "Signing...";
-                sendEventToTauri(event);
-            }
-
-            function uuidv4() {
-                return "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".replace(/x/g, function () {
-                    return Math.floor(Math.random() * 16).toString(16);
-                });
-            }
-
-            function getCookie(name) {
-                var match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-                return match ? decodeURIComponent(match[2]) : "";
-            }
-
-            // Initialize on page load
-            document.addEventListener("DOMContentLoaded", function () {
-                connectToSigningBridge();
-                loadRelaysFromStorage();
-            });
-        </script>
-    </body>
+    <script>
+        window.TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url }}";
+        window.userPubkey = "{{ user_pubkey }}";
+        window.userNpub = "{{ user_npub }}";
+        window.userDid = "{{ user_did }}";
+    </script>
+    <script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ idp_home_ws_url }}"></script>
+    <script src="{% static 'js/feed_interactions.js' %}"></script>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            bridgeClient.connect(handleSignedEvent);
+        });
+    </script>
+</body>
 </html>

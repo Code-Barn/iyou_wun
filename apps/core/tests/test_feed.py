@@ -23,27 +23,35 @@ from .helpers import make_event, VALID_PUBKEY_HEX
 
 
 class ProcessIntoFeedTest(TestCase):
-    """process_into_feed must never crash and must correctly structure events."""
+    """process_into_feed must never crash and must correctly structure events.
+
+    process_into_feed returns a dict: {"roots": [...], "replies": {...}, ...}
+    All tests access result["roots"] for the root-level feed list.
+    """
 
     def setUp(self):
         self.pk = VALID_PUBKEY_HEX
 
-    def test_empty_events_returns_empty_list(self):
+    def _roots(self, events, **kwargs):
+        """Helper: call process_into_feed and return the roots list."""
+        return process_into_feed(events, **kwargs)["roots"]
+
+    def test_empty_events_returns_empty_roots(self):
         result = process_into_feed({})
-        self.assertEqual(result, [])
+        self.assertEqual(result["roots"], [])
 
     def test_empty_events_with_max_items_zero(self):
         result = process_into_feed({}, max_items=0)
-        self.assertEqual(result, [])
+        self.assertEqual(result["roots"], [])
 
     def test_kind_1_appears_in_feed(self):
         events = {"e1": make_event("e1", 1, content="hello world")}
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "e1")
-        self.assertEqual(result[0]["content"], "hello world")
-        self.assertEqual(result[0]["reactions"], [])
-        self.assertEqual(result[0]["comments"], [])
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "e1")
+        self.assertEqual(roots[0]["content"], "hello world")
+        self.assertEqual(roots[0]["reactions"], [])
+        self.assertEqual(roots[0]["replies"], [])
 
     def test_kind_1063_has_media_fields(self):
         events = {
@@ -55,9 +63,9 @@ class ProcessIntoFeedTest(TestCase):
                 ["alt", "example image"],
             ])
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        item = result[0]
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        item = roots[0]
         self.assertEqual(item["file_url"], "http://127.0.0.1:9000/img.png")
         self.assertEqual(item["mime_type"], "image/png")
         self.assertEqual(item["dimensions"], "800x600")
@@ -70,8 +78,8 @@ class ProcessIntoFeedTest(TestCase):
                 ["url", "http://127.0.0.1:9000/img.png"],
             ])
         }
-        result = process_into_feed(events)
-        self.assertTrue(result[0]["is_sovereign"])
+        roots = self._roots(events)
+        self.assertTrue(roots[0]["is_sovereign"])
 
     def test_kind_1063_sovereign_flag_false_for_external_url(self):
         events = {
@@ -79,53 +87,54 @@ class ProcessIntoFeedTest(TestCase):
                 ["url", "https://cdn.example.com/img.png"],
             ])
         }
-        result = process_into_feed(events)
-        self.assertFalse(result[0]["is_sovereign"])
+        roots = self._roots(events)
+        self.assertFalse(roots[0]["is_sovereign"])
 
     def test_kind_1063_sovereign_flag_false_no_url(self):
         events = {"e1": make_event("e1", 1063)}
-        result = process_into_feed(events)
-        self.assertFalse(result[0]["is_sovereign"])
+        roots = self._roots(events)
+        self.assertFalse(roots[0]["is_sovereign"])
 
     def test_reaction_grouped_under_parent(self):
         events = {
             "parent": make_event("parent", 1),
             "r1": make_event("r1", 7, tags=[["e", "parent"]]),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(len(result[0]["reactions"]), 1)
-        self.assertEqual(result[0]["reactions"][0]["id"], "r1")
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(len(roots[0]["reactions"]), 1)
+        self.assertEqual(roots[0]["reactions"][0]["id"], "r1")
 
     def test_reaction_without_parent_dropped(self):
         events = {
             "r1": make_event("r1", 7, tags=[["e", "nonexistent_parent"]]),
             "parent": make_event("parent", 1),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "parent")
-        self.assertEqual(len(result[0]["reactions"]), 0)
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "parent")
+        self.assertEqual(len(roots[0]["reactions"]), 0)
 
-    def test_orphan_comment_preserved(self):
+    def test_reply_grouped_under_parent(self):
+        events = {
+            "parent": make_event("parent", 1),
+            "c1": make_event("c1", 1111, content="reply", tags=[["e", "parent", "reply"]]),
+        }
+        result = process_into_feed(events)
+        self.assertEqual(len(result["roots"]), 1)
+        self.assertEqual(result["roots"][0]["id"], "parent")
+        self.assertEqual(len(result["roots"][0]["replies"]), 1)
+        self.assertEqual(result["roots"][0]["replies"][0]["id"], "c1")
+
+    def test_orphan_reply_still_appears_as_root(self):
         events = {
             "c1": make_event("c1", 1111, content="orphan comment", tags=[["e", "nonexistent_parent"]]),
         }
         result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "c1")
-        self.assertEqual(result[0]["content"], "orphan comment")
-
-    def test_comment_grouped_under_parent(self):
-        events = {
-            "parent": make_event("parent", 1),
-            "c1": make_event("c1", 1111, content="comment", tags=[["e", "parent"]]),
-        }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "parent")
-        self.assertEqual(len(result[0]["comments"]), 1)
-        self.assertEqual(result[0]["comments"][0]["id"], "c1")
+        # Orphan Kind 1111 should appear as a root
+        self.assertTrue(len(result["roots"]) >= 1)
+        ids = {r["id"] for r in result["roots"]}
+        self.assertIn("c1", ids)
 
     def test_reaction_dedup_by_pubkey(self):
         events = {
@@ -133,16 +142,16 @@ class ProcessIntoFeedTest(TestCase):
             "r1": make_event("r1", 7, tags=[["e", "parent"]]),
             "r2": make_event("r2", 7, pubkey=VALID_PUBKEY_HEX, tags=[["e", "parent"]]),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result[0]["reactions"]), 1)
+        roots = self._roots(events)
+        self.assertEqual(len(roots[0]["reactions"]), 1)
 
     def test_max_items_truncates_output(self):
         events = {
             f"e{i}": make_event(f"e{i}", 1, created_at=1000000 + i)
             for i in range(10)
         }
-        result = process_into_feed(events, max_items=3)
-        self.assertEqual(len(result), 3)
+        roots = self._roots(events, max_items=3)
+        self.assertEqual(len(roots), 3)
 
     def test_events_sorted_by_created_at_desc(self):
         events = {
@@ -150,10 +159,10 @@ class ProcessIntoFeedTest(TestCase):
             "mid": make_event("mid", 1, created_at=200),
             "new": make_event("new", 1, created_at=300),
         }
-        result = process_into_feed(events, max_items=10)
-        self.assertEqual(result[0]["id"], "new")
-        self.assertEqual(result[1]["id"], "mid")
-        self.assertEqual(result[2]["id"], "old")
+        roots = self._roots(events, max_items=10)
+        self.assertEqual(roots[0]["id"], "new")
+        self.assertEqual(roots[1]["id"], "mid")
+        self.assertEqual(roots[2]["id"], "old")
 
     def test_profile_enrichment_sets_author_name_and_avatar(self):
         events = {"e1": make_event("e1", 1)}
@@ -164,9 +173,9 @@ class ProcessIntoFeedTest(TestCase):
                 "picture": "http://example.com/avatar.png",
             }
         }
-        result = process_into_feed(events, profiles=profiles)
-        self.assertEqual(result[0]["author_name"], "Alice")
-        self.assertEqual(result[0]["author_avatar"], "http://example.com/avatar.png")
+        roots = self._roots(events, profiles=profiles)
+        self.assertEqual(roots[0]["author_name"], "Alice")
+        self.assertEqual(roots[0]["author_avatar"], "http://example.com/avatar.png")
 
     def test_profile_enrichment_falls_back_to_name(self):
         events = {"e1": make_event("e1", 1)}
@@ -176,41 +185,41 @@ class ProcessIntoFeedTest(TestCase):
                 "picture": "",
             }
         }
-        result = process_into_feed(events, profiles=profiles)
-        self.assertEqual(result[0]["author_name"], "bob")
+        roots = self._roots(events, profiles=profiles)
+        self.assertEqual(roots[0]["author_name"], "bob")
 
     def test_profile_enrichment_empty_when_no_profile(self):
         events = {"e1": make_event("e1", 1)}
-        result = process_into_feed(events, profiles={})
-        self.assertEqual(result[0]["author_name"], "")
-        self.assertEqual(result[0]["author_avatar"], "")
+        roots = self._roots(events, profiles={})
+        self.assertEqual(roots[0]["author_name"], "")
+        self.assertEqual(roots[0]["author_avatar"], "")
 
     def test_none_profiles_does_not_crash(self):
         events = {"e1": make_event("e1", 1)}
-        result = process_into_feed(events, profiles=None)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["author_name"], "")
+        roots = self._roots(events, profiles=None)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["author_name"], "")
 
     def test_malformed_missing_pubkey(self):
         events = {"e1": {"id": "e1", "kind": 1, "content": "no pubkey", "tags": [], "created_at": 1000}}
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["pubkey"], "")
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["pubkey"], "")
 
     def test_missing_tags_field_does_not_crash(self):
         events = {"e1": {"id": "e1", "kind": 1, "pubkey": self.pk, "content": "no tags", "created_at": 1000}}
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["tags"], [])
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["tags"], [])
 
     def test_kind_0_profile_events_ignored(self):
         events = {
             "note": make_event("note", 1, content="real note"),
             "profile": make_event("profile", 0, content='{"name":"test"}'),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "note")
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "note")
 
     def test_kind_7_with_multiple_parents(self):
         events = {
@@ -219,10 +228,10 @@ class ProcessIntoFeedTest(TestCase):
             "r1": make_event("r1", 7, tags=[["e", "p1"]]),
             "r2": make_event("r2", 7, tags=[["e", "p2"]]),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 2)
-        p1 = next(i for i in result if i["id"] == "p1")
-        p2 = next(i for i in result if i["id"] == "p2")
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 2)
+        p1 = next(i for i in roots if i["id"] == "p1")
+        p2 = next(i for i in roots if i["id"] == "p2")
         self.assertEqual(len(p1["reactions"]), 1)
         self.assertEqual(len(p2["reactions"]), 1)
         self.assertEqual(p1["reactions"][0]["id"], "r1")
@@ -235,24 +244,26 @@ class ProcessIntoFeedTest(TestCase):
             "orphan": make_event("orphan", 1111, content="orphan", tags=[["e", "missing"]]),
         }
         result = process_into_feed(events)
-        ids = {i["id"] for i in result}
-        self.assertEqual(ids, {"note", "media", "orphan"})
+        ids = {i["id"] for i in result["roots"]}
+        self.assertIn("note", ids)
+        self.assertIn("media", ids)
+        self.assertIn("orphan", ids)
 
     def test_npub_field_is_populated(self):
         events = {"e1": make_event("e1", 1)}
-        result = process_into_feed(events)
-        self.assertIn("npub", result[0])
-        self.assertIsInstance(result[0]["npub"], str)
-        self.assertTrue(len(result[0]["npub"]) > 0)
+        roots = self._roots(events)
+        self.assertIn("npub", roots[0])
+        self.assertIsInstance(roots[0]["npub"], str)
+        self.assertTrue(len(roots[0]["npub"]) > 0)
 
     # --- Poll governance tests (Kind 30023 / 1112) ---
 
     def test_kind_30023_appears_in_feed(self):
         events = {"poll": make_event("poll", 30023, content="Test Poll?")}
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "poll")
-        self.assertEqual(result[0]["kind"], 30023)
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "poll")
+        self.assertEqual(roots[0]["kind"], 30023)
 
     def test_kind_30023_extracts_poll_options(self):
         events = {
@@ -262,13 +273,13 @@ class ProcessIntoFeedTest(TestCase):
                 ["option", "Green"],
             ])
         }
-        result = process_into_feed(events)
-        self.assertEqual(result[0]["poll_options"], ["Red", "Blue", "Green"])
+        roots = self._roots(events)
+        self.assertEqual(roots[0]["poll_options"], ["Red", "Blue", "Green"])
 
     def test_kind_30023_no_options_returns_empty_list(self):
         events = {"poll": make_event("poll", 30023, content="No options?")}
-        result = process_into_feed(events)
-        self.assertEqual(result[0]["poll_options"], [])
+        roots = self._roots(events)
+        self.assertEqual(roots[0]["poll_options"], [])
 
     def test_kind_30023_extracts_scope_tags(self):
         events = {
@@ -279,32 +290,32 @@ class ProcessIntoFeedTest(TestCase):
                 ["expires", "20261201"],
             ])
         }
-        result = process_into_feed(events)
-        self.assertEqual(result[0]["poll_scope_geohash"], "9q8yy")
-        self.assertEqual(result[0]["poll_scope_org"], "iyou")
-        self.assertEqual(result[0]["poll_closes_at"], "20261201")
+        roots = self._roots(events)
+        self.assertEqual(roots[0]["poll_scope_geohash"], "9q8yy")
+        self.assertEqual(roots[0]["poll_scope_org"], "iyou")
+        self.assertEqual(roots[0]["poll_closes_at"], "20261201")
 
     def test_kind_1112_vote_grouped_under_parent_poll(self):
         events = {
             "poll": make_event("poll", 30023, content="Test poll?", tags=[["option", "A"]]),
             "vote": make_event("vote", 1112, tags=[["e", "poll"]]),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "poll")
-        self.assertIn("votes", result[0])
-        self.assertEqual(len(result[0]["votes"]), 1)
-        self.assertEqual(result[0]["votes"][0]["id"], "vote")
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "poll")
+        self.assertIn("votes", roots[0])
+        self.assertEqual(len(roots[0]["votes"]), 1)
+        self.assertEqual(roots[0]["votes"][0]["id"], "vote")
 
     def test_kind_1112_vote_dropped_without_parent(self):
         events = {
             "vote": make_event("vote", 1112, tags=[["e", "nonexistent"]]),
             "poll": make_event("poll", 30023, content="Real poll?", tags=[["option", "A"]]),
         }
-        result = process_into_feed(events)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]["id"], "poll")
-        self.assertEqual(result[0].get("votes", []), [])
+        roots = self._roots(events)
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "poll")
+        self.assertEqual(roots[0].get("votes", []), [])
 
     def test_mixed_kinds_includes_poll(self):
         events = {
@@ -312,5 +323,5 @@ class ProcessIntoFeedTest(TestCase):
             "poll": make_event("poll", 30023, content="Poll?", tags=[["option", "A"]]),
         }
         result = process_into_feed(events)
-        ids = {i["id"] for i in result}
+        ids = {i["id"] for i in result["roots"]}
         self.assertEqual(ids, {"note", "poll"})

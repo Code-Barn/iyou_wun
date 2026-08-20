@@ -176,6 +176,7 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 # Production static-file compression / fingerprinting via WhiteNoise
 STORAGES = {
@@ -212,21 +213,35 @@ AUTHENTICATION_BACKENDS = [
 # OIDC CLIENT (RELYING PARTY) SETTINGS
 # ------------------------------------------------------------------------------
 # IDP base URLs for endpoint construction
-IDP_BASE_INTERNAL_URL = env.str("IDP_BASE_INTERNAL_URL", default="http://iyou-idp.identity.svc.cluster.local:8000")
+IDP_BASE_INTERNAL_URL = env.str("IDP_BASE_INTERNAL_URL", default="http://127.0.0.1:8000")
 IDP_BASE_PUBLIC_URL = env.str("IDP_BASE_PUBLIC_URL", default="https://iyou.me")
 
-# OIDC Relying Party — all values purely from environment
-OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID")
-OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET", default="")
+# OIDC Relying Party — defaults match ecosystem PKCE public client standard
+OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID", default="iyou-wun-satellite-client")
+OIDC_RP_CLIENT_SECRET = env.str("OIDC_RP_CLIENT_SECRET", default="")  # Empty for public PKCE
 OIDC_RP_SIGN_ALGO = "RS256"
 OIDC_RP_VERIFY_KID = False
-OIDC_RP_SCOPES = "openid profile email"
-OIDC_RP_CALLBACK_URL = env.str("OIDC_RP_CALLBACK_URL")
+OIDC_RP_SCOPES = env.str("OIDC_RP_SCOPES", default="openid profile email")
+OIDC_RP_CALLBACK_URL = env.str(
+    "OIDC_RP_CALLBACK_URL", default="http://127.0.0.1:8001/oidc/callback/"
+)
 
-OIDC_OP_AUTHORIZATION_ENDPOINT = f"{IDP_BASE_PUBLIC_URL}/openid/authorize/"
-OIDC_OP_TOKEN_ENDPOINT = f"{IDP_BASE_INTERNAL_URL}/openid/token/"
-OIDC_OP_USER_ENDPOINT = f"{IDP_BASE_INTERNAL_URL}/openid/userinfo/"
-OIDC_OP_JWKS_ENDPOINT = f"{IDP_BASE_INTERNAL_URL}/openid/jwks/"
+OIDC_OP_AUTHORIZATION_ENDPOINT = env.str(
+    "OIDC_OP_AUTHORIZATION_ENDPOINT",
+    default=f"{IDP_BASE_PUBLIC_URL}/openid/authorize/",
+)
+OIDC_OP_TOKEN_ENDPOINT = env.str(
+    "OIDC_OP_TOKEN_ENDPOINT",
+    default=f"{IDP_BASE_INTERNAL_URL}/openid/token/",
+)
+OIDC_OP_USER_ENDPOINT = env.str(
+    "OIDC_OP_USER_ENDPOINT",
+    default=f"{IDP_BASE_INTERNAL_URL}/openid/userinfo/",
+)
+OIDC_OP_JWKS_ENDPOINT = env.str(
+    "OIDC_OP_JWKS_ENDPOINT",
+    default=f"{IDP_BASE_INTERNAL_URL}/openid/jwks/",
+)
 
 OIDC_VERIFY_SSL = False
 OIDC_STORE_ID_TOKEN = True

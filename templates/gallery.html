@@ -1,192 +1,128 @@
+{% load static %}
 <!doctype html>
 <html>
 <head>
     <title>Media Gallery - iyou_wun</title>
-    <!-- REPLACE WITH STATIC TAILWIND CSS - Rule 7 compliance -->
-    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
-    <link rel="stylesheet" href="{% static 'css/output.css %}">
-    <script>
-        // Prevent script execution crashes if runtime tailwind variables are unresolved
-        if (typeof tailwind !== 'undefined') {
-            tailwind.config = {
-            theme: {
-                extend: {
-                    screens: { xs: '360px' }
-                }
-            }
-        }
-    </script>
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
         .modal-open { overflow: hidden; }
-        #mediaModal {
-            opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
-        }
-        #mediaModal.show {
-            opacity: 1; pointer-events: auto;
-        }
+        #lightboxModal { opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
+        #lightboxModal.show { opacity: 1; pointer-events: auto; }
+        .tab-active { background-color: #7c3aed; color: #fff; }
+        .tab-inactive { color: #9ca3af; }
+        .tab-inactive:hover { color: #fff; }
+        .masonry-item { break-inside: avoid; }
+        audio::-webkit-media-controls-panel { background: #1e1b4b; }
+        .scrubber::-webkit-slider-runnable-track { height: 4px; background: #4c1d95; border-radius: 2px; }
+        .scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #a78bfa; border-radius: 50%; margin-top: -5px; cursor: pointer; }
+        .scrubber::-moz-range-track { height: 4px; background: #4c1d95; border-radius: 2px; }
+        .scrubber::-moz-range-thumb { width: 14px; height: 14px; background: #a78bfa; border-radius: 50%; border: none; cursor: pointer; }
+        .video-card-overlay { opacity: 0; transition: opacity 0.2s ease; }
+        .video-card:hover .video-card-overlay { opacity: 1; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="bg-gray-950 min-h-screen text-white">
     {% include 'includes/_ecosystem_bar.html' %}
     {% include 'includes/_standard_header.html' %}
     {% include '_nav.html' %}
 
-    <main class="max-w-6xl mx-auto px-4 py-10">
-        <div class="bg-white rounded-lg shadow-md p-8">
-            <div class="flex items-center justify-between mb-6">
-                <h1 class="text-2xl font-bold">Media Gallery</h1>
-                {% if filter_pubkey %}
-                <a href="{% url 'gallery' %}" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Clear filter</a>
-                {% endif %}
-            </div>
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-bold text-white">Media Gallery</h1>
+            {% if filter_pubkey %}
+            <a href="{% url 'gallery' %}" class="text-sm text-violet-400 hover:text-violet-300">&larr; Clear filter</a>
+            {% endif %}
+        </div>
 
-            <!-- MIME-type filter sub-nav -->
-            <div class="flex items-center gap-2 mb-6 border-b border-gray-200 pb-4">
-                <button onclick="filterGallery('all')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-indigo-600 text-white" data-filter="all">All</button>
-                <button onclick="filterGallery('image')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="image">Images</button>
-                <button onclick="filterGallery('video')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="video">Video</button>
-                <button onclick="filterGallery('audio')" class="filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 bg-gray-100 text-gray-600 hover:bg-gray-200" data-filter="audio">Audio</button>
-            </div>
+        <div class="flex items-center gap-3 mb-8 overflow-x-auto pb-2" id="tabRibbon">
+            <button onclick="switchTab('all')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'all' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="all">&#11088; All Media <span class="ml-1 opacity-70">{{ counts.all }}</span></button>
+            <button onclick="switchTab('images')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'images' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="images">&#128444;&#65039; Visuals <span class="ml-1 opacity-70">{{ counts.images }}</span></button>
+            <button onclick="switchTab('videos')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'videos' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="videos">&#127916; Video Stream <span class="ml-1 opacity-70">{{ counts.videos }}</span></button>
+            <button onclick="switchTab('audio')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'audio' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="audio">&#127911; Audio &amp; Pods <span class="ml-1 opacity-70">{{ counts.audio }}</span></button>
+        </div>
 
+        <div id="panel-all" class="gallery-panel {% if active_type != 'all' %}hidden{% endif %}">
             {% if notes %}
-            <div id="galleryGrid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="allGrid">
                 {% for note in notes %}
-                {% with mime=note.mime_type|lower %}
-                {% if mime and "image" in mime %}
-                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="image">
-                    <div class="aspect-square bg-gray-100 overflow-hidden cursor-pointer" onclick="openModal('{{ note.file_url }}', 'image', '{{ note.alt_text|addslashes }}')">
-                        <img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover" loading="lazy">
-                    </div>
-                {% elif mime and "video" in mime %}
-                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="video">
-                    <div class="aspect-square bg-gray-900 overflow-hidden relative cursor-pointer" onclick="openModal('{{ note.file_url }}', 'video', '{{ note.alt_text|addslashes }}')">
-                        <video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata"></video>
-                        <div class="absolute inset-0 flex items-center justify-center hover:bg-black hover:bg-opacity-10 transition-colors">
-                            <span class="text-white text-4xl opacity-80">&#9654;</span>
-                        </div>
-                    </div>
-                {% elif mime and "audio" in mime %}
-                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="audio">
-                    <div class="aspect-square bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center cursor-pointer" onclick="openModal('{{ note.file_url }}', 'audio', '{{ note.alt_text|addslashes }}')">
-                        <span class="text-5xl">&#127925;</span>
-                    </div>
-                {% else %}
-                <div class="gallery-card bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow" data-type="other">
-                    <div class="aspect-square bg-gray-100 flex items-center justify-center cursor-pointer" onclick="openModal('{{ note.file_url }}', 'other', '')">
-                        <span class="text-4xl text-gray-400">&#128196;</span>
-                    </div>
-                {% endif %}
-                {% endwith %}
+                <div class="gallery-card group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="{{ note.media_type }}" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dims="{{ note.dimensions }}" data-hash="{{ note.blossom_hash }}" data-dur="{{ note.duration }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
+                    {% if note.media_type == "image" %}
+                    <div class="aspect-square bg-gray-800 overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
+                    {% elif note.media_type == "video" %}
+                    <div class="aspect-video bg-gray-900 overflow-hidden relative cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata" muted></video><div class="video-card-overlay absolute inset-0 flex items-center justify-center bg-black/30"><span class="text-white text-5xl">&#9654;</span></div></div>
+                    {% elif note.media_type == "audio" %}
+                    <div class="aspect-square bg-gradient-to-br from-violet-900/60 to-indigo-900/60 flex items-center justify-center cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><span class="text-6xl">&#127925;</span></div>
+                    {% else %}
+                    <div class="aspect-square bg-gray-800 flex items-center justify-center cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><span class="text-4xl text-gray-500">&#128196;</span></div>
+                    {% endif %}
                     <div class="p-3">
-                        <div class="flex items-center justify-between mb-2">
-                            <div class="flex items-center gap-2 min-w-0">
-                                <a href="{% url 'profile' npub=note.npub %}" class="text-xs font-mono text-gray-600 hover:text-indigo-600 truncate">
-                                    {{ note.author_name|default:note.npub|truncatechars:20 }}
-                                </a>
-                            </div>
-                            {% if note.is_sovereign %}
-                            <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Sovereign</span>
-                            {% else %}
-                            <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Verified</span>
-                            {% endif %}
-                        </div>
-                        {% if note.content %}
-                        <p class="text-xs text-gray-500 truncate">{{ note.content }}</p>
-                        {% endif %}
-                        <p class="text-xs text-gray-400 mt-1">{{ note.created_at|date:"Y-m-d H:i" }}</p>
+                        <div class="flex items-center justify-between mb-1"><a href="{% url 'profile' npub=note.npub %}" class="text-xs font-mono text-gray-400 hover:text-violet-400 truncate">{{ note.author_name|default:note.npub|truncatechars:20 }}</a>{% if note.is_sovereign %}<span class="bg-amber-900/50 text-amber-300 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Sovereign</span>{% else %}<span class="bg-green-900/50 text-green-300 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Verified</span>{% endif %}</div>
+                        {% if note.content %}<p class="text-xs text-gray-500 truncate">{{ note.content }}</p>{% endif %}
+                        <div class="flex items-center gap-2 mt-1"><p class="text-xs text-gray-600">{{ note.created_at|date:"Y-m-d H:i" }}</p>{% if note.dimensions %}<span class="text-xs text-gray-600">{{ note.dimensions }}</span>{% endif %}{% if note.duration %}<span class="text-xs text-gray-600">{{ note.duration }}s</span>{% endif %}</div>
                     </div>
                 </div>
                 {% endfor %}
             </div>
-            {% else %}
-            <div class="text-center py-12 text-gray-500">
-                <p class="text-lg">No media events found.</p>
-                <p class="text-sm mt-2">Media uploaded via the feed will appear here.</p>
+            {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No media events found.</p><p class="text-sm mt-2">Media uploaded via the feed will appear here.</p></div>{% endif %}
+        </div>
+
+        <div id="panel-images" class="gallery-panel hidden">
+            {% if images %}
+            <div class="columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4" id="imageGrid">
+                {% for note in images %}
+                <div class="masonry-item gallery-card group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="image" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dims="{{ note.dimensions }}" data-hash="{{ note.blossom_hash }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
+                    <div class="overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
+                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200"><div class="flex items-center gap-2">{% if note.author_avatar %}<img src="{{ note.author_avatar }}" class="w-6 h-6 rounded-full object-cover" alt="">{% endif %}<span class="text-xs text-white font-medium truncate">{{ note.author_name|default:note.npub|truncatechars:24 }}</span><span class="text-xs text-gray-400 ml-auto">{{ note.created_at|date:"M d" }}</span></div></div>
+                </div>
+                {% endfor %}
             </div>
-            {% endif %}
+            {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No images found.</p></div>{% endif %}
+        </div>
+
+        <div id="panel-videos" class="gallery-panel hidden">
+            {% if videos %}
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="videoGrid">
+                {% for note in videos %}
+                <div class="gallery-card group bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="video" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dims="{{ note.dimensions }}" data-hash="{{ note.blossom_hash }}" data-dur="{{ note.duration }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
+                    <div class="aspect-video bg-gray-950 relative cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata" muted data-poster="{{ note.thumbnail_url }}"></video><div class="video-card-overlay absolute inset-0 flex items-center justify-center bg-black/30"><div class="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"><span class="text-white text-2xl ml-1">&#9654;</span></div></div>{% if note.duration %}<span class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">{{ note.duration }}s</span>{% endif %}</div>
+                    <div class="p-4"><div class="flex items-start gap-3">{% if note.author_avatar %}<img src="{{ note.author_avatar }}" class="w-9 h-9 rounded-full object-cover flex-shrink-0" alt="">{% else %}<div class="w-9 h-9 rounded-full bg-violet-900 flex items-center justify-center flex-shrink-0"><span class="text-violet-300 text-xs font-bold">{{ note.author_name|default:"V"|truncatechars:1 }}</span></div>{% endif %}<div class="min-w-0 flex-1"><p class="text-sm text-white font-medium truncate">{{ note.content|default:note.alt_text|truncatechars:80 }}</p><div class="flex items-center gap-2 mt-1"><a href="{% url 'profile' npub=note.npub %}" class="text-xs text-gray-400 hover:text-violet-400">{{ note.author_name|default:note.npub|truncatechars:24 }}</a><span class="text-xs text-gray-600">&middot;</span><span class="text-xs text-gray-600">{{ note.created_at|date:"M d, Y" }}</span></div></div>{% if note.is_sovereign %}<span class="bg-amber-900/50 text-amber-300 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Sovereign</span>{% endif %}</div>{% if note.file_url %}<a href="{{ note.file_url }}" target="_blank" rel="noopener noreferrer" class="mt-2 text-xs text-violet-400 hover:text-violet-300 inline-flex items-center gap-1">&#128279; Open in Blossom</a>{% endif %}</div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No videos found.</p></div>{% endif %}
+        </div>
+
+        <div id="panel-audio" class="gallery-panel hidden">
+            {% if audio_items %}
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="audioGrid">
+                {% for note in audio_items %}
+                <div class="gallery-card group bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="audio" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dur="{{ note.duration }}" data-hash="{{ note.blossom_hash }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
+                    <div class="flex items-center gap-4 p-4">{% if note.author_avatar %}<img src="{{ note.author_avatar }}" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" alt="">{% else %}<div class="w-16 h-16 rounded-lg bg-gradient-to-br from-violet-800 to-indigo-900 flex items-center justify-center flex-shrink-0"><span class="text-2xl">&#127925;</span></div>{% endif %}<div class="min-w-0 flex-1"><p class="text-sm text-white font-medium truncate">{{ note.content|default:note.alt_text|truncatechars:40 }}</p><a href="{% url 'profile' npub=note.npub %}" class="text-xs text-gray-400 hover:text-violet-400 truncate block">{{ note.author_name|default:note.npub|truncatechars:24 }}</a><div class="flex items-center gap-2 mt-1"><span class="text-xs text-gray-600">{{ note.created_at|date:"M d" }}</span>{% if note.duration %}<span class="text-xs text-gray-600">{{ note.duration }}s</span>{% endif %}{% if note.is_sovereign %}<span class="text-xs text-amber-400">Sovereign</span>{% endif %}</div></div></div>
+                    <div class="px-4 pb-4"><div class="bg-gray-950 rounded-lg p-3 flex items-center gap-3"><button onclick="toggleAudioPlayer('{{ note.file_url }}', this)" class="audio-play-btn w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0 transition-colors" data-src="{{ note.file_url }}"><span class="text-white text-lg">&#9654;</span></button><div class="flex-1 min-w-0"><input type="range" min="0" max="100" value="0" class="scrubber w-full h-1 appearance-none rounded-full bg-gray-700 cursor-pointer" data-src="{{ note.file_url }}"><div class="flex justify-between mt-1"><span class="text-xs text-gray-500 audio-current" data-src="{{ note.file_url }}">0:00</span>{% if note.duration %}<span class="text-xs text-gray-500">{{ note.duration }}s</span>{% endif %}</div></div></div></div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No audio tracks found.</p></div>{% endif %}
         </div>
     </main>
 
-    <!-- Media Modal -->
-    <div id="mediaModal" class="fixed inset-0 z-50 bg-black bg-opacity-80 flex items-center justify-center p-4" onclick="closeModal(event)">
-        <div class="relative max-w-4xl w-full max-h-full" onclick="event.stopPropagation()">
-            <button onclick="closeModal()" class="absolute -top-10 right-0 text-white text-2xl hover:text-gray-300">&times;</button>
-            <div id="modalContent" class="flex items-center justify-center max-h-[90vh]"></div>
+    <div id="lightboxModal" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center" onclick="closeLightbox(event)">
+        <button onclick="closeLightbox()" class="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 z-50">&times;</button>
+        <button onclick="navigateLightbox(-1)" class="absolute left-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 z-50 opacity-60 hover:opacity-100 transition-opacity" id="lbPrev">&#8249;</button>
+        <button onclick="navigateLightbox(1)" class="absolute right-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 z-50 opacity-60 hover:opacity-100 transition-opacity" id="lbNext">&#8250;</button>
+        <div class="relative max-w-6xl w-full mx-12 max-h-full flex flex-col lg:flex-row gap-0" onclick="event.stopPropagation()">
+            <div id="lbMediaPane" class="flex-1 flex items-center justify-center min-h-0 bg-black rounded-t-xl lg:rounded-l-xl lg:rounded-tr-none overflow-hidden"></div>
+            <div id="lbMetaPane" class="w-full lg:w-80 bg-gray-900 rounded-b-xl lg:rounded-r-xl lg:rounded-bl-none p-5 overflow-y-auto max-h-[40vh] lg:max-h-full flex-shrink-0">
+                <div id="lbAuthor" class="flex items-center gap-3 mb-4"></div>
+                <div id="lbCaption" class="text-sm text-gray-300 mb-4"></div>
+                <div id="lbMeta" class="space-y-2 text-xs text-gray-500"></div>
+            </div>
         </div>
     </div>
 
     <script>
-        var modal = document.getElementById("mediaModal");
-        var modalContent = document.getElementById("modalContent");
-
-        function openModal(url, type, alt) {
-            modalContent.innerHTML = "";
-            if (type === "image") {
-                var img = document.createElement("img");
-                img.src = url;
-                img.alt = alt || "";
-                img.className = "max-w-full max-h-[85vh] rounded-lg shadow-2xl object-contain";
-                modalContent.appendChild(img);
-            } else if (type === "video") {
-                var video = document.createElement("video");
-                video.src = url;
-                video.controls = true;
-                video.autoplay = true;
-                video.className = "max-w-full max-h-[85vh] rounded-lg shadow-2xl";
-                modalContent.appendChild(video);
-            } else if (type === "audio") {
-                var div = document.createElement("div");
-                div.className = "bg-white rounded-lg p-8 shadow-2xl text-center";
-                var icon = document.createElement("div");
-                icon.className = "text-6xl mb-6";
-                icon.textContent = "\uD83C\uDFB5";
-                var audio = document.createElement("audio");
-                audio.src = url;
-                audio.controls = true;
-                audio.autoplay = true;
-                audio.className = "w-full max-w-md";
-                div.appendChild(icon);
-                div.appendChild(audio);
-                modalContent.appendChild(div);
-            } else {
-                var link = document.createElement("a");
-                link.href = url;
-                link.target = "_blank";
-                link.className = "text-white text-lg underline hover:text-indigo-300";
-                link.textContent = "Open file \u2197";
-                modalContent.appendChild(link);
-            }
-            modal.classList.add("show");
-            document.body.classList.add("modal-open");
-        }
-
-        function closeModal(e) {
-            if (e && e.target !== modal) return;
-            modal.classList.remove("show");
-            document.body.classList.remove("modal-open");
-            modalContent.innerHTML = "";
-        }
-
-        document.addEventListener("keydown", function (e) {
-            if (e.key === "Escape") closeModal({ target: modal });
-        });
-
-        function filterGallery(type) {
-            var cards = document.querySelectorAll(".gallery-card");
-            var btns = document.querySelectorAll(".filter-btn");
-            btns.forEach(function (b) {
-                var isActive = b.getAttribute("data-filter") === type;
-                b.className = "filter-btn px-4 py-2 text-sm font-medium rounded-lg transition-colors duration-200 " +
-                    (isActive ? "bg-indigo-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200");
-            });
-            cards.forEach(function (card) {
-                if (type === "all" || card.getAttribute("data-type") === type) {
-                    card.style.display = "";
-                } else {
-                    card.style.display = "none";
-                }
-            });
-        }
+        window.galleryActiveType = "{{ active_type|default:'all' }}";
     </script>
+    <script src="{% static 'js/gallery_player.js' %}"></script>
 </body>
 </html>

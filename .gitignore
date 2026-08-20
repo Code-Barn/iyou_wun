@@ -20,3 +20,9 @@ node_modules/
 
 # macOS
 .DS_Store
+
+# Django collectstatic output
+staticfiles/
+
+# Tailwind build artifact
+static/css/output.css

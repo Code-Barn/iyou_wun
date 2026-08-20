@@ -59,7 +59,7 @@ class DashboardViewTest(TestCase):
         user = User.objects.create_user(username="did:iyou:0xghi789")
         self.client.force_login(user)
         response = self.client.get("/dashboard")
-        self.assertContains(response, "Logout")
+        self.assertContains(response, "Sign Out")
 
 
 class JwksConnectivityTest(TestCase):
@@ -119,13 +119,14 @@ class ChatViewTest(TestCase):
         user = User.objects.create_user(username="did:key:z6Mklogout")
         self.client.force_login(user)
         response = self.client.get(reverse("chat"))
-        self.assertContains(response, "Logout")
+        self.assertContains(response, "Sign Out")
 
 
 class GalleryViewTest(TestCase):
-    def test_redirects_anonymous(self):
+    def test_anonymous_can_view_gallery(self):
         response = self.client.get(reverse("gallery"))
-        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "gallery.html")
 
     def test_authenticated_user_sees_gallery(self):
         user = User.objects.create_user(username="did:key:z6Mkgallery")
