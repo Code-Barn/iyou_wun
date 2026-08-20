@@ -2,9 +2,13 @@
 <html>
 <head>
     <title>Media Gallery - iyou_wun</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- REPLACE WITH STATIC TAILWIND CSS - Rule 7 compliance -->
+    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
+    <link rel="stylesheet" href="{% static 'css/output.css %}">
     <script>
-        tailwind.config = {
+        // Prevent script execution crashes if runtime tailwind variables are unresolved
+        if (typeof tailwind !== 'undefined') {
+            tailwind.config = {
             theme: {
                 extend: {
                     screens: { xs: '360px' }

@@ -1,22 +1,41 @@
-<header class="w-full border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-6 py-3 flex items-center justify-between font-mono text-sm shadow-sm">
-    <div class="flex items-center space-x-2">
-        <span class="font-bold tracking-tight text-violet-600 dark:text-violet-400">iyou_</span>
-        <span class="text-slate-500 font-semibold">wun</span>
+{% load static %}
+<header class="sticky top-0 z-50 border-b backdrop-blur-sm transition-colors duration-200 bg-white/90 border-slate-200 text-slate-900 dark:bg-[#0B0F19]/90 dark:border-gray-800 dark:text-gray-100">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+    
+    <a href="/" class="flex items-center gap-2 group transition-transform active:scale-95">
+      <span class="text-xl font-bold tracking-tight">
+        <span class="text-slate-400 dark:text-gray-400 group-hover:text-slate-600 dark:group-hover:text-gray-200 transition-colors">iyou</span><span class="text-violet-400">_wun</span>
+      </span>
+    </a>
+
+    <div class="flex items-center gap-4">
+      {% if user.is_authenticated or request.user.is_authenticated %}
+        <span class="flex items-center gap-1.5 text-xs font-mono text-slate-600 dark:text-gray-400">
+          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" title="Sovereign Key Active"></span>
+          <span class="max-w-[140px] sm:max-w-[220px] truncate" title="{{ user.username|default:request.user.username }}">
+            {{ user.username|default:request.user.username|truncatechars:24 }}
+          </span>
+        </span>
+        <a href="{% url 'oidc_logout' %}" class="text-sm text-slate-400 hover:text-violet-400 dark:text-gray-400 dark:hover:text-violet-400 transition">Sign Out</a>
+      {% else %}
+        <span class="flex items-center gap-1.5 text-xs text-slate-400 dark:text-gray-500">
+          <span class="w-2 h-2 rounded-full bg-amber-500 inline-block" title="Sovereign Key Required"></span>
+          <span class="hidden sm:inline italic">Sovereign Key Required</span>
+        </span>
+        <a href="{% url 'oidc_authentication_init' %}" class="text-sm text-violet-400 hover:text-violet-300 font-medium transition">Sign In</a>
+      {% endif %}
+
+      <button id="theme-toggle" type="button" class="text-slate-400 hover:text-violet-400 dark:text-gray-400 dark:hover:text-violet-400 transition focus:outline-none" aria-label="Toggle theme">
+        <svg id="icon-sun" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+        </svg>
+        <svg id="icon-moon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+        </svg>
+      </button>
     </div>
 
-    <div class="flex items-center space-x-4 text-xs">
-        {% if request.user.is_authenticated %}
-            <div class="flex items-center space-x-2 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded border border-slate-200 dark:border-slate-700">
-                <span class="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span class="text-slate-600 dark:text-slate-300 max-w-[240px] truncate" title="{{ request.user.username }}">{{ request.user.username }}</span>
-            </div>
-            <a href="{% url 'oidc_logout' %}" class="text-slate-400 hover:text-rose-500 transition-colors duration-150">Sign Out</a>
-        {% else %}
-            <div class="flex items-center space-x-2">
-                <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-500"></span>
-                <span class="text-slate-400 italic">Sovereign Key Required</span>
-            </div>
-            <a href="{% url 'oidc_authentication_init' %}" class="bg-violet-600 hover:bg-violet-500 text-white font-bold px-3 py-1 rounded transition-colors duration-150 shadow-sm">Sign In</a>
-        {% endif %}
-    </div>
+  </div>
 </header>
