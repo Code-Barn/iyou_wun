@@ -16,6 +16,7 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.conf import settings
+from django.urls import reverse
 
 from ..auth import MyOIDCAuthenticationBackend
 from .helpers import create_oidc_user, make_claims
@@ -61,13 +62,9 @@ class SovereignOnboardingTest(TestCase):
         self.did = "did:iyou:0x123456789abcdef"
         self.claims = {"sub": self.did}
 
-    def test_filter_users_by_claims_creates_new_user(self):
+    def test_filter_users_by_claims_returns_empty_when_no_user(self):
         users = self.backend.filter_users_by_claims(self.claims)
-        self.assertEqual(len(users), 1)
-        user = users[0]
-        self.assertEqual(user.username, self.did)
-        self.assertTrue(user.is_active)
-        self.assertFalse(user.has_usable_password())
+        self.assertEqual(len(users), 0)
 
     def test_filter_users_by_claims_returns_existing_user(self):
         existing_user = User.objects.create_user(username=self.did)
@@ -100,11 +97,11 @@ class PasswordRejectionTest(TestCase):
         user = backend.create_user(claims)
         self.assertFalse(user.has_usable_password())
 
-    def test_filter_users_by_claims_sets_unusable_password(self):
+    def test_created_user_sets_unusable_password(self):
         backend = MyOIDCAuthenticationBackend()
         claims = make_claims("did:key:z6Mkpwdreject2")
-        users = backend.filter_users_by_claims(claims)
-        self.assertFalse(users[0].has_usable_password())
+        user = backend.create_user(claims)
+        self.assertFalse(user.has_usable_password())
 
     def test_existing_user_keeps_unusable_password(self):
         backend = MyOIDCAuthenticationBackend()
@@ -113,6 +110,7 @@ class PasswordRejectionTest(TestCase):
         user.set_unusable_password()
         user.save()
         users = backend.filter_users_by_claims(claims)
+        self.assertEqual(len(users), 1)
         self.assertFalse(users[0].has_usable_password())
 
     def test_model_backend_cannot_auth_oidc_user(self):
@@ -135,7 +133,7 @@ class OIDCBackendEnforcementTest(TestCase):
     def test_oidc_backend_is_configured(self):
         backends = settings.AUTHENTICATION_BACKENDS
         self.assertIn(
-            "apps.core.auth_pkce.PKCEAuthenticationBackend",
+            "apps.core.auth.MyOIDCAuthenticationBackend",
             backends,
         )
 
@@ -145,7 +143,37 @@ class OIDCBackendEnforcementTest(TestCase):
     def test_oidc_backend_creates_user_with_unusable_password(self):
         backend = MyOIDCAuthenticationBackend()
         claims = make_claims("did:key:z6Mkoidcenforce1")
-        users = backend.filter_users_by_claims(claims)
-        user = users[0]
+        user = backend.create_user(claims)
         self.assertEqual(user.username, "did:key:z6Mkoidcenforce1")
         self.assertFalse(user.has_usable_password())
+
+
+class OIDCLogoutViewTest(TestCase):
+    def test_logout_get_flushes_session_and_redirects(self):
+        user = User.objects.create_user(username="did:key:z6Mklogoutget")
+        self.client.force_login(user)
+        response = self.client.get(reverse("oidc_logout"))
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_logout_post_flushes_session_and_redirects(self):
+        user = User.objects.create_user(username="did:key:z6Mklogoutpost")
+        self.client.force_login(user)
+        response = self.client.post(reverse("oidc_logout"))
+        self.assertEqual(response.status_code, 302)
+        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+    def test_logout_aliases(self):
+        user = User.objects.create_user(username="did:key:z6Mklogoutalias")
+        self.client.force_login(user)
+        response = self.client.get(reverse("logout"))
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("_auth_user_id", self.client.session)
+
+        self.client.force_login(user)
+        response = self.client.get("/logout/")
+        self.assertEqual(response.status_code, 302)
+        self.assertNotIn("_auth_user_id", self.client.session)
+

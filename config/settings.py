@@ -50,15 +50,17 @@ SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 
 # Session isolation via app prefix
-APP_NAME_PREFIX = env.str("APP_NAME_PREFIX", default="wun")
+APP_NAME_PREFIX = "wun"
+
+# Cookie Isolation (Prevents collision with IdP on 127.0.0.1)
 SESSION_COOKIE_NAME = f"{APP_NAME_PREFIX}_sessionid"
+CSRF_COOKIE_NAME = f"{APP_NAME_PREFIX}_csrftoken"
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = False  # False for local HTTP development
 SESSION_COOKIE_DOMAIN = None
 SESSION_SAVE_EVERY_REQUEST = True
-CSRF_COOKIE_NAME = f"{APP_NAME_PREFIX}_csrftoken"
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SECURE = False
 SESSION_TRUSTED_ORIGINS = [f"https://{APP_NAME_PREFIX}.iyou.me"]
 
 
@@ -77,26 +79,23 @@ INSTALLED_APPS = [
 
 # Logging configuration
 LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
         },
     },
-    "root": {
-        "handlers": ["console"],
-        "level": "INFO",
-    },
-    "loggers": {
-        "apps.core": {
-            "handlers": ["console"],
-            "level": "INFO",
-            "propagate": False,
+    'loggers': {
+        'mozilla_django_oidc': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
         },
-        "mozilla_django_oidc": {
-            "handlers": ["console"],
-            "level": "DEBUG",
+        'apps.core.auth': {
+            'handlers': ['console'],
+            'level': 'DEBUG',
+            'propagate': True,
         },
     },
 }
@@ -203,8 +202,8 @@ AUTH_USER_MODEL = "auth.User"
 # AUTHENTICATION CONFIGURATION
 # ------------------------------------------------------------------------------
 AUTHENTICATION_BACKENDS = [
-    "apps.core.auth_pkce.PKCEAuthenticationBackend",
-    "django.contrib.auth.backends.ModelBackend",
+    'apps.core.auth.MyOIDCAuthenticationBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
 
 # iyou_wun uses standard Django users where the 'username' is the DID.
@@ -268,6 +267,11 @@ ADMIN_DID = env.str("ADMIN_DID", default="")
 # iyou_home Satellite Service URLs (injected into all template contexts)
 IDP_HOME_URL = env.str("IDP_HOME_URL", default="https://home.iyou.me/")
 IDP_HOME_WS_URL = env.str("IDP_HOME_WS_URL", default="wss://home.iyou.me:9001/")
+BRIDGE_WS_URL = env.str("BRIDGE_WS_URL", default=IDP_HOME_WS_URL)
+
+# Blossom Media Server & CDN Endpoints
+BLOSSOM_SERVER_URL = env.str("BLOSSOM_SERVER_URL", default="http://127.0.0.1:9002")
+BLOSSOM_CDN_URL = env.str("BLOSSOM_CDN_URL", default="https://cdn.iyou.me")
 
 # XMPP Chat Server — defaults used by context processor; overridden per-level in ChatView
 XMPP_DOMAIN = env.str("XMPP_DOMAIN", default="127.0.0.1")
@@ -276,3 +280,4 @@ XMPP_PASSWORD = env.str("XMPP_PASSWORD", default="")
 
 # User infrastructure level: "1" = Managed (cluster), "2" = Sovereign (local enclave)
 WUN_USER_LEVEL = env.str("WUN_USER_LEVEL", default="2")
+

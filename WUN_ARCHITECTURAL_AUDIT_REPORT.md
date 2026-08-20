@@ -1,280 +1,319 @@
 # WUN Architectural Audit Report
 
-**Date:** 2026-08-19
-**Scope:** Media Compartmentalization, Nostr Threading, Profile Persistence, Route Inventory
-**Constraint:** Read-only audit — no files modified
+**Date:** 2026-08-20 (updated from 2026-08-19)
+**Original Scope:** Media Compartmentalization, Nostr Threading, Profile Persistence, Route Inventory
+**Updated Scope:** Phases 1–5 completed; DID implementation audit added
+**Constraint:** Original audit was read-only; subsequent phases modified files
 
 ---
 
 ## 1. Executive Summary
 
-`iyou_wun` is a Django 5.2 OIDC Relying Party satellite with a sovereign Nostr-based social stack. The codebase is structurally clean with proper OIDC/PKCE auth, a well-scoped model layer, and functional multi-kind feed/gallery/profile/chat views. However, **four structural debt categories** require attention:
+`iyou_wun` is a Django 5.2 OIDC Relying Party satellite with a sovereign Nostr-based social stack. The codebase has undergone five implementation phases since the original audit. **Four of five original debt categories are now resolved.**
 
-1. **Media Gallery** uses raw HTML5 `<video>`/`<audio>` elements with no dedicated players, no MIME-type-aware layout, and no media metadata display. The grid is functional but generic.
-2. **Nostr Threading** is flat single-level grouping — `e` tag markers (`root`/`reply` per NIP-10) are completely ignored, making recursive reply trees impossible. There is no server-side thread indexing.
-3. **Profile Editing** is purely client-side (Tauri bridge signing) with missing form fields (banner, NIP-05, lud16), no bridge reconnection, and no broadcast retry.
-4. **Architecture** has significant inline JavaScript (~800 lines in feed.html), duplicated WebSocket bridge logic across templates, hardcoded localhost endpoints, and no base template inheritance.
+### Original Debt Status
 
-**Health Rating:** Functional for local/sovereign desktop use; requires hardening for production multi-user deployment.
-
----
-
-## 2. Subsystem Matrix
-
-| Subsystem | Source Files | Current Behavior | Target State | Identified Bottlenecks |
-|---|---|---|---|---|
-| **Media Gallery** | `gallery.html`, `views.py:240-292,617-632`, `feed.html:207-259` | Generic responsive grid (1-4 cols), MIME filter bar, basic modal with native HTML5 controls, no poster/waveform/metadata, fixed limit=50 | YouTube/Spotify/Instagram-style dedicated viewports with rich players | No custom players; no video poster; no waveform; no metadata in modal; no download; no srcset; no CORS/PNA |
-| **Nostr Threading** | `feed.html:158-304,421-1224`, `views.py:342-367,456-567,370-378` | Flat single-level grouping; `e` tag marker ignored; no reply UI; orphan comments as standalone cards | Recursive tree with NIP-10 markers, indented rendering, reply form, live updates | `get_tag_value()` ignores `e` tag[3]; no `parent_id`/`root_id` models; no recursive fetch; no reply button |
-| **Profile Editing** | `dashboard.html:170-416`, `profile.html`, `views.py:48-60,222-237,635-661` | Client-side Kind 0 construction -> Tauri bridge -> relay broadcast; 3/6 fields editable; no reconnection; no retry | Full fields, resilient bridge, retry queue, fallback modal | Missing fields; no reconnection; no retry; no pubkey validation; inconsistent relay defaults |
-| **Static Assets** | `static/css/`, `tailwind.config.js`, `package.json`, all templates | Tailwind CLI v3.4 pipeline (DONE); WhiteNoise compression; `STATICFILES_DIRS` configured | CSP headers; base template to eliminate 5x boilerplate duplication | Inline JS prevents CSP; no base template; ConverseJS CDN in chat.html |
-
----
-
-## 3. Detailed Findings
-
-### 3.1 Multi-Modal Media Rendering
-
-**Data Flow:**
-```
-Nostr Relay (Kind 1063) -> views.py: fetch_media_assets() / process_into_feed()
-  -> Tag extraction: url, m (MIME), dim, thumb, alt
-  -> GalleryView.get_context_data() -> gallery.html
-  -> Client-side: filterGallery() (show/hide by data-type)
-```
-
-**Tag Parsing** (views.py:282-288, 505-512):
-- `"url"` tag → `file_url`, `"m"` → `mime_type`, `"dim"` → `dimensions`, `"thumb"` → `thumbnail_url`, `"alt"` → `alt_text`
-- Sovereign flag: `is_sovereign = True` if `file_url` contains `"127.0.0.1"`
-
-**Template Rendering:**
-
-| Media Type | Grid Card | Modal | Limitations |
+| # | Debt Category | Status | Resolution |
 |---|---|---|---|
-| Image | `<img>` with thumbnail fallback, `object-cover`, lazy load | Full `<img>` `max-h-[85vh]` | No srcset, no caption, no download |
-| Video | `<video preload="metadata">` + play overlay | `<video controls autoplay>` | Native controls only, no poster, no custom UI |
-| Audio | Gradient bg + music note emoji (no playback in grid) | `<audio controls autoplay>` in white card | Native controls only, no waveform, no playlist |
-| Other | File icon emoji | External link | No preview |
+| 1 | Media Gallery — raw HTML5, no MIME-aware layout | **RESOLVED** | Phase 3: tabbed decks, masonry, lightbox, categorize_media() |
+| 2 | Nostr Threading — flat single-level, NIP-10 markers ignored | **RESOLVED** | Phase 2: nip10.py, recursive tree, threaded feed layout |
+| 3 | Profile Editing — missing fields, no bridge resilience | **RESOLVED** | Phase 1: 6 NIP-01 fields, hardened bridge_client.js singleton |
+| 4 | Architecture — inline JS, duplicated bridge logic | **RESOLVED** | Phase 4: 3 static JS modules, templates reduced 73% |
 
-**Blossom Integration** (feed.html:631-684): Upload only — PUT to `http://127.0.0.1:9002/{sha256}`. No NIP-98 auth, no CDN fallback, URL hardcoded in JS.
+### Remaining Debt
 
-**Missing:** No custom video/audio players, no lightbox keyboard nav, no media metadata in modal, no download button, no infinite scroll, no API endpoint, no media caching, no CORS/PNA handling.
+| # | Category | Severity | Notes |
+|---|---|---|---|
+| 5 | DID layer uses custom implementation, not `did_rust` submodule | See §7 | No external DID library; `cryptography` + `bech32` + string parsing |
+| 6 | No base template (`base.html`) | LOW | 5 templates still duplicate head/nav/ecosystem bar boilerplate |
+| 7 | No CSP headers | LOW | Inline JS eliminated but CSP not yet enabled |
+| 8 | `POLY_ENGINE_URL` not injected to template context | MEDIUM | Hardcoded `127.0.0.1:8002` in `feed_interactions.js` |
+| 9 | ConverseJS loaded from CDN | LOW | `chat.html` loads `https://cdn.conversejs.org/` |
+| 10 | Debug `print()` statements in auth.py | LOW | Should use `logging` module |
+
+### Health Rating
+
+Functional for local/sovereign desktop use. Phases 1–4 resolved all critical structural debt. Remaining items are production-hardening (CSP, base template, logging) and the DID layer decision (§7).
 
 ---
 
-### 3.2 Nostr Threading & Conversation Flow
+## 2. Subsystem Matrix (Updated)
 
-**Event Kinds:**
+| Subsystem | Source Files | Current Behavior | Remaining Work |
+|---|---|---|---|
+| **Media Gallery** | `views.py` (`categorize_media`, `MEDIA_CATEGORIES`), `gallery.html`, `gallery_player.js` | Server-side MIME categorization; tabbed decks (All/Images/Videos/Audio/Other); masonry image grid; 16:9 video feed; inline audio players with scrubber; lightbox with metadata sidebar; keyboard nav (←/→/Esc) | Plyr.js integration, Wavesurfer.js, infinite scroll, download button |
+| **Nostr Threading** | `nip10.py` (`parse_tags`, `build_thread_tree`), `views.py` (`process_into_feed` → threaded dict), `feed.html`, `_thread_post.html`, `feed_interactions.js` | NIP-10 `e` tag markers parsed (root/reply); recursive `roots[]` + `replies{}` dict; threaded layout with indented nested cards; `submitReply()` constructs Kind 1111 with `e`/`p` tags; `broadcastReplyToRelays()` | Multi-relay merge, live updates, depth-unlimited nesting |
+| **Profile Editing** | `dashboard.html`, `bridge_client.js`, `views.py` (`fetch_profile_data`) | 6 NIP-01 fields (name, NIP-05, picture, banner, about, lud16); hardened bridge with mutex/timeout; pubkey validation; fallback modal; profile sync on connect | Broadcast retry queue, localStorage persistence |
+| **Static Assets** | `static/js/bridge_client.js`, `feed_interactions.js`, `gallery_player.js`, `static/css/` | Tailwind CLI pre-compiled; 3 modular JS files; total 1,431 lines extracted from templates | Base template, CSP headers, ConverseJS local bundling |
+| **DID Layer** | `did_kit.py`, `views.py` (bech32 functions), `pyproject.toml` | Custom implementation on `cryptography` + `bech32`; no `didkit` or `did_rust` | See §7 — decision needed on migration path |
 
-| Kind | Purpose | Can Be Parent? |
+---
+
+## 3. Detailed Findings (Original — Status Updated)
+
+### 3.1 Multi-Modal Media Rendering — RESOLVED (Phase 3)
+
+**What was fixed:**
+- `categorize_media()` in `views.py` categorizes Kind 1063 events by MIME type into `MEDIA_CATEGORIES` dict (prefix matching + extension fallback, case-insensitive)
+- `fetch_media_assets()` enriched with `duration`, `blossom_hash`, `blurhash`, `summary`, `media_type` fields
+- `GalleryView` is now public-read (no `LoginRequiredMixin`)
+- Gallery tabbed by MIME type with counts; masonry image grid; 16:9 video feed; audio deck with inline `<audio>` players and scrubber
+- Lightbox modal with metadata sidebar (file name, MIME, sovereign status, NIP-52 timestamps)
+- Keyboard navigation (←/→/Esc)
+- Single-instance media coordinator: switching tabs stops active audio/video
+- NIP-94 tag extraction via `_extract_nip94_tags()`
+
+**Remaining:** Plyr.js for custom video controls, Wavesurfer.js for audio waveforms, infinite scroll, download button.
+
+### 3.2 Nostr Threading — RESOLVED (Phase 2)
+
+**What was fixed:**
+- `apps/core/nip10.py` created: `parse_tags()` extracts NIP-10 `e` tag markers (root/reply), `build_thread_tree()` builds recursive nested structure
+- `process_into_feed()` returns `{"roots": [...], "replies": {parent_id: [note, ...]}, "total_replies": int, "flat": []}` dict
+- `templates/includes/_thread_post.html` — shared threaded post renderer partial
+- `feed.html` rewritten with threaded layout using nested `{% for %}` loops
+- `feed_interactions.js` has `submitReply()` constructing Kind 1111 with `e`/`p` tags and `broadcastReplyToRelays()`
+- 31 tests in `test_feed.py` covering threading + poll governance
+
+**Remaining:** Multi-relay merge, live WebSocket updates, depth-unlimited nesting (currently capped by template recursion).
+
+### 3.3 Sovereign Profile Persistence — RESOLVED (Phase 1)
+
+**What was fixed:**
+- Dashboard form: 6 NIP-01 fields (Display Name, NIP-05, Picture URL, Banner URL, Bio/About, Lightning Address)
+- `bridge_client.js` singleton with mutex state machine, 5s timeout, `getEffectivePubkey()`, `signEvent()`, shared fallback modal
+- Pubkey validation (64-char hex check)
+- Profile sync on bridge connect (`get_profile` → `profile_sync`)
+- `fetch_profile_data()` in `views.py` enriched with `banner` field
+- Profile page: banner hero, NIP-05 badge, lud16 tip button
+- Relay broadcast in parallel with per-relay success/failure toasts
+
+**Remaining:** Broadcast retry queue with localStorage persistence.
+
+### 3.4 Architecture & JS Modularization — RESOLVED (Phase 4)
+
+**What was fixed:**
+- `static/js/bridge_client.js` (361 lines): WebSocket mutex, signing, fallback modal, toast, relay utils
+- `static/js/feed_interactions.js` (808 lines): Feed controller — posting, NIP-10 threading, Blossom media, poll governance
+- `static/js/gallery_player.js` (262 lines): Tab switching, lightbox, media playback coordinator
+- Templates reduced: `feed.html` 1,310→159 lines (−88%), `dashboard.html` 699→387 lines (−45%), `gallery.html` 534→128 lines (−76%)
+- Total: 2,543→674 template lines (−73%)
+
+**Remaining:** Base template for shared boilerplate, CSP headers.
+
+---
+
+## 4. DID Implementation Audit
+
+### 4.1 Executive Finding
+
+**The project does NOT use `didkit`, `pydidkit`, `did_rust`, or any external DID library.** The entire DID layer is a custom implementation totaling ~225 lines across two files, built on:
+
+| Dependency | Version | Purpose |
 |---|---|---|
-| 1 | Text note | Yes |
-| 7 | Reaction | No (child only) |
-| 1063 | Media entry | Yes |
-| 1111 | Comment/reply | **No** (treated as child only; replies to other Kind 1111 → orphan) |
-| 30023 | Long-form article | Yes |
-| 1112 | Poll vote | No (child only) |
+| `cryptography` | 47.0.0 | Ed25519 key generation, signing, verification |
+| `bech32` | 1.2.0 | Nostr npub ↔ hex pubkey conversion |
 
-**`process_into_feed()`** (views.py:456-567) performs single-pass flat grouping:
+No `.gitmodules` file exists. No `did_rust` directory exists. No `didkit` import exists anywhere in the codebase.
+
+### 4.2 DID Layer Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                  DID Operations                      │
+│                                                      │
+│  did_kit.py (145 lines)     views.py (~80 lines)    │
+│  ┌──────────────────────┐   ┌─────────────────────┐ │
+│  │ Ed25519 key mgmt     │   │ did_to_pubkey()     │ │
+│  │ ├─ get_node_signing  │   │ ├─ did:key:z... →   │ │
+│  │ │  _key()            │   │ │  base64url decode  │ │
+│  │ ├─ load_signing_key()│   │ │  strip multicodec  │ │
+│  │ └─ get_public_key_   │   │ └─ return 32B hex   │ │
+│  │    hex()             │   │                      │ │
+│  │                      │   │ npub_to_hex()        │ │
+│  │ VC Operations        │   │ ├─ bech32_decode()   │ │
+│  │ ├─ build_unsigned_vc │   │ └─ convertbits(5→8) │ │
+│  │ ├─ sign_vc()         │   │                      │ │
+│  │ ├─ verify_vc_sig()   │   │ hex_to_npub()        │ │
+│  │ └─ issue_vc()        │   │ ├─ convertbits(8→5) │ │
+│  │                      │   │ └─ bech32_encode()   │ │
+│  │ Crypto:              │   │                      │ │
+│  │ cryptography.hazmat   │   │ did_to_npub()        │ │
+│  │ └─ Ed25519PrivateKey │   │ ├─ did_to_pubkey()   │ │
+│  │ └─ Ed25519PublicKey  │   │ └─ hex_to_npub()     │ │
+│  └──────────────────────┘   └─────────────────────┘ │
+└─────────────────────────────────────────────────────┘
+```
+
+### 4.3 DID Method Support
+
+| DID Method | Format | Resolution Method | Cryptographic Verification |
+|---|---|---|---|
+| `did:key` | `did:key:z<base64url-multicodec-pubkey>` | **Inline extraction** — base64url decode, strip 2-byte multicodec prefix (`ed01` for Ed25519), return raw 32-byte pubkey | **Yes** — Ed25519 sign/verify via `cryptography` library |
+| `did:iyou` | `did:iyou:0x<hex-pubkey>` | **Inline extraction** — strip prefix, hex-decode | **Partial** — pubkey extracted but no DID document resolution |
+| `did:example` | `did:example:<opaque>` | **None** — test-only format | **No** |
+| `did:web` | Not supported | N/A | N/A |
+| `did:peer` | Not supported | N/A | N/A |
+
+**Key limitation:** Resolution is entirely inline string parsing — no actual DID resolution (HTTP(S) DID resolution, DID document retrieval, or key agreement verification). This is acceptable for `did:key` (self-certifying) but would be insufficient for `did:web` or other methods requiring resolution.
+
+### 4.4 What `did_rust` Would Provide (Not Currently Used)
+
+The ecosystem standard routine imports a `did_rust` submodule. If integrated, it would provide:
+
+| Capability | Current (custom) | With `did_rust` |
+|---|---|---|
+| `did:key` resolution | Inline base64url decode | Full DID document resolution |
+| `did:web` resolution | Not supported | HTTP(S) DID document fetch |
+| `did:peer` resolution | Not supported | Peer DID exchange |
+| VC proof verification | Ed25519 only (cryptography lib) | Multi-algorithm via DID document |
+| Key agreement | Not implemented | X25519 for encryption |
+| DID document parsing | Not implemented | Full W3C DID Core spec |
+| NIP-59 gift wrap | Not implemented | Seal + encrypt to recipient |
+| secp256k1 support | Not implemented (Nostr keys) | Full secp256k1 operations |
+
+### 4.5 Ed25519 Signing Deep Dive
+
+All Ed25519 operations use `cryptography.hazmat.primitives.asymmetric.ed25519`:
+
 ```python
-parent_lookup = {**kind_1, **kind_1063, **kind_30023}  # Only these can be parents
-for c in comments:
-    parent_id = get_tag_value(c["tags"], "e")  # First "e" tag only — marker ignored
-    if parent_id in parent_lookup:
-        parent_lookup[parent_id]["comments"].append(c)
-    else:
-        orphan_comments.append(c)
+# Key generation (did_kit.py:24-28)
+digest = hashlib.sha256(seed).digest()          # SHA-256 of WUN_SECRET_KEY
+key = Ed25519PrivateKey.from_private_bytes(digest)
+
+# Public key extraction (did_kit.py:32-36)
+pub_bytes = private_key.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+
+# VC signing (did_kit.py:97-99)
+payload = _canonical_json(unsigned_vc) + _canonical_json(proof)
+signature_hex = private_key.sign(payload).hex()
+
+# VC verification (did_kit.py:112-117)
+public_key = Ed25519PublicKey.from_public_bytes(bytes.fromhex(pubkey_hex))
+public_key.verify(bytes.fromhex(proof_value_hex), payload)
 ```
 
-**`get_tag_value()`** (views.py:370-378) reads only `tag[1]` (event ID), **completely ignoring `tag[3]`** (NIP-10 marker: `"root"` or `"reply"`). This means:
-- Reply-to-reply treated identically to reply-to-root
-- No distinction between root and reply references
-- Multi-level nesting impossible
+**Proof type:** `Ed25519Signature2020` (W3C Data Integrity proof)
+**Canonicalization:** Custom `_canonical_json()` — sorted keys, compact separators, no whitespace
 
-**DOM Rendering:** All comments render at the same visual depth — `pl-4 border-l-2 border-gray-200` (single indentation level). No dynamic indentation based on depth.
+### 4.6 Bech32 Conversion Chain
 
-**Missing:** No NIP-10 marker parsing, no recursive thread tree builder, no reply composition UI (no "Reply" button), no JS function to construct Kind 1111 events with `e`/`p` tags, no live thread updates, single-relay read with no merge.
-
-**Data Flow Bottlenecks:**
-1. Synchronous relay fetches: 2-4 sequential WebSocket connections per page load, 10s timeout each (worst case: 120s)
-2. No caching: every page load triggers fresh relay queries
-3. Profile fetch capped at 100 unique pubkeys
-4. No WebSocket subscription: feed is static until manual refresh
-
----
-
-### 3.3 Sovereign Profile Persistence Pipeline (Kind 0)
-
-**Complete Flow:**
 ```
-/dashboard -> fetch_profile_data() from relay -> render form
-  -> editProfile() constructs Kind 0 JSON
-  -> sendEventToTauri() via WebSocket (wss://home.iyou.me:9001/)
-  -> Bridge signs -> returns signed_event
-  -> broadcastProfile() to each relay (3s timeout each)
-  -> Success/failure toast
+DID string                hex pubkey              npub string
+─────────────            ─────────────           ─────────────
+did:key:z6Mkpw...   →   did_to_pubkey()    →   hex_to_npub()
+  │ base64url decode       │                      │
+  │ strip multicodec       │                      bech32_encode("npub",
+  │ return 32B hex         │                       convertbits(8→5))
+  │                        │
+  └── Used in:             └── Used in:
+      auth.py                  views.py (profile URLs)
+      test_auth.py             nip10.py (note author display)
+      views.py (validation)    feed_interactions.js (via API)
 ```
 
-**Editable Fields:**
-
-| Field | Editable? | In Kind 0 Payload? | Displayed? |
-|---|---|---|---|
-| Display Name | Yes | Yes | Yes |
-| Bio/About | Yes | Yes | Yes |
-| Avatar URL | Yes | Yes | Yes |
-| Banner URL | **No** (no form field) | No | No |
-| NIP-05 | **No** (no form field) | No | Yes (read-only from relay) |
-| Lightning/lud16 | **No** (no form field) | No | Yes (read-only from relay) |
-
-**Bridge Connection Comparison:**
-
-| Feature | dashboard.html | feed.html |
-|---|---|---|
-| Mutex/lock guard | No | Yes (`feedConnectionLock`) |
-| Profile sync on connect | No | Yes (`{ type: "get_profile" }`) |
-| Pubkey validation | No | Yes (64-char hex check) |
-| `onclose` handler | Console log only | Resets lock to IDLE |
-| Reconnection | **No** | **No** |
-
-**Failure Points:**
-
-| # | Failure | Severity | Location |
-|---|---|---|---|
-| 1 | Bridge not running — socket state not cleaned; subsequent sends poll dead socket for 5s | HIGH | dashboard.html:191-192 |
-| 2 | Bridge drops mid-session — `onclose` only logs; editing broken until reload | HIGH | dashboard.html:198 |
-| 3 | All relays unreachable — valid signed event discarded, no retry | HIGH | dashboard.html:252-253 |
-| 4 | Bridge timeout (5s) — state reset, user must manually re-click | MEDIUM | dashboard.html:229-235 |
-| 5 | Invalid pubkey — no validation (unlike feed.html) | MEDIUM | dashboard.html:297 |
-| 6 | `pendingEvent` collision on rapid double-click | LOW | dashboard.html:175,218 |
-
-**Missing:** Bridge reconnection, broadcast retry queue, fallback modal, pubkey validation, profile sync on connect, local persistence of signed events. Relay defaults inconsistent (dashboard: 2, feed: 3, views.py: 3).
-
----
-
-### 3.4 Codebase Architecture & Route Inventory
-
-**Complete Route Map:**
-
-| URL | View | Template | Auth |
-|---|---|---|---|
-| `/` | `home()` | redirect → `/feed` | No |
-| `/feed` | `FeedView` | `feed.html` | No |
-| `/dashboard` | `dashboard()` | `dashboard.html` | Yes |
-| `/gallery` | `GalleryView` | `gallery.html` | Yes |
-| `/profile/<npub>/` | `ProfileView` | `profile.html` | No |
-| `/chat` | `ChatView` | `chat.html` | Yes |
-| `/api/relays` | `api_relays()` | JSON | Yes |
-| `/api/feed` | `api_feed()` | JSON | Yes |
-| `/api/vote` | `api_cast_vote()` | JSON | Yes |
-| `/api/credentials/issue/` | `IssueCredentialView` | JSON | Yes+staff |
-| `/api/config/` | `node_config()` | JSON | No |
-
-**Models:** Only `IssuedCredential` (subject_did, credential_type, vc_id, issued_at). No social/event models — all data fetched live from relays.
-
-**Dead Assets:**
-- `templates/includes/_tailwind_safe_init.html` — never included by any template
-- `RELAY_URL` constant (views.py:381) — defined, never referenced
-- `getCookie()` function (feed.html:1214) — defined, never called
-
-**Hardcoded Endpoints in JS (not configurable):**
-- `http://127.0.0.1:9002/` — Blossom (feed.html:653,669)
-- `http://127.0.0.1:8002/api/nostr/ingest/` — Poly engine (feed.html:522,550) — `POLY_ENGINE_URL` exists in settings but is NOT injected to template context
-- `https://cdn.conversejs.org/` — ConverseJS CDN (chat.html:20,31)
-
-**Inline JS:** feed.html ~800 lines, dashboard.html ~250 lines, gallery.html ~75 lines. Significant duplication of bridge logic, toast functions, and relay management between feed.html and dashboard.html.
-
----
-
-## 4. Implementation Roadmap
-
-### Phase 1: Foundation Hardening (Low Risk, High Impact)
-
-| Step | Task | Files |
-|---|---|---|
-| 1.1 | Extract shared JS into `static/js/bridge.js` (WebSocket bridge, toast, relay mgmt) | `static/js/bridge.js`, `feed.html`, `dashboard.html` |
-| 1.2 | Create `templates/base.html` with shared head, nav, header, ecosystem bar, Tailwind config, toast styles | `base.html`, all 5 page templates |
-| 1.3 | Inject configurable endpoints via context processor: `BLOSSOM_URL`, `POLY_ENGINE_URL` | `context_processors.py`, `settings.py`, `feed.html` |
-| 1.4 | Delete dead assets: `_tailwind_safe_init.html`, `RELAY_URL`, `getCookie()` | 3 files |
-| 1.5 | Add CSP headers after base template eliminates inline scripts | `settings.py` or middleware |
-
-### Phase 2: Nostr Threading (High Complexity, High Value)
-
-| Step | Task | Files |
-|---|---|---|
-| 2.1 | Extend `get_tag_value()` to parse NIP-10 `e` tag markers (`root`/`reply`) | `views.py` |
-| 2.2 | Build recursive thread tree in `process_into_feed()`: `root_id`/`parent_id` relationships, nest children | `views.py` |
-| 2.3 | Depth-aware rendering in `feed.html`: dynamic indentation based on comment depth | `feed.html` |
-| 2.4 | Reply composition UI: "Reply" button, textarea, Kind 1111 construction with `e`/`p` tags | `feed.html` |
-| 2.5 | Add `api/thread/<event_id>` endpoint for recursive thread fetching | `views.py`, `urls.py` |
-| 2.6 | Fetch missing parents for orphan comments | `views.py` |
-
-### Phase 3: Media Gallery (Medium Complexity, High UX Impact)
-
-| Step | Task | Files |
-|---|---|---|
-| 3.1 | Integrate Plyr.js for video: custom controls, poster, responsive aspect ratio | `gallery.html`, `static/js/` |
-| 3.2 | Integrate Wavesurfer.js for audio: waveform, tracklist, duration | `gallery.html`, `static/js/` |
-| 3.3 | Enhance lightbox: keyboard nav, swipe, metadata panel, download button | `gallery.html` |
-| 3.4 | Add infinite scroll with IntersectionObserver | `gallery.html`, `views.py` |
-| 3.5 | Add `?type=image/video/audio` server-side filtering | `views.py`, `gallery.html` |
-
-### Phase 4: Profile Pipeline (Medium Complexity, High Reliability)
-
-| Step | Task | Files |
-|---|---|---|
-| 4.1 | Add missing form fields: Banner URL, NIP-05, lud16 | `dashboard.html` |
-| 4.2 | Include missing fields in Kind 0 payload | `dashboard.html` |
-| 4.3 | Bridge reconnection with exponential backoff on `onclose` | `dashboard.html` |
-| 4.4 | Add pubkey validation (64-char hex check) | `dashboard.html` |
-| 4.5 | Broadcast retry queue: persist signed event in localStorage | `dashboard.html` |
-| 4.6 | Profile sync on dashboard bridge connect | `dashboard.html` |
-| 4.7 | Fallback error modal for persistent bridge disconnection | `dashboard.html` |
-| 4.8 | Unify relay defaults across Python and all JS templates | `views.py`, `feed.html`, `dashboard.html` |
-
-### Phase 5: Production Readiness (Cross-Cutting)
-
-| Step | Task | Files |
-|---|---|---|
-| 5.1 | Django cache layer for relay fetches (60s profiles, 30s feeds) | `views.py`, `settings.py` |
-| 5.2 | Multi-relay fan-out and merge (replace sequential single-relay reads) | `views.py` |
-| 5.3 | Rate limiting on API endpoints | `settings.py`, middleware |
-| 5.4 | Replace debug `print()` with proper logging | `auth.py`, `views.py` |
-| 5.5 | WebSocket subscription for live feed updates (optional, advanced) | `feed.html`, async view |
-
----
-
-## 5. Risk Assessment
+### 4.7 Risk Assessment: DID Layer
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| Production fails due to hardcoded localhost URLs | High | Critical | Step 1.3 |
-| Thread replies render incorrectly for nested conversations | High | High | Phase 2 |
-| Profile save silently fails when bridge is down | High | High | Steps 4.3-4.5 |
-| Media gallery feels dated vs. competitors | Medium | Medium | Phase 3 |
-| CSP headers break ConverseJS or inline JS | Medium | Medium | Steps 1.1 + 1.2 |
-| Relay fetch latency degrades UX | Medium | Medium | Steps 5.1 + 5.2 |
+| `did:iyou` extraction works for current test vectors but may fail for edge cases (no DID doc) | Medium | Medium | Add `did:iyou` test vectors; consider `did_rust` for production |
+| Ed25519 proof type mismatch with verifiers expecting `Ed25519Signature2018` or JSON Web Signature | Medium | Low | Current proof type matches ecosystem convention; verify with iyou_poly |
+| secp256k1 Nostr keys cannot be used for VC signing (Ed25519 only) | Low | High | By design — VCs use DID key, not Nostr key |
+| `did:web` / `did:peer` not supported | Low | Low | Not needed for current satellite scope |
+| Custom `_canonical_json()` may diverge from W3C canonicalization spec | Low | Medium | Test against W3C VC test suite if needed |
+
+### 4.8 Recommendation
+
+The current custom DID layer is **fit for purpose** for the satellite's scope:
+- `did:key` is self-certifying — inline extraction is correct
+- Ed25519 signing/verification via `cryptography` is production-grade
+- `bech32` conversion is standard Nostr protocol
+
+**If/when the project needs** `did:web`, `did:peer`, NIP-59 gift wrap, or multi-algorithm VC verification, migrating to `did_rust` would be the correct path. Until then, the custom implementation has zero external attack surface and no native compilation dependencies.
 
 ---
 
-## 6. File Reference Index
+## 5. Route Inventory (Updated)
+
+| URL | View | Template | Auth | Notes |
+|---|---|---|---|---|
+| `/` | `home()` | redirect → `/feed` | No | |
+| `/feed` | `FeedView` | `feed.html` | No | Threaded NIP-10 layout |
+| `/feed?thread=<id>` | `FeedView` | `feed.html` | No | Thread-focused view |
+| `/dashboard` | `dashboard()` | `dashboard.html` | Yes | 6 NIP-01 fields |
+| `/gallery` | `GalleryView` | `gallery.html` | **No** | Changed from Yes (Phase 3) |
+| `/gallery?type=image` | `GalleryView` | `gallery.html` | No | MIME-filtered decks |
+| `/profile/<npub>/` | `ProfileView` | `profile.html` | No | Banner hero, NIP-05, lud16 |
+| `/chat` | `ChatView` | `chat.html` | Yes | Converse.js XMPP |
+| `/api/feed` | `api_feed()` | JSON | Yes | JSON feed endpoint |
+| `/api/relays` | `api_relays()` | JSON | Yes | GET/POST relay config |
+| `/api/vote` | `api_cast_vote()` | JSON | Yes | POST signed vote envelopes |
+| `/api/credentials/issue/` | `IssueCredentialView` | JSON | Yes+staff | VC issuance |
+| `/api/config/` | `node_config()` | JSON | No | Public node identity |
+
+---
+
+## 6. File Reference Index (Updated)
 
 | File | Lines | Role in Audit |
 |---|---|---|
-| `apps/core/views.py` | 825 | All server logic: feed, gallery, profile, threading, relay connections |
+| `apps/core/views.py` | 930 | All server logic: feed, gallery (categorize_media, MEDIA_CATEGORIES), profile, threading, relay connections |
+| `apps/core/nip10.py` | 213 | NIP-10 threading — parse_tags(), build_thread_tree() |
+| `apps/core/did_kit.py` | 145 | Ed25519 key management, VC build/sign/verify (custom — no didkit) |
 | `apps/core/models.py` | 29 | Only `IssuedCredential` — no social/event models |
 | `apps/core/urls.py` | 31 | All app routes |
-| `apps/core/context_processors.py` | 10 | Template context injection |
+| `apps/core/context_processors.py` | 10 | Injects `idp_home_ws_url`, `xmpp_ws_url` |
 | `apps/core/auth.py` | 125 | OIDC backend with debug prints |
 | `apps/core/auth_pkce.py` | 88 | PKCE authentication views |
-| `templates/feed.html` | 1225 | Feed + ~800 lines inline JS |
-| `templates/dashboard.html` | 417 | Profile edit + ~250 lines inline JS |
-| `templates/gallery.html` | 192 | Media gallery + modal |
-| `templates/profile.html` | 132 | Read-only profile display |
-| `templates/chat.html` | 52 | Converse.js XMPP chat |
+| `static/js/bridge_client.js` | 361 | TauriBridgeClient — WebSocket mutex, signing, fallback modal |
+| `static/js/feed_interactions.js` | 808 | Feed controller — posting, NIP-10 threading, polls, Blossom |
+| `static/js/gallery_player.js` | 262 | Gallery — tab switching, lightbox, media playback coordinator |
+| `templates/feed.html` | 159 | Threaded feed layout + NIP-10 nested comments |
+| `templates/dashboard.html` | 387 | Dashboard + Edit Profile (6 NIP-01 fields) |
+| `templates/gallery.html` | 128 | Tabbed media decks + masonry + lightbox |
+| `templates/profile.html` | 157 | Sovereign profile (banner hero, NIP-05, lud16) |
+| `templates/chat.html` | 53 | Converse.js XMPP chat |
 | `templates/poll_modal.html` | 73 | Poll creation modal |
-| `templates/_nav.html` | 12 | Navigation bar |
+| `templates/includes/_thread_post.html` | 103 | Shared threaded post renderer partial |
 | `templates/includes/_standard_header.html` | 41 | Header with auth state |
-| `templates/includes/_ecosystem_bar.html` | 47 | Sovereign mesh top bar |
-| `templates/includes/_tailwind_safe_init.html` | 21 | **DEAD** — never included |
-| `config/settings.py` | 264 | All Django configuration |
+| `templates/includes/_ecosystem_bar.html` | 47 | Sovereign mesh top bar (generated) |
+| `config/settings.py` | 278 | All Django configuration (OIDC defaults updated) |
 | `services/poly_client.py` | 59 | Poly governance HTTP client |
-| `tailwind.config.js` | 22 | Tailwind content paths + theme |
+| `apps/core/tests/test_gallery.py` | 220 | 26 tests: MIME categorization + gallery context |
+| `apps/core/tests/test_feed.py` | 327 | 31 tests: NIP-10 threading + poll governance |
+| `tailwind.config.js` | 25 | Tailwind content paths + theme |
+| `package.json` | 22 | npm scripts: build:css, watch:css |
+
+**Total test count:** 115 across 5 modules — `test_auth` (17), `test_views` (21), `test_feed` (31), `test_issuance` (19), `test_gallery` (26).
+
+---
+
+## 7. Remaining Work (Post-Phase 5)
+
+### High Priority
+
+| Step | Task | Impact |
+|---|---|---|
+| 6.1 | **DID layer decision:** Evaluate `did_rust` integration vs. maintaining custom implementation (see §4.8) | Strategic |
+| 6.2 | Inject `POLY_ENGINE_URL` and `BLOSSOM_URL` via context processor, replace hardcoded JS values | Correctness |
+| 6.3 | Replace `print()` debug statements with `logging` module in `auth.py` | Production |
+
+### Medium Priority
+
+| Step | Task | Impact |
+|---|---|---|
+| 6.4 | Create `templates/base.html` — shared head, nav, ecosystem bar, Tailwind config, toast styles | Maintainability |
+| 6.5 | Broadcast retry queue in `feed_interactions.js` (localStorage persistence) | Reliability |
+| 6.6 | Add CSP headers after base template eliminates remaining inline patterns | Security |
+
+### Low Priority
+
+| Step | Task | Impact |
+|---|---|---|
+| 6.7 | Bundle ConverseJS locally (remove CDN dependency) | Offline resilience |
+| 6.8 | Delete dead assets if still present (`_tailwind_safe_init.html`, stale constants) | Hygiene |
+| 6.9 | Multi-relay fan-out and merge for feed/profile fetches | Performance |
+| 6.10 | Django cache layer for relay fetches (60s profiles, 30s feeds) | Performance |

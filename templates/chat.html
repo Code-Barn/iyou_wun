@@ -3,32 +3,30 @@
 <html>
 <head>
     <title>Chat - iyou_wun</title>
-    <!-- REPLACE WITH STATIC TAILWIND CSS - Rule 7 compliance -->
-    <!-- <script src="https://cdn.tailwindcss.com"></script> -->
-    <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <script>
-        // Prevent script execution crashes if runtime tailwind variables are unresolved
-        if (typeof tailwind !== 'undefined') {
-            tailwind.config = {
-            theme: {
-                extend: {
-                    screens: { xs: '360px' }
-                }
-            }
+      (function() {
+        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
+        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
+        if (theme === 'dark' || theme === 'stealth') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
         }
+      })();
     </script>
-    <link rel="stylesheet" type="text/css" href="https://cdn.conversejs.org/dist/converse.min.css">
+    <link rel="stylesheet" href="{% static 'css/output.css' %}">
+    <link rel="stylesheet" type="text/css" href="https://cdn.conversejs.org/10.1.7/dist/converse.min.css">
     <style>
         #conversejs { height: calc(100vh - 57px); }
         .converse-chatrooms, .converse-chatboxes { max-width: 100% !important; }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200">
     {% include 'includes/_ecosystem_bar.html' %}
     {% include 'includes/_standard_header.html' %}
     {% include '_nav.html' %}
     <div id="conversejs"></div>
-    <script src="https://cdn.conversejs.org/dist/converse.min.js"></script>
+    <script src="https://cdn.conversejs.org/10.1.7/dist/converse.min.js"></script>
     <script>
         converse.initialize({
             bosh_service_url: undefined,
@@ -36,12 +34,14 @@
             jid: '{{ user_pubkey }}@{{ xmpp_domain }}',
             password: '{{ xmpp_password }}',
             authentication: 'login',
-            keepalive: false,
-            persistent_store: 'session',
+            keepalive: true,
+            persistent_store: 'local',
             view_mode: 'fullscreen',
             auto_login: true,
             allow_registration: false,
             discover_connection_methods: false,
+            allow_non_roster_messaging: true,
+            archived_messages: false,
             theme: 'light',
             show_controlbox_by_default: true,
             hide_muc_panel: true,
@@ -49,5 +49,6 @@
             sticky_controlbox: true,
         });
     </script>
+    <script src="{% static 'js/theme.js' %}"></script>
 </body>
 </html>

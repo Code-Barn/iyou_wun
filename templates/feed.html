@@ -3,6 +3,17 @@
 <html>
 <head>
     <title>Feed - iyou_wun</title>
+    <script>
+      (function() {
+        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
+        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
+        if (theme === 'dark' || theme === 'stealth') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
         .toast { animation: slideIn 0.3s ease-out; }
@@ -11,7 +22,7 @@
         @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
     </style>
 </head>
-<body class="bg-gray-100 min-h-screen">
+<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200">
     {% include 'includes/_ecosystem_bar.html' %}
     {% include 'includes/_standard_header.html' %}
     {% include '_nav.html' %}
@@ -144,16 +155,21 @@
 
     <script>
         window.TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url }}";
+        window.BLOSSOM_SERVER_URL = "{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}";
         window.userPubkey = "{{ user_pubkey }}";
         window.userNpub = "{{ user_npub }}";
         window.userDid = "{{ user_did }}";
     </script>
-    <script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ idp_home_ws_url }}"></script>
-    <script src="{% static 'js/feed_interactions.js' %}"></script>
+    <script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"></script>
+    <script src="{% static 'js/feed_interactions.js' %}"
+            data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"
+            data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             bridgeClient.connect(handleSignedEvent);
         });
     </script>
+    <script src="{% static 'js/theme.js' %}"></script>
 </body>
 </html>
+

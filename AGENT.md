@@ -14,14 +14,14 @@ Do NOT implement cleartext client secrets, do NOT use email addresses as databas
 
 **iyou_wun** (WUN) is a Django 5.2 OIDC Relying Party satellite that authenticates users via the **iyou_idp** identity provider using Decentralized Identifiers (DID). Passwords are deprecated — OIDC/DID is the sole entry point.
 
-**Core features:** Omni-Social Nostr Feed (Kind 1/7/1063/1111/30023/1112), Media Gallery, Sovereign Profile pages, XMPP Chat (Converse.js), Poly Governance Polls, Verifiable Credential issuance.
+**Core features:** Omni-Social Nostr Feed (Kind 1/7/1063/1111/30023/1112) with NIP-10 threading, Media Gallery (tabbed by MIME type), Sovereign Profile pages, XMPP Chat (Converse.js), Poly Governance Polls, Verifiable Credential issuance.
 
 ---
 
 ## Quick Start
 
 ```bash
-cp .env.example .env          # fill in OIDC_RP_CLIENT_ID, WUN_SECRET_KEY
+cp .env.example .env          # fill in WUN_SECRET_KEY (OIDC client defaults work for local dev)
 uv sync
 uv run python manage.py migrate
 uv run python manage.py runserver 8001
@@ -37,7 +37,7 @@ Requires: running `iyou_idp` instance + `iyou_home` (Tauri bridge :9001, Blossom
 |----------|----------|---------|
 | Developer Guide | `docs/DEVELOPER_GUIDE.md` | Full setup, env vars, architecture, troubleshooting |
 | Design Doc | `docs/DESIGN_DOC.md` | Sovereign Media Stack architecture (Django + React + Rust) |
-| Project TODO | `docs/TODO.md` | Current task tracking (synced from omni_social hub) |
+| Project TODO | `TODO.md` | Current task tracking (synced from omni_social hub) |
 | Auth Standard | `docs/ecosystem_shared/OMNI_SOCIAL_AUTH_STANDARDIZATION.md` | Platform-wide OIDC/PKCE rules |
 | Auth Flow Spec | `docs/ecosystem_shared/AUTH_FLOW_SPECIFICATION.md` | Request/response flow diagrams |
 | PKCE Reference | `docs/ecosystem_shared/auth_pkce.py` | Canonical reference implementation |
@@ -74,8 +74,12 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 | `apps/core/auth.py` | `MyOIDCAuthenticationBackend` — DID user creation, admin elevation |
 | `apps/core/auth_pkce.py` | PKCE views + backend with code_verifier relay |
 | `apps/core/views.py` | Feed, Dashboard, Gallery, Profile, Chat, API endpoints |
+| `apps/core/nip10.py` | NIP-10 threading parser — tree builder for reply threading |
 | `apps/core/models.py` | `IssuedCredential` — VC issuance tracking |
 | `apps/core/did_kit.py` | Ed25519 VC signing/verification |
+| `static/js/bridge_client.js` | Tauri WebSocket bridge — mutex, signing, fallback modal |
+| `static/js/feed_interactions.js` | Feed controller — posting, replies, threading, poll governance |
+| `static/js/gallery_player.js` | Gallery controller — tab switching, lightbox, media playback |
 
 ---
 
@@ -85,9 +89,9 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 2. `PKCEOIDCAuthenticationRequestView` generates `code_verifier` + `code_challenge` (S256), stores verifier in session, redirects to IDP with `scope=openid profile email`
 3. User authenticates at IDP, IDP redirects back to `/oidc/callback/?code=...&state=...`
 4. `PKCEOIDCAuthenticationCallbackView.get_backend_kwargs()` pops `pkce_code_verifier` from session, injects into backend kwargs
-5. `PKCEAuthenticationBackend.authenticate()` stores verifier on `self` instance, calls library's `authenticate()`
+5. `MyOIDCAuthenticationBackend.authenticate()` stores verifier on `self` instance, calls library's `authenticate()`
 6. Library calls `get_token()` → our override injects `code_verifier` into POST payload → token exchange with IDP
-7. `MyOIDCAuthenticationBackend.filter_users_by_claims()` does `get_or_create(username=claims["sub"])` — DID is the username
+7. `MyOIDCAuthenticationBackend.filter_users_by_claims()` filters by `username=claims["sub"]` and `create_user()` creates sovereign user with unusable password
 8. `_evaluate_admin_elevation()` checks `settings.ADMIN_DID` match → grants staff/superuser
 9. Session established, user redirected to `LOGIN_REDIRECT_URL` = `/`
 
@@ -99,7 +103,7 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 uv run python manage.py test apps.core.tests
 ```
 
-89 tests across 4 modules: `test_auth` (17), `test_views` (21), `test_feed` (31), `test_issuance` (19).
+115 tests across 5 modules: `test_auth` (17), `test_views` (21), `test_feed` (31), `test_issuance` (19), `test_gallery` (26).
 
 ---
 
@@ -107,22 +111,22 @@ uv run python manage.py test apps.core.tests
 
 ```python
 # OIDC (config/settings.py)
-OIDC_RP_CLIENT_ID       = env.str("OIDC_RP_CLIENT_ID")
+OIDC_RP_CLIENT_ID       = env.str("OIDC_RP_CLIENT_ID", default="iyou-wun-satellite-client")
 OIDC_RP_CLIENT_SECRET   = env.str("OIDC_RP_CLIENT_SECRET", default="")  # PKCE-only, no secret needed
-OIDC_RP_SCOPES          = "openid profile email"
+OIDC_RP_SCOPES          = env.str("OIDC_RP_SCOPES", default="openid profile email")
 OIDC_RP_SIGN_ALGO       = "RS256"
 OIDC_VERIFY_SSL         = False
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST    = True
 
 # Auth
-AUTHENTICATION_BACKENDS = ["apps.core.auth_pkce.PKCEAuthenticationBackend", "django.contrib.auth.backends.ModelBackend"]
+AUTHENTICATION_BACKENDS = ["apps.core.auth.MyOIDCAuthenticationBackend", "django.contrib.auth.backends.ModelBackend"]
 LOGIN_URL               = "oidc_authentication_init"
 LOGIN_REDIRECT_URL      = "/"
 ADMIN_DID               = env.str("ADMIN_DID", default="")
 
 # Session
 SESSION_COOKIE_NAME     = "wun_sessionid"
-SESSION_COOKIE_SECURE   = True
+SESSION_COOKIE_SECURE   = False
 SESSION_COOKIE_SAMESITE = "Lax"
 ```

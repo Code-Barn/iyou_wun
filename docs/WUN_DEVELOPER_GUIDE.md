@@ -14,11 +14,11 @@ The project is in active development. The root URL (`/`) immediately redirects t
 
 | Component           | Technology                           |
 | ------------------- | ------------------------------------ |
-| Language            | Python 3.12                          |
+| Language            | Python 3.10+                         |
 | Framework           | Django 5.2.13                        |
 | Auth                | mozilla-django-oidc 5.0.2            |
 | Config              | django-environ 0.13+                 |
-| Styling             | Tailwind CSS (CDN, v3)              |
+| Styling             | Tailwind CSS (pre-compiled via `npm run build:css`) |
 | Database            | PostgreSQL (production via DATABASE_URL), SQLite (default local dev) |
 | WSGI server         | Gunicorn 23+                         |
 | WebSocket (server)  | websocket-client 1.9+                |
@@ -48,8 +48,9 @@ The project is in active development. The root URL (`/`) immediately redirects t
 ```bash
 # Copy environment template and fill in credentials
 cp .env.example .env
-# Edit .env with your OIDC_RP_CLIENT_ID, OIDC_RP_CLIENT_SECRET,
-# WUN_SECRET_KEY (any long random string), and DATABASE_URL if using PostgreSQL
+# Edit .env with your WUN_SECRET_KEY (any long random string),
+# and DATABASE_URL if using PostgreSQL.
+# OIDC client credentials default to ecosystem PKCE standard — no edits needed for local dev.
 
 # Install dependencies
 uv sync
@@ -74,9 +75,9 @@ docker run -d --name iyou-wun \
   -e WUN_DEBUG=False \
   -e WUN_ALLOWED_HOSTS="['localhost','127.0.0.1','wun.iyou.me']" \
   -e DATABASE_URL="postgres://user:pass@host:5432/wun" \
-  -e POLY_ENGINE_URL="http://iyou-idp.identity.svc.cluster.local:8000" \
-  -e OIDC_RP_CLIENT_ID="747582" \
-  -e OIDC_RP_CLIENT_SECRET="<secret>" \
+  -e POLY_ENGINE_URL="http://127.0.0.1:8002" \
+  -e OIDC_RP_CLIENT_ID="iyou-wun-satellite-client" \
+  -e OIDC_RP_CLIENT_SECRET="" \
   iyou-wun:latest
 ```
 
@@ -96,7 +97,7 @@ The `config/settings.py` reads operational parameters from `WUN_`-prefixed env v
 | `WUN_DEBUG`                       | `False`                         | Django debug mode                  |
 | `WUN_ALLOWED_HOSTS`               | `['localhost', '127.0.0.1']`    | Django allowed hosts (list format) |
 | `DATABASE_URL`                    | `sqlite:///db.sqlite3`          | Database connection string (use `postgres://...` in production) |
-| `POLY_ENGINE_URL`                 | `http://127.0.0.1:8000`         | Headless calculation engine (Poly governance voting) |
+| `POLY_ENGINE_URL`                 | `http://127.0.0.1:8002`         | Headless calculation engine (Poly governance voting) |
 | `NODE_DID`                        | `did:key:z6Mkdevlocal...`       | Node's own DID (used as VC issuer) |
 | `NODE_PRIVATE_KEY_HEX`            | *(derived from WUN_SECRET_KEY)*  | Ed25519 private key hex (32 bytes → 64 chars). If set, takes absolute precedence over WUN_SECRET_KEY derivation. |
 | `IDP_HOME_URL`                    | `https://home.iyou.me/`         | iyou_home HTTP endpoint (mesh badge health check) |
@@ -115,10 +116,9 @@ The following variables connect to the iyou_idp. Fallback defaults target the cl
 | `OIDC_OP_TOKEN_ENDPOINT`            | `http://iyou-idp.identity.svc.cluster.local:8000/openid/token/` | IdP token exchange (back-channel)          |
 | `OIDC_OP_USER_ENDPOINT`             | `http://iyou-idp.identity.svc.cluster.local:8000/openid/userinfo/` | IdP userinfo/claims (back-channel)         |
 | `OIDC_OP_JWKS_ENDPOINT`             | `http://iyou-idp.identity.svc.cluster.local:8000/openid/jwks/` | IdP JWKS key set (back-channel)                 |
-| `OIDC_RP_CLIENT_ID`                 | *(required — no default)*       | Client ID registered with the IdP                |
-| `OIDC_RP_CLIENT_SECRET`             | *(required — no default)*       | Client secret registered with the IdP            |
+| `OIDC_RP_CLIENT_ID`                 | `iyou-wun-satellite-client`    | Client ID registered with the IdP (ecosystem default) |
+| `OIDC_RP_CLIENT_SECRET`             | *(empty — PKCE public client)* | Client secret (unused for PKCE public clients)  |
 | `OIDC_RP_CALLBACK_URL`              | `http://127.0.0.1:8001/oidc/callback/` | OIDC callback URL                          |
-| `OIDC_OP_AUTHORIZATION_ENDPOINT`    | —                                      | Also controls `LOGIN_URL` (Django redirect for unauthenticated users) |
 
 Current iyou_idp development values (localhost):
 
@@ -128,8 +128,8 @@ OIDC_OP_TOKEN_ENDPOINT=http://127.0.0.1:8000/openid/token/
 OIDC_OP_USER_ENDPOINT=http://127.0.0.1:8000/openid/userinfo/
 OIDC_OP_JWKS_ENDPOINT=http://127.0.0.1:8000/openid/jwks/
 OIDC_RP_CALLBACK_URL=http://127.0.0.1:8001/oidc/callback/
-OIDC_RP_CLIENT_ID=747582
-OIDC_RP_CLIENT_SECRET=1522b34850cdd1140f889d8e0fdf6704e52659af5d9a84adabfdfea0
+OIDC_RP_CLIENT_ID=iyou-wun-satellite-client
+OIDC_RP_CLIENT_SECRET=
 ```
 
 > **⚠️ FINAL STANDARDIZATION RULE**: After extensive testing, we've determined that **ALL** OIDC endpoints must use `127.0.0.1` to completely eliminate the localhost/127.0.0.1 mismatch that causes session drops on ALL platforms (not just Intel Mac).
@@ -186,9 +186,11 @@ The `mozilla-django-oidc` library handles the token exchange, userinfo retrieval
 
 ## Signature Bridge (Port 9001 — Tauri)
 
-**File:** `templates/feed.html` / `templates/dashboard.html` (inline JavaScript)
+**Files:** `static/js/bridge_client.js`, `templates/dashboard.html`, `templates/feed.html`
 
 The Tauri signing bridge at `ws://127.0.0.1:9001` is a WebSocket endpoint provided by iyou_home that signs Nostr events with the user's local key. The browser never has access to the private key.
+
+The bridge logic is centralized in `static/js/bridge_client.js` — a singleton `TauriBridgeClient` instance shared across all templates. Feed and dashboard controllers import it via `<script src="{% static 'js/bridge_client.js' %}">`.
 
 ### Supported Message Types
 
@@ -239,8 +241,8 @@ An additional runtime guard in `sendEventToTauri()` logs `SENDING_EVENT_WITH_PUB
 
 ### Connection Management
 
-- A **mutex lock** (`window.feedConnectionLock`) prevents overlapping connection attempts: states are `"IDLE"` → `"CONNECTING"` → `"OPEN"`.
-- `window.activeFeedSocket` is the singleton WebSocket reference; `readyState` is checked before any new connection is spawned.
+- `TauriBridgeClient` (singleton in `bridge_client.js`) manages a single WebSocket with a **mutex state machine**: states are `"IDLE"` → `"CONNECTING"` → `"OPEN"`.
+- `bridgeClient.socket` is the singleton WebSocket reference; `readyState` is checked before any new connection is spawned.
 - Immediately after `onopen`, the client sends `{"type": "get_profile"}` to populate `window.activeProfile`.
 - A 5-second timeout abandons signing if the bridge is unreachable.
 - The `isProcessing` flag prevents concurrent signing requests.
@@ -341,7 +343,9 @@ Media files are uploaded to the local Blossom server at `http://127.0.0.1:9002/<
 
 ### Gallery View
 
-The **Media Gallery** (`/gallery`) renders all Kind 1063 events in a responsive CSS grid with MIME-type filtering (All / Images / Video / Audio). Clicking a card opens a fullscreen modal with native `<video>`, `<audio>`, or full-resolution `<img>` playback.
+The **Media Gallery** (`/gallery`) renders Kind 1063 events with server-side MIME categorization into tabbed decks — **All**, **Images** (CSS masonry grid), **Videos** (16:9 feed cards), **Audio** (inline players with scrubber), and **Other**. Counts are shown on each tab. Clicking an image opens a fullscreen lightbox with metadata sidebar (file name, MIME, sovereign status, NIP-52 timestamps) and keyboard navigation (←/→/Esc). Audio auto-pauses when navigating between tabs. Gallery is public-read (no login required).
+
+**Files:** `apps/core/views.py` (GalleryView + `categorize_media()`), `templates/gallery.html`, `static/js/gallery_player.js`
 
 ---
 
@@ -513,12 +517,12 @@ Profile pages are public (no login required).
 
 ### Dashboard — Edit Profile
 
-**File:** `templates/dashboard.html`
+**Files:** `templates/dashboard.html`, `static/js/bridge_client.js`
 
 Authenticated users can publish a Kind 0 profile event from the Dashboard:
-1. Form fields: Display Name, Picture URL, Bio/About
+1. Form fields: Display Name, NIP-05 Identifier, Picture URL, Banner URL, Bio/About, Lightning Address (lud16)
 2. On submit, constructs a Kind 0 event with JSON-stringified content
-3. Sends to the Tauri signing bridge (`ws://127.0.0.1:9001`) for signing
+3. Signs via `bridgeClient.signEvent()` through the Tauri WebSocket bridge
 4. Broadcasts the signed event to all three relays in parallel
 5. Toast feedback on success/failure
 
@@ -538,7 +542,7 @@ The XMPP endpoint is selected dynamically based on `WUN_USER_LEVEL`:
 | `1` | Managed (cluster) | `iyou.me` | `wss://xmpp.iyou.me:5222/xmpp-websocket` |
 | `2` | Sovereign (local enclave) | `127.0.0.1` | `wss://home.iyou.me:5222/xmpp-websocket` |
 
-- **JID format**: `{user_did}@{domain}` (user's Decentralized Identifier as local part)
+- **JID format**: `{nostr_pubkey_hex}@{domain}` (hex pubkey derived from DID, RFC 7622 nodeprep compliant)
 - **Password**: `{nostr_hex_pubkey}` (derived from the DID)
 - **Fullscreen mode**: Converse.js fills the viewport below the nav bar
 - **Auto-login**: Connects on page load using the derived credentials
@@ -588,15 +592,25 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 .
 ├── manage.py                       # Django management entry point
 ├── pyproject.toml                   # Project metadata & dependencies
+├── package.json                     # Tailwind CSS build scripts
+├── tailwind.config.js               # Tailwind content paths + theme
+├── postcss.config.js                # PostCSS plugin config (tailwindcss + autoprefixer)
 ├── Dockerfile                       # Multi-stage production build (uv + gunicorn)
 ├── docker-entrypoint.sh             # Container init (migrate → gunicorn on :8000)
 ├── .dockerignore                    # Excludes garbage from Docker context
 ├── .env                             # Environment variables (git-ignored)
 ├── .env.example                     # Template for .env (safe to commit)
-├── WUN_DEVELOPER_GUIDE.md           # This file
 ├── services/
 │   ├── __init__.py
 │   └── poly_client.py               # PolyClient — HTTP proxy to governance engine
+├── static/
+│   ├── css/
+│   │   ├── input.css                # Tailwind source (directives only)
+│   │   └── output.css               # Compiled Tailwind (gitignored, built via npm)
+│   └── js/
+│       ├── bridge_client.js         # TauriBridgeClient — WebSocket mutex, signing, fallback modal
+│       ├── feed_interactions.js     # Feed controller — posting, NIP-10 threading, polls
+│       └── gallery_player.js        # Gallery — tab switching, lightbox, media playback
 ├── config/
 │   ├── settings.py                  # Django settings (OIDC, auth, apps, CSRF, POLY_ENGINE_URL)
 │   ├── urls.py                      # Root URL configuration
@@ -606,11 +620,13 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 │   ├── __init__.py
 │   ├── apps.py                      # Django app config
 │   ├── did_kit.py                   # Ed25519 VC signing/verification (hex proofValue)
-│   ├── views.py                     # home(), dashboard(), FeedView, GalleryView,
-│   │                                # ProfileView, ChatView, + Nostr helpers,
-│   │                                # api_cast_vote(), IssueCredentialView, node_config()
+│   ├── nip10.py                     # NIP-10 threading — parse_tags(), build_thread_tree()
+│   ├── views.py                     # FeedView, GalleryView, ProfileView, ChatView,
+│   │                                # home(), dashboard(), Nostr helpers, api_cast_vote(),
+│   │                                # IssueCredentialView, node_config(), categorize_media()
 │   ├── urls.py                      # App-level URL routing
 │   ├── auth.py                      # MyOIDCAuthenticationBackend
+│   ├── auth_pkce.py                 # PKCE views + backend with code_verifier relay
 │   ├── models.py                    # IssuedCredential — tracks VC issuance events
 │   ├── admin.py                     # IssuedCredential admin registration
 │   ├── conftest.py                  # pytest fixtures (OIDC claims, users, Nostr events)
@@ -620,15 +636,19 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 │       ├── test_auth.py             # 17 tests: auth backend, password rejection, OIDC enforcement
 │       ├── test_views.py            # 21 tests: home redirect, dashboard, chat, gallery, profile
 │       ├── test_feed.py             # 31 tests: process_into_feed threading + poll governance
+│       ├── test_gallery.py          # 26 tests: MIME categorization + gallery context + auth
 │       └── test_issuance.py         # 19 tests: did_kit sign/verify + credential API (real Ed25519)
-└── templates/
-    ├── _nav.html                    # Shared navigation (DRY — included by all views)
-    ├── dashboard.html               # Dashboard + Edit Profile (Kind 0 broadcast)
-    ├── feed.html                    # Omni-Social feed (Kind 1, 1063, 1111, 30023, 1112) + poll creation
-    ├── poll_modal.html              # Poll creation modal (Tailwind overlay)
-    ├── gallery.html                 # Media gallery (Kind 1063 grid + modal)
-    ├── profile.html                 # Sovereign profile pages
-    └── chat.html                    # XMPP chat (Converse.js)
+├── templates/
+│   ├── _nav.html                    # Shared navigation (DRY — included by all views)
+│   ├── _ecosystem_bar.html          # Sovereign mesh top bar (generated — do not edit)
+│   ├── includes/
+│   │   └── _thread_post.html        # Shared threaded post renderer partial (NIP-10)
+│   ├── dashboard.html               # Dashboard + Edit Profile (Kind 0 broadcast, 6 NIP-01 fields)
+│   ├── feed.html                    # Omni-Social feed with threaded layout + poll creation
+│   ├── poll_modal.html              # Poll creation modal (Tailwind overlay)
+│   ├── gallery.html                 # Media gallery — tabbed decks + masonry + lightbox
+│   ├── profile.html                 # Sovereign profile (banner hero, NIP-05 badge, lud16 tip)
+│   └── chat.html                    # XMPP chat (Converse.js)
 ```
 
 ### URL Map
@@ -638,7 +658,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 | `/`                   | `home`         | No            | Redirects to /feed                   |
 | `/dashboard`          | `dashboard`    | Yes           | DID display + Edit Profile (Kind 0)  |
 | `/feed`               | `FeedView`     | No            | Public unified Nostr feed + polls    |
-| `/gallery`            | `GalleryView`  | Yes           | Media grid with MIME filters + modal |
+| `/gallery`            | `GalleryView`  | No            | Media tabbed decks + masonry + lightbox  |
 | `/profile/<npub>/`    | `ProfileView`  | No            | Sovereign profile (Kind 0, 1, 1063)  |
 | `/chat`               | `ChatView`     | Yes           | XMPP sovereign chat                  |
 | `/admin/`             | Django admin   | —             |                                      |
@@ -657,7 +677,7 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 uv run python manage.py test apps.core.tests
 ```
 
-Tests cover (89 total across 4 modules):
+Tests cover (115 total across 5 modules):
 
 ### `test_auth.py` (17 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5 tests)
@@ -669,16 +689,20 @@ Tests cover (89 total across 4 modules):
 - `HomeViewTest` — root redirect to /feed (1 test)
 - `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link (5 tests)
 - `ChatViewTest` — anonymous redirect to IdP, XMPP init, nav links (6 tests)
-- `GalleryViewTest` — anonymous redirect, media heading, nav links (4 tests)
+- `GalleryViewTest` — media heading, nav links, anonymous access, tab context (5 tests — public-read)
 - `ProfileViewTest` — invalid npub error, valid npub page render (2 tests)
 - `DashboardProfileTest` — profile section, publish button (2 tests)
-- `JwksConnectivityTest` — IdP JWKS endpoint integration (1 test, skips if IdP is down)
 
 ### `test_feed.py` (31 tests)
 - `ProcessIntoFeedTest` — empty input, kind 1/1063/7/1111/30023/1112 routing, reaction grouping/dedup,
   orphan comment preservation, sovereign flag, profile enrichment, sort order,
   max_items truncation, malformed events, missing fields, mixed kinds, npub generation,
   poll option extraction, scope tags, vote grouping under parent poll, orphan vote dropped
+
+### `test_gallery.py` (26 tests)
+- `CategorizeMediaTest` — 21 tests: image/video/audio MIME grouping, NIP-94 tag extraction, missing tags, `duration` field, `blurhash`, `blossom_hash`, mixed media, long audio, glob wildcard, unknown MIME
+- `GalleryViewContextTest` — 4 tests: 200 status, correct context keys, public access (no login required), type filter passes correct subset
+- `GalleryViewAuthTest` — 1 test: anonymous access returns 200
 
 ### `test_issuance.py` (19 tests)
 - `DIDKitUnitTest` — key loading (32/64 hex), VC structure, sign/verify round-trip, wrong-key rejection, tamper detection (6 tests)
@@ -741,6 +765,5 @@ Poll creation (Kind 30023) gets a 400 from `POST /api/nostr/ingest/` with `Inval
 ## Known Issues
 
 - `.env` was previously committed to git — now removed from tracking and gitignored. **DO NOT re-commit it.**
-- Tailwind CSS is loaded via CDN — consider a build step for production offline resilience.
 - Profile pages (`/profile/<npub>/`) are public but the feed/gallery links to them are only visible to authenticated users.
 - **Ed25519 signature mismatch** between iyou_home signing and iyou_poly verification — see Troubleshooting section above.

@@ -13,11 +13,14 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import hashlib
 import json
 import logging
 import urllib.request
 import urllib.error
+from unittest.mock import patch, MagicMock
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.urls import reverse
@@ -121,6 +124,32 @@ class ChatViewTest(TestCase):
         response = self.client.get(reverse("chat"))
         self.assertContains(response, "Sign Out")
 
+    def test_chat_persistent_store_local(self):
+        user = User.objects.create_user(username="did:key:z6Mkomemo1")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertContains(response, "persistent_store: 'local'")
+
+    def test_chat_allow_non_roster_messaging(self):
+        user = User.objects.create_user(username="did:key:z6Mkomemo2")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertContains(response, "allow_non_roster_messaging: true")
+
+    def test_chat_keepalive_enabled(self):
+        user = User.objects.create_user(username="did:key:z6Mkomemo3")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertContains(response, "keepalive: true")
+
+    def test_chat_jid_uses_pubkey_hex(self):
+        user = User.objects.create_user(username="did:key:z6Mkjidtest")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        content = response.content.decode()
+        self.assertIn("jid:", content)
+        self.assertNotIn("did:key:", content.split("jid:")[1].split("@")[0])
+
 
 class GalleryViewTest(TestCase):
     def test_anonymous_can_view_gallery(self):
@@ -174,3 +203,101 @@ class DashboardProfileTest(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard"))
         self.assertContains(response, "Publish Profile")
+
+
+class MediaUploadProxyViewTest(TestCase):
+    def test_upload_proxy_success_multipart(self):
+        file_content = b"fake_image_bytes_12345"
+        expected_hash = hashlib.sha256(file_content).hexdigest()
+        uploaded_file = SimpleUploadedFile("photo.jpg", file_content, content_type="image/jpeg")
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = MagicMock(status=201)
+            mock_urlopen.return_value = mock_cm
+
+            response = self.client.post(
+                reverse("media_upload_proxy"),
+                {"file": uploaded_file},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["sha256"], expected_hash)
+        self.assertEqual(data["url"], f"https://cdn.iyou.me/{expected_hash}")
+        self.assertEqual(data["size"], len(file_content))
+        self.assertEqual(data["type"], "image/jpeg")
+        self.assertTrue(mock_urlopen.called)
+
+    def test_upload_proxy_no_file_returns_400(self):
+        response = self.client.post(reverse("media_upload_proxy"), {})
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("error", data)
+
+    def test_upload_proxy_get_returns_405(self):
+        response = self.client.get(reverse("media_upload_proxy"))
+        self.assertEqual(response.status_code, 405)
+        data = response.json()
+        self.assertIn("error", data)
+
+    def test_upload_proxy_raw_body_upload(self):
+        raw_content = b"audio_raw_data_stream_6789"
+        expected_hash = hashlib.sha256(raw_content).hexdigest()
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = MagicMock(status=200)
+            mock_urlopen.return_value = mock_cm
+
+            response = self.client.post(
+                reverse("media_upload_proxy"),
+                data=raw_content,
+                content_type="audio/ogg",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["sha256"], expected_hash)
+        self.assertEqual(data["url"], f"https://cdn.iyou.me/{expected_hash}")
+        self.assertEqual(data["type"], "audio/ogg")
+
+    def test_upload_proxy_upstream_fallback_on_404(self):
+        file_content = b"video_sample_content"
+        expected_hash = hashlib.sha256(file_content).hexdigest()
+        uploaded_file = SimpleUploadedFile("clip.mp4", file_content, content_type="video/mp4")
+
+        # First call raises HTTPError(404), second call succeeds
+        http_err = urllib.error.HTTPError("http://127.0.0.1:9002/upload", 404, "Not Found", {}, None)
+        success_cm = MagicMock()
+        success_cm.__enter__.return_value = MagicMock(status=201)
+
+        with patch("urllib.request.urlopen", side_effect=[http_err, success_cm]) as mock_urlopen:
+            response = self.client.post(
+                reverse("media_upload_proxy"),
+                {"file": uploaded_file},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["sha256"], expected_hash)
+        self.assertEqual(data["url"], f"https://cdn.iyou.me/{expected_hash}")
+        self.assertEqual(mock_urlopen.call_count, 2)
+
+    def test_upload_proxy_upstream_exception_resilient(self):
+        file_content = b"document_data"
+        expected_hash = hashlib.sha256(file_content).hexdigest()
+        uploaded_file = SimpleUploadedFile("doc.pdf", file_content, content_type="application/pdf")
+
+        # Network error to upstream Blossom
+        with patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")):
+            response = self.client.post(
+                reverse("media_upload_proxy"),
+                {"file": uploaded_file},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["sha256"], expected_hash)
+        self.assertEqual(data["url"], f"https://cdn.iyou.me/{expected_hash}")
+

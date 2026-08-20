@@ -568,7 +568,53 @@
             });
     }
 
-    // ---------- Media Upload (Blossom + Kind 1063) ----------
+    // ---------- Blossom Base URL & Media Upload (Kind 1063) ----------
+
+    function getBlossomBaseUrl() {
+        // 1. Check if configured via script data attribute or window global
+        if (window.BLOSSOM_SERVER_URL && window.BLOSSOM_SERVER_URL.trim()) {
+            return window.BLOSSOM_SERVER_URL.trim().replace(/\/+$/, "");
+        }
+        var feedScript = document.querySelector("script[data-blossom-url]");
+        if (feedScript && feedScript.dataset && feedScript.dataset.blossomUrl && feedScript.dataset.blossomUrl.trim()) {
+            return feedScript.dataset.blossomUrl.trim().replace(/\/+$/, "");
+        }
+
+        // 2. HTTPS Production Context -> Use CDN / TLS Gateway
+        if (window.location.protocol === "https:") {
+            return "https://cdn.iyou.me";
+        }
+
+        // 3. HTTP Local Dev Context -> Use local Blossom server
+        return "http://127.0.0.1:9002";
+    }
+
+    function getCsrfToken() {
+        var cookieMatch = document.cookie.match(/(?:^|;\s*)(?:wun_csrftoken|csrftoken)=([^;]+)/);
+        if (cookieMatch) return decodeURIComponent(cookieMatch[1]);
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        return input ? input.value : "";
+    }
+
+    async function uploadViaServerProxy(file, hash) {
+        var formData = new FormData();
+        formData.append("file", file);
+        if (hash) formData.append("sha256", hash);
+        var headers = {};
+        var csrf = getCsrfToken();
+        if (csrf) {
+            headers["X-CSRFToken"] = csrf;
+        }
+        var res = await fetch("/api/media/upload/", {
+            method: "POST",
+            headers: headers,
+            body: formData,
+        });
+        if (!res.ok) {
+            throw new Error("Server proxy upload failed with status " + res.status);
+        }
+        return await res.json();
+    }
 
     async function sha256Hex(data) {
         var hashBuffer = await crypto.subtle.digest("SHA-256", data);
@@ -589,42 +635,130 @@
         try {
             var arrayBuffer = await file.arrayBuffer();
             var hash = await sha256Hex(arrayBuffer);
-            setUploadStatus("Uploading to Blossom...");
-            var response = await fetch("http://127.0.0.1:9002/" + hash, {
-                method: "PUT",
-                body: arrayBuffer,
-            });
-            if (response.status === 201) {
-                setUploadStatus("Requesting signature...");
-                var pk;
-                try { pk = await bridgeClient.getEffectivePubkey(); }
-                catch (e) {
-                    setUploadStatus(e.message);
-                    setTimeout(function () { var el = document.getElementById("uploadStatus"); if (el) el.classList.add("hidden"); }, 3000);
-                    return;
+            var baseUrl = getBlossomBaseUrl();
+            var uploadedUrl = null;
+            var blobExists = false;
+
+            setUploadStatus("Checking Blossom...");
+            try {
+                var headRes = await fetch(baseUrl + "/" + hash, {
+                    method: "HEAD",
+                });
+                if (headRes.ok) {
+                    blobExists = true;
+                    uploadedUrl = baseUrl + "/" + hash;
                 }
-                bridgeClient.isProcessing = true;
-                var event = {
-                    kind: 1063,
-                    content: "",
-                    pubkey: pk,
-                    created_at: Math.floor(Date.now() / 1000),
-                    tags: [
-                        ["url", "http://127.0.0.1:9002/" + hash],
-                        ["x", hash],
-                        ["m", file.type],
-                    ],
-                };
-                bridgeClient.signEvent(event);
-            } else {
-                setUploadStatus("Upload failed (" + response.status + ")");
-                setTimeout(function () { var el = document.getElementById("uploadStatus"); if (el) el.classList.add("hidden"); }, 3000);
+            } catch (e) {
+                // Direct HEAD failed (PNA / CORS / network), continue to upload attempts
             }
+
+            if (!blobExists) {
+                setUploadStatus("Uploading to Blossom...");
+                var directUploaded = false;
+                try {
+                    var mimeType = file.type || "application/octet-stream";
+                    var putRes = await fetch(baseUrl + "/upload", {
+                        method: "PUT",
+                        headers: {
+                            "Content-Type": mimeType,
+                            "X-SHA-256": hash,
+                        },
+                        body: arrayBuffer,
+                    });
+                    if (putRes.status === 200 || putRes.status === 201) {
+                        directUploaded = true;
+                        try {
+                            var putData = await putRes.json();
+                            if (putData && putData.url) {
+                                uploadedUrl = putData.url;
+                            }
+                        } catch (err) {
+                            /* ignore JSON parse */
+                        }
+                        if (!uploadedUrl) {
+                            uploadedUrl = baseUrl + "/" + hash;
+                        }
+                    } else if (putRes.status === 404 || putRes.status === 405) {
+                        var putHashRes = await fetch(baseUrl + "/" + hash, {
+                            method: "PUT",
+                            headers: {
+                                "Content-Type": mimeType,
+                                "X-SHA-256": hash,
+                            },
+                            body: arrayBuffer,
+                        });
+                        if (putHashRes.status === 200 || putHashRes.status === 201) {
+                            directUploaded = true;
+                            uploadedUrl = baseUrl + "/" + hash;
+                        }
+                    }
+                } catch (directErr) {
+                    console.warn("Direct Blossom upload failed, trying server proxy:", directErr);
+                }
+
+                if (!directUploaded) {
+                    setUploadStatus("Proxying upload via server...");
+                    try {
+                        var proxyData = await uploadViaServerProxy(file, hash);
+                        if (proxyData && proxyData.url) {
+                            uploadedUrl = proxyData.url;
+                        } else {
+                            uploadedUrl = baseUrl + "/" + hash;
+                        }
+                    } catch (proxyErr) {
+                        console.warn("Server proxy upload also failed:", proxyErr);
+                        uploadedUrl = baseUrl + "/" + hash;
+                        if (typeof showToast === "function") {
+                            showToast("Media upload offline; drafting event with hash.", true);
+                        }
+                    }
+                }
+            }
+
+            if (!uploadedUrl) {
+                uploadedUrl = baseUrl + "/" + hash;
+            }
+
+            setUploadStatus("Requesting signature...");
+            var pk;
+            try {
+                pk = await bridgeClient.getEffectivePubkey();
+            } catch (e) {
+                setUploadStatus(e.message);
+                setTimeout(function () {
+                    var el = document.getElementById("uploadStatus");
+                    if (el) el.classList.add("hidden");
+                }, 3000);
+                return;
+            }
+
+            bridgeClient.isProcessing = true;
+            var tags = [
+                ["url", uploadedUrl],
+                ["x", hash],
+                ["m", file.type || "application/octet-stream"],
+            ];
+            if (file.size) {
+                tags.push(["size", String(file.size)]);
+            }
+
+            var event = {
+                kind: 1063,
+                content: "",
+                pubkey: pk,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: tags,
+            };
+            bridgeClient.signEvent(event);
         } catch (err) {
             setUploadStatus("Error: " + err.message);
-            setTimeout(function () { var el = document.getElementById("uploadStatus"); if (el) el.classList.add("hidden"); }, 3000);
+            setTimeout(function () {
+                var el = document.getElementById("uploadStatus");
+                if (el) el.classList.add("hidden");
+            }, 3000);
         }
     }
+
 
     // ---------- Poll Governance ----------
 
@@ -797,6 +931,7 @@
     window.addNoteToFeed = addNoteToFeed;
     window.appendNoteToFeed = appendNoteToFeed;
     window.loadMoreNotes = loadMoreNotes;
+    window.getBlossomBaseUrl = getBlossomBaseUrl;
     window.handleMediaSelected = handleMediaSelected;
     window.toggleGear = toggleGear;
     window.castPollVote = castPollVote;

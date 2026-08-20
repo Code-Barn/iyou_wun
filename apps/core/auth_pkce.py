@@ -1,16 +1,20 @@
 import logging
 import secrets
+from urllib.parse import urlencode
 
+from django.conf import settings
+from django.contrib.auth import logout
 from django.http import HttpResponseRedirect
+from django.shortcuts import redirect
 from django.urls import reverse
 from mozilla_django_oidc.utils import absolutify, import_from_settings
 from mozilla_django_oidc.views import (
     OIDCAuthenticationCallbackView,
     OIDCAuthenticationRequestView,
+    OIDCLogoutView,
     add_state_and_verifier_and_nonce_to_session,
     generate_code_challenge,
 )
-from urllib.parse import urlencode
 
 from apps.core.auth import MyOIDCAuthenticationBackend
 
@@ -54,6 +58,7 @@ class PKCEOIDCAuthenticationRequestView(OIDCAuthenticationRequestView):
         add_state_and_verifier_and_nonce_to_session(request, state, params, code_verifier)
 
         request.session["oidc_login_next"] = self.get_next_url(request, redirect_field_name)
+        request.session.save()
 
         redirect_url = "{url}?{query}".format(
             url=self.OIDC_OP_AUTH_ENDPOINT, query=urlencode(params)
@@ -66,23 +71,26 @@ class PKCEOIDCAuthenticationRequestView(OIDCAuthenticationRequestView):
 
 
 class PKCEOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
-    def get_backend_kwargs(self, request, **kwargs):
-        kwargs = super().get_backend_kwargs(request, **kwargs)
-        code_verifier = request.session.pop("pkce_code_verifier", None)
-        if code_verifier:
-            kwargs["code_verifier"] = code_verifier
-        return kwargs
+    def get_backend_kwargs(self, *args, **kwargs):
+        base_kwargs = super().get_backend_kwargs(*args, **kwargs) if hasattr(super(), "get_backend_kwargs") else {}
+        base_kwargs['pkce_code_verifier'] = self.request.session.pop('pkce_code_verifier', None)
+        return base_kwargs
+
+
+class PKCEOIDCLogoutView(OIDCLogoutView):
+    """
+    Handles both GET and POST requests for user logout.
+    Flushes the local Django session and redirects to LOGOUT_REDIRECT_URL.
+    """
+    def get(self, request, *args, **kwargs):
+        return self.post(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        logout(request)
+        redirect_url = getattr(settings, "LOGOUT_REDIRECT_URL", "/")
+        return redirect(redirect_url)
 
 
 class PKCEAuthenticationBackend(MyOIDCAuthenticationBackend):
-    def authenticate(self, request, **kwargs):
-        code_verifier = kwargs.pop("code_verifier", None)
-        if code_verifier:
-            self.pkce_code_verifier = code_verifier
-        return super().authenticate(request, **kwargs)
+    pass
 
-    def get_token(self, payload, **kwargs):
-        code_verifier = getattr(self, "pkce_code_verifier", None)
-        if code_verifier:
-            payload["code_verifier"] = code_verifier
-        return super().get_token(payload, **kwargs)

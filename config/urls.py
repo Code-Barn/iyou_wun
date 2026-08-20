@@ -31,17 +31,20 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
-from mozilla_django_oidc.views import OIDCLogoutView
 
 from apps.core.auth_pkce import (
     PKCEOIDCAuthenticationCallbackView,
     PKCEOIDCAuthenticationRequestView,
+    PKCEOIDCLogoutView,
 )
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('oidc/authenticate/', PKCEOIDCAuthenticationRequestView.as_view(), name='oidc_authentication_init'),
     path('oidc/callback/', PKCEOIDCAuthenticationCallbackView.as_view(), name='oidc_authentication_callback'),
-    path('oidc/logout/', OIDCLogoutView.as_view(), name='oidc_logout'),
+    path('oidc/logout/', PKCEOIDCLogoutView.as_view(), name='oidc_logout'),
+    path('accounts/logout/', PKCEOIDCLogoutView.as_view(), name='logout'),
+    path('logout/', PKCEOIDCLogoutView.as_view()),
     path('', include('apps.core.urls')),
 ]
+

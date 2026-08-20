@@ -3,6 +3,17 @@
 <html>
 <head>
     <title>Media Gallery - iyou_wun</title>
+    <script>
+      (function() {
+        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
+        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
+        if (theme === 'dark' || theme === 'stealth') {
+          document.documentElement.classList.add('dark');
+        } else {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
         .modal-open { overflow: hidden; }
@@ -122,7 +133,10 @@
 
     <script>
         window.galleryActiveType = "{{ active_type|default:'all' }}";
+        window.BLOSSOM_SERVER_URL = "{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}";
     </script>
-    <script src="{% static 'js/gallery_player.js' %}"></script>
+    <script src="{% static 'js/gallery_player.js' %}"
+            data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
+    <script src="{% static 'js/theme.js' %}"></script>
 </body>
 </html>
