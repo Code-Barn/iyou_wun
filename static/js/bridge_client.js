@@ -12,6 +12,8 @@
     var CONNECTION_TIMEOUT = 5000;
     var SOCKET_POLL_INTERVAL = 100;
     var SOCKET_POLL_TIMEOUT = 6000;
+    var ALIAS_DEBOUNCE_MS = 200;
+    var ALIAS_CONNECT_POLL_MAX_ATTEMPTS = 60;
 
     var DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me"];
 
@@ -85,7 +87,152 @@
         this.isProcessing = false;
         this.pendingSignedPayload = null;
         this._onMessage = null;
+        // Project Zero Trust Lens alias store (purely in-memory, never persisted)
+        this._aliasCache = new Map();          // normalized key -> { nickname, trust_level, badge } | null
+        this._aliasQueue = new Set();          // normalized keys awaiting dispatch
+        this._aliasWaiters = [];               // pending Promise resolve callbacks
+        this._aliasPendingBatches = [];        // FIFO of { keys, waiters } sent over the wire
+        this._aliasTimer = null;
     }
+
+    TauriBridgeClient.prototype._normalizeAliasKey = function (raw) {
+        var key = String(raw == null ? "" : raw).trim();
+        if (!key) return "";
+        if (/^[0-9a-fA-F]{64}$/.test(key)) return key.toLowerCase();
+        return key; // preserve DID casing (did:key:..., did:iyou:...)
+    };
+
+    /**
+     * Resolve peer aliases via the iyou_home Contact Enclave bridge.
+     * Returns a Promise resolving to a matches dictionary keyed by the
+     * normalized queried pubkey: { "<key>": { nickname, trust_level, badge } }.
+     * Keys absent from the result were unknown to the enclave (negative-cached).
+     */
+    TauriBridgeClient.prototype.resolvePeerAliases = function (pubkeys) {
+        var self = this;
+        var tokens = Array.isArray(pubkeys) ? pubkeys : [pubkeys];
+        var hits = {};
+        var misses = [];
+
+        tokens.forEach(function (raw) {
+            var key = self._normalizeAliasKey(raw);
+            if (!key) return;
+            if (self._aliasCache.has(key)) {
+                var cached = self._aliasCache.get(key);
+                if (cached) hits[key] = cached;
+            } else {
+                self._aliasQueue.add(key);
+                misses.push(key);
+            }
+        });
+
+        if (misses.length === 0) {
+            return Promise.resolve(hits);
+        }
+
+        return new Promise(function (resolve) {
+            self._aliasWaiters.push(resolve);
+            if (self._aliasTimer === null) {
+                self._aliasTimer = setTimeout(function () {
+                    self._flushAliasQueue();
+                }, ALIAS_DEBOUNCE_MS);
+            }
+        });
+    };
+
+    TauriBridgeClient.prototype.isProcessingAliasFlush = function () {
+        return this._aliasPendingBatches.length > 0;
+    };
+
+    TauriBridgeClient.prototype._flushAliasQueue = function () {
+        this._aliasTimer = null;
+        var self = this;
+        var keys = Array.from(this._aliasQueue);
+        this._aliasQueue.clear();
+
+        var waiters = this._aliasWaiters.splice(0, this._aliasWaiters.length);
+        if (keys.length === 0) {
+            waiters.forEach(function (w) { w({}); });
+            return;
+        }
+
+        this._aliasPendingBatches.push({ keys: keys, waiters: waiters });
+
+        var dispatch = function () {
+            try {
+                self.socket.send(JSON.stringify({ type: "RESOLVE_PEER_ALIASES", pubkeys: keys }));
+            } catch (err) {
+                console.error("Failed to send RESOLVE_PEER_ALIASES:", err);
+                self._failAliasBatch(self._dequeueAliasBatch(keys));
+            }
+        };
+
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            dispatch();
+            return;
+        }
+
+        this.connect();
+        var attempts = 0;
+        var pollSocket = setInterval(function () {
+            attempts++;
+            if (self.socket && self.socket.readyState === WebSocket.OPEN) {
+                clearInterval(pollSocket);
+                dispatch();
+            } else if (attempts >= ALIAS_CONNECT_POLL_MAX_ATTEMPTS) {
+                clearInterval(pollSocket);
+                self._failAliasBatch(self._dequeueAliasBatch(keys));
+            }
+        }, SOCKET_POLL_INTERVAL);
+    };
+
+    TauriBridgeClient.prototype._dequeueAliasBatch = function (keys) {
+        for (var i = 0; i < this._aliasPendingBatches.length; i++) {
+            if (this._aliasPendingBatches[i].keys === keys ||
+                this._aliasPendingBatches[i].keys.length === keys.length &&
+                this._aliasPendingBatches[i].keys.every(function (k, idx) { return k === keys[idx]; })) {
+                return this._aliasPendingBatches.splice(i, 1)[0];
+            }
+        }
+        return null;
+    };
+
+    TauriBridgeClient.prototype._failAliasBatch = function (batch) {
+        if (!batch || !batch.waiters) return;
+        batch.waiters.forEach(function (w) {
+            try { w({}); } catch (e) { /* ignore */ }
+        });
+    };
+
+    TauriBridgeClient.prototype._onPeerAliasesResolved = function (message) {
+        var self = this;
+        var matches = message.matches || {};
+        var unknown = message.unknown || [];
+        var waiters = [];
+
+        Object.keys(matches).forEach(function (key) {
+            var normalized = self._normalizeAliasKey(key);
+            self._aliasCache.set(normalized, matches[key]);
+        });
+        unknown.forEach(function (key) {
+            self._aliasCache.set(self._normalizeAliasKey(key), null);
+        });
+
+        var batch = this._aliasPendingBatches.shift();
+        if (batch && batch.waiters) {
+            waiters = batch.waiters;
+        } else {
+            waiters = this._aliasWaiters.splice(0, this._aliasWaiters.length);
+        }
+        waiters.forEach(function (w) {
+            try { w(matches); } catch (e) { /* ignore */ }
+        });
+    };
+
+    TauriBridgeClient.prototype.clearAliasCache = function () {
+        this._aliasCache.clear();
+        this._aliasQueue.clear();
+    };
 
     TauriBridgeClient.prototype.getBridgeUrl = function () {
         var scriptTag = document.querySelector('script[src*="bridge_client.js"]');
@@ -147,7 +294,24 @@
             var message = JSON.parse(data);
 
             if (message.type === "profile_sync") {
+                var previousPubkey = window.activeProfile ? window.activeProfile.nostr_pubkey_hex : null;
                 window.activeProfile = message.profile;
+                var newPubkey = message.profile ? message.profile.nostr_pubkey_hex : null;
+                if (previousPubkey !== newPubkey) {
+                    // Identity switch: local trust view is stale, invalidate and re-scan.
+                    this.clearAliasCache();
+                    if (window.trustLens && typeof window.trustLens.reset === "function") {
+                        window.trustLens.reset();
+                    }
+                    if (window.trustLens && typeof window.trustLens.scan === "function") {
+                        window.trustLens.scan();
+                    }
+                }
+                return;
+            }
+
+            if (message.type === "peer_aliases_resolved") {
+                this._onPeerAliasesResolved(message);
                 return;
             }
 
@@ -349,6 +513,7 @@
     // ---------- Public API ----------
 
     window.bridgeClient = new TauriBridgeClient();
+    window.tauriBridge = window.bridgeClient;
     window.escapeHtml = escapeHtml;
     window.escapeAttr = escapeAttr;
     window.getCookie = getCookie;

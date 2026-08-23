@@ -265,6 +265,7 @@
             '<div class="flex-1 min-w-0">' +
             '<div class="flex items-center gap-2 mb-2">' +
             '<span class="font-semibold text-gray-900">' + npub + '</span>' +
+            '<span class="author-badge-slot" data-author-slot="' + escapeAttr(event.pubkey) + '"></span>' +
             '<span class="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">Reply</span>' +
             '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
             '</div>' +
@@ -275,6 +276,9 @@
         var textarea = document.getElementById("reply-content-" + rootId);
         if (textarea) textarea.value = "";
         cancelReply(rootId);
+        if (window.trustLens && typeof window.trustLens.scan === "function") {
+            window.trustLens.scan(repliesDiv);
+        }
     }
 
     // ---------- Optimistic Feed Insert ----------
@@ -316,6 +320,7 @@
                 '<div class="flex-1 min-w-0">' +
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<span class="font-semibold text-gray-900">' + npub + '</span>' +
+                '<span class="author-badge-slot" data-author-slot="' + escapeAttr(event.pubkey) + '"></span>' +
                 '<span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>' +
                 '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
                 '</div>' + mediaHtml +
@@ -327,6 +332,7 @@
                 '<div class="flex-1 min-w-0">' +
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<span class="font-semibold text-gray-900">' + npub + '</span>' +
+                '<span class="author-badge-slot" data-author-slot="' + escapeAttr(event.pubkey) + '"></span>' +
                 '<span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>' +
                 '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
                 '</div>' +
@@ -354,6 +360,10 @@
             container.insertBefore(wrapper, container.firstChild);
         } else {
             container.appendChild(wrapper);
+        }
+
+        if (window.trustLens && typeof window.trustLens.scan === "function") {
+            window.trustLens.scan(container);
         }
 
         var postContent = document.getElementById("postContent");
@@ -385,6 +395,7 @@
                 '<div class="flex-1 min-w-0">' +
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + escapeHtml(note.author_name || npub) + '</a>' +
+                '<span class="author-badge-slot" data-author-slot="' + escapeAttr(note.pubkey) + '"></span>' +
                 '<span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>' +
                 '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
                 '</div>' +
@@ -414,6 +425,7 @@
                 '<div class="flex-1 min-w-0">' +
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + escapeHtml(note.author_name || npub) + '</a>' +
+                '<span class="author-badge-slot" data-author-slot="' + escapeAttr(note.pubkey) + '"></span>' +
                 '<span class="' + badgeClass + ' text-xs font-medium px-2 py-0.5 rounded-full">' + badge + '</span>' +
                 '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
                 '</div>' +
@@ -451,6 +463,7 @@
                 '<div class="flex-1 min-w-0">' +
                 '<div class="flex items-center gap-2 mb-2">' +
                 '<a href="/profile/' + npub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + escapeHtml(note.author_name || npub) + '</a>' +
+                '<span class="author-badge-slot" data-author-slot="' + escapeAttr(note.pubkey) + '"></span>' +
                 '<span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Poll</span>' +
                 '<span class="text-xs text-gray-500">' + formattedDate + '</span>' +
                 '</div>' +
@@ -484,6 +497,7 @@
                     '<div class="flex-1 min-w-0">' +
                     '<div class="flex items-center gap-2 mb-2">' +
                     '<a href="/profile/' + rNpub + '/" class="font-semibold text-gray-900 hover:text-indigo-600">' + escapeHtml(reply.author_name || rNpub) + '</a>' +
+                    '<span class="author-badge-slot" data-author-slot="' + escapeAttr(reply.pubkey) + '"></span>' +
                     '<span class="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">Reply</span>' +
                     '<span class="text-xs text-gray-500">' + rDate.toLocaleString() + '</span>' +
                     '</div>' +
@@ -528,6 +542,10 @@
                     castPollVote(pid, idx);
                 });
             }
+        }
+
+        if (window.trustLens && typeof window.trustLens.scan === "function") {
+            window.trustLens.scan(container);
         }
     }
 

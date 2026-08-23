@@ -164,9 +164,13 @@
     <script src="{% static 'js/feed_interactions.js' %}"
             data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"
             data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
+    <script src="{% static 'js/trust_lens.js' %}"></script>
     <script>
         document.addEventListener("DOMContentLoaded", function () {
             bridgeClient.connect(handleSignedEvent);
+            if (window.trustLens && typeof window.trustLens.scan === "function") {
+                window.trustLens.scan();
+            }
         });
     </script>
     <script src="{% static 'js/theme.js' %}"></script>

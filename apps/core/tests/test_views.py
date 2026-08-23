@@ -26,6 +26,8 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.conf import settings
 
+from .helpers import make_event
+
 logger = logging.getLogger(__name__)
 
 
@@ -300,4 +302,49 @@ class MediaUploadProxyViewTest(TestCase):
         data = response.json()
         self.assertEqual(data["sha256"], expected_hash)
         self.assertEqual(data["url"], f"https://cdn.iyou.me/{expected_hash}")
+
+
+class FeedViewTrustLensContractTest(TestCase):
+    """Trust Lens DOM contract: badge slots, pubkey attributes, script wiring.
+
+    relay_req is patched with one synthetic Kind 1 note so tests stay hermetic
+    and fast while still rendering real card markup through feed.html.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.relay_events = {
+            "e1": make_event("e1", 1, content="trust lens fixture note"),
+        }
+
+    def _get_feed(self):
+        with patch("apps.core.views.relay_req", return_value=self.relay_events):
+            return self.client.get(reverse("feed"))
+
+    def test_anonymous_feed_returns_200(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+
+    def test_authenticated_feed_returns_200(self):
+        user = User.objects.create_user(username="did:key:z6Mktrustlens")
+        self.client.force_login(user)
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+
+    def test_feed_contains_author_pubkey_attribute(self):
+        response = self._get_feed()
+        self.assertContains(response, "data-pubkey=")
+
+    def test_feed_contains_author_badge_slot(self):
+        response = self._get_feed()
+        self.assertContains(response, 'class="author-badge-slot"')
+        self.assertContains(response, "data-author-slot=")
+
+    def test_feed_loads_trust_lens_script(self):
+        response = self._get_feed()
+        self.assertContains(response, "trust_lens.js")
+
+    def test_feed_wires_trust_lens_scan_on_domContentLoaded(self):
+        response = self._get_feed()
+        self.assertContains(response, "trustLens.scan")
 

@@ -15,6 +15,7 @@
     <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 mb-2">
             <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
+            <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
             {% if note.kind == 1 %}
             <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
             {% elif note.kind == 1063 %}
