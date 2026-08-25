@@ -49,6 +49,7 @@
             <div class="bg-white rounded-lg shadow-md p-8 mb-6">
                 <div class="flex border-b border-gray-200 mb-6">
                     <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors" data-tab="profile" onclick="switchTab('profile')">Profile</button>
+                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="deck" onclick="switchTab('deck')">Link Deck</button>
                     <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="settings" onclick="switchTab('settings')">Settings</button>
                 </div>
 
@@ -136,6 +137,79 @@
                         <span id="relayStatus" class="text-xs text-gray-500 hidden"></span>
                     </div>
                 </div>
+
+                <div id="tab-deck" class="tab-panel hidden">
+                    <h2 class="text-lg font-semibold mb-4">Link Deck Manager</h2>
+
+                    <div id="deckHandleBanner" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
+                        <p class="text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Sovereign Handle</p>
+                        <p id="deckHandleDisplay" class="text-lg font-mono font-semibold text-indigo-600">Unclaimed</p>
+                        <p class="text-xs text-gray-500 mt-1 break-all">
+                            <span class="font-medium">Canonical URL:</span>
+                            <span id="deckCanonicalUrl" class="font-mono">—</span>
+                            <button type="button" onclick="copyDeckUrl()" class="ml-2 text-indigo-600 hover:text-indigo-800 text-xs font-medium">Copy</button>
+                        </p>
+                    </div>
+                    <form onsubmit="return claimDeckHandle(event)" class="flex items-center gap-2 mb-6">
+                        {% csrf_token %}
+                        <span class="text-sm text-gray-500">@</span>
+                        <input type="text" id="deckHandleInput" placeholder="your-handle" maxlength="32"
+                               class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                        <button type="submit" id="deckClaimBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors flex-shrink-0">Claim Handle</button>
+                    </form>
+
+                    <div id="deckVerifyCard" class="rounded-lg p-4 mb-6 bg-emerald-50 border border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800">
+                        <p class="text-xs font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-2">Proof-of-Authority Verification</p>
+                        <div id="deckVerifyBadge" class="hidden">
+                            <p class="text-sm font-mono font-semibold text-emerald-600 dark:text-emerald-400">&#10003; VERIFIED</p>
+                            <p class="text-xs text-gray-500 mt-1 break-all">
+                                <span class="font-medium">Source:</span>
+                                <a id="deckVerifySource" href="#" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 break-all"></a>
+                            </p>
+                        </div>
+                        <div id="deckVerifyPrompt">
+                            <p class="text-xs text-gray-600 dark:text-gray-300 mb-3">Prove ownership of an external bio (GitHub, X, Mastodon&hellip;) to claim the canonical @handle with discriminator 0.</p>
+                            <button type="button" onclick="openVerifyModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Verify Profile / Claim Canonical Handle</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-xs font-medium text-gray-600 mb-1">Deck Headline</label>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="deckHeadlineInput" maxlength="160" placeholder="One-line bio for your deck card"
+                                   class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                            <button type="button" onclick="saveDeckHeadline()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 transition-colors flex-shrink-0">Save</button>
+                        </div>
+                        <span id="deckStatus" class="text-xs text-gray-500 hidden"></span>
+                    </div>
+
+                    <h3 class="text-sm font-semibold text-gray-700 mb-2">Your Links</h3>
+                    <div id="deckItemsList" class="space-y-2 mb-4"></div>
+
+                    <form onsubmit="return addDeckItem(event)" class="border border-gray-200 rounded-lg p-4 bg-gray-50">
+                        {% csrf_token %}
+                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_2fr] gap-3 mb-3">
+                            <input type="text" id="deckItemTitle" placeholder="Title (e.g. My X)" maxlength="64"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                            <input type="text" id="deckItemUrl" placeholder="https://x.com/you  |  nostr:...  |  did:..." maxlength="2048"
+                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                        </div>
+                        <div class="flex items-center gap-3">
+                            <select id="deckItemIcon" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
+                                <option value="x">X</option>
+                                <option value="github">GitHub</option>
+                                <option value="mastodon">Mastodon</option>
+                                <option value="website">Website</option>
+                                <option value="blog">Blog</option>
+                                <option value="talk">Talk</option>
+                                <option value="poly">Poly</option>
+                                <option value="gallery">Gallery</option>
+                                <option value="link" selected>Link</option>
+                            </select>
+                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors ml-auto">Add Link</button>
+                        </div>
+                    </form>
+                </div>
             </div>
 
             <div class="bg-white rounded-lg shadow-md p-8">
@@ -172,6 +246,50 @@
             <div class="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
                 <button type="button" onclick="bridgeClient.closeFallbackModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
                 <button type="button" onclick="bridgeClient.submitSignedEvent()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">Broadcast Signed Event</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="verifyModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4">
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+            <div class="p-6 border-b border-gray-200">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-gray-900">Verify Profile / Claim Canonical Handle</h3>
+                    <button type="button" onclick="closeVerifyModal()" class="text-gray-400 hover:text-gray-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
+                </div>
+                <p class="text-sm text-gray-500 mt-2">1. Pick the @handle you want to own canonically. 2. Point to a public bio on an allowlisted domain. 3. Paste the generated token into that bio. 4. Check &amp; Claim &mdash; if a squatter holds the handle they are demoted to the next discriminator.</p>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Target Handle (canonical, no discriminator)</label>
+                    <div class="flex items-center gap-2">
+                        <span class="text-sm text-gray-500">@</span>
+                        <input type="text" id="verifyTargetHandle" maxlength="32" placeholder="testcreator" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Public Bio URL (https, allowlisted domain)</label>
+                    <input type="url" id="verifyExternalUrl" list="verifyDomainSuggestions" placeholder="https://github.com/you" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+                    <datalist id="verifyDomainSuggestions">
+                        <option value="https://github.com/"></option>
+                        <option value="https://x.com/"></option>
+                        <option value="https://mastodon.social/@"></option>
+                        <option value="https://bsky.app/profile/"></option>
+                        <option value="https://threads.net/@"></option>
+                    </datalist>
+                </div>
+                <div id="verifyTokenBox" class="hidden bg-gray-50 border border-gray-200 rounded-lg p-4">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Verification Token</label>
+                    <p id="verifyTokenValue" class="font-mono text-xs text-gray-800 break-all select-all"></p>
+                    <p id="verifyTokenExpiry" class="text-[11px] text-gray-400 mt-1"></p>
+                    <button type="button" onclick="copyVerifyToken()" class="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-800">Copy token</button>
+                </div>
+                <span id="verifyStatus" class="text-xs text-gray-500 hidden block"></span>
+            </div>
+            <div class="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+                <button type="button" onclick="closeVerifyModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+                <button type="button" id="generateTokenBtn" onclick="generateVerifyToken()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">Generate Token</button>
+                <button type="button" id="confirmVerifyBtn" onclick="confirmVerification()" disabled class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 rounded-lg transition-colors">Check &amp; Claim Handle</button>
             </div>
         </div>
     </div>
@@ -392,8 +510,10 @@
             switchTab("profile");
             loadRelays();
             updatePreview();
+            if (typeof initDeckManager === "function") { initDeckManager(); }
         });
     </script>
+    <script src="{% static 'js/link_deck_manager.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
 </body>
 </html>

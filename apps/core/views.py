@@ -16,22 +16,25 @@
 import base64
 import hashlib
 import json
-import logging
 import re
 import ssl
 import threading
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime
+import uuid
+from datetime import datetime, timedelta
 
 import bech32
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
-from urllib.parse import urlencode
-from django.http import JsonResponse, HttpResponseBadRequest
+from django.db import IntegrityError, transaction
+from django.db.models import Max
+from django.http import HttpResponsePermanentRedirect, HttpResponseBadRequest, Http404, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET
@@ -41,8 +44,11 @@ from websocket import WebSocketApp
 
 from services.poly_client import PolyClient, PolyConnectionError
 
-from .did_kit import get_public_key_hex, issue_vc
-from .models import IssuedCredential
+from .did_kit import get_node_signing_key, get_public_key_hex, issue_vc
+from .models import HandleVerificationChallenge, IssuedCredential, UserLinkDeck, UserLinkItem
+from .utils import validate_external_bio_url, verify_external_profile_token
+
+UserModel = get_user_model()
 
 
 def home(request):
@@ -55,12 +61,14 @@ def dashboard(request):
     user_npub = did_to_npub(request.user.username)
     relays = request.session.get("relays", DEFAULT_RELAYS)
     profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
+    deck = UserLinkDeck.objects.filter(user=request.user).first()
     return render(request, "dashboard.html", {
         "user_pubkey": user_pubkey,
         "user_npub": user_npub,
         "user_did": request.user.username,
         "profile": profile,
         "relays": relays,
+        "deck": deck,
     })
 
 
@@ -542,7 +550,7 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     if profiles is None:
         profiles = {}
 
-    from .nip10 import build_thread_tree, parse_nip10_tags
+    from .nip10 import build_thread_tree
     from datetime import datetime
 
     def _ts_to_dt(ts):
@@ -767,7 +775,438 @@ class ProfileView(TemplateView):
         sovereign_score = sum(1 for m in media if m.get("is_sovereign"))
         context["sovereign_score"] = sovereign_score
 
+        owner_user = None
+        for candidate in UserModel.objects.only("username").iterator():
+            if did_to_pubkey(candidate.username) == hex_pubkey:
+                owner_user = candidate
+                break
+        owner_deck = getattr(owner_user, "link_deck", None) if owner_user else None
+        context["owner_deck"] = owner_deck
+        context["deck_items"] = list(owner_deck.items.filter(is_active=True)) if owner_deck else []
+
         return context
+
+
+RESERVED_HANDLES = {
+    "admin", "iyou", "wun", "poly", "idp", "api",
+    "dev", "mods", "system", "help", "official",
+}
+
+HANDLE_PATTERN = re.compile(r"^[a-z0-9_-]{3,32}$")
+MAX_HANDLE_CLAIM_ATTEMPTS = 5
+
+ECOSYSTEM_SEED_ITEMS = [
+    ("Blog", "https://blog.iyou.me", "blog"),
+    ("Talk", "https://talk.iyou.me", "talk"),
+    ("Poly", "https://poly.iyou.me", "poly"),
+    ("Gallery", "/gallery", "gallery"),
+]
+
+
+class HandleValidationError(Exception):
+    pass
+
+
+def normalize_handle(raw_handle):
+    return (raw_handle or "").strip().lstrip("@").lower()
+
+
+def seed_default_deck_items(deck):
+    items = [
+        UserLinkItem(
+            deck=deck,
+            title=title,
+            url=url,
+            icon_category=category,
+            is_ecosystem_link=True,
+            is_active=False,
+            order=position,
+        )
+        for position, (title, url, category) in enumerate(ECOSYSTEM_SEED_ITEMS)
+    ]
+    UserLinkItem.objects.bulk_create(items)
+
+
+def claim_handle(user, raw_handle):
+    handle = normalize_handle(raw_handle)
+    if not HANDLE_PATTERN.match(handle):
+        raise HandleValidationError(
+            "Handle must be 3-32 chars: lowercase letters, digits, '_' or '-'."
+        )
+    if handle in RESERVED_HANDLES:
+        raise HandleValidationError("That handle is reserved.")
+
+    for _attempt in range(MAX_HANDLE_CLAIM_ATTEMPTS):
+        try:
+            with transaction.atomic():
+                deck = UserLinkDeck.objects.filter(user=user).first()
+                if deck is not None and deck.handle == handle:
+                    return deck
+                max_disc = UserLinkDeck.objects.filter(handle=handle).aggregate(
+                    Max("discriminator")
+                )["discriminator__max"]
+                discriminator = 0 if max_disc is None else max_disc + 1
+                created = False
+                if deck is None:
+                    deck = UserLinkDeck(user=user, handle=handle, discriminator=discriminator)
+                    deck.save()
+                    created = True
+                else:
+                    deck.handle = handle
+                    deck.discriminator = discriminator
+                    deck.save()
+                if created:
+                    seed_default_deck_items(deck)
+                return deck
+        except IntegrityError:
+            continue
+
+    raise HandleValidationError("Handle claim failed due to contention. Try again.")
+
+
+def _get_user_deck(user):
+    return UserLinkDeck.objects.filter(user=user).first()
+
+
+def _serialize_deck_item(item):
+    return {
+        "id": item.id,
+        "title": item.title,
+        "url": item.url,
+        "icon_category": item.icon_category,
+        "icon_emoji": item.icon_emoji,
+        "is_ecosystem_link": item.is_ecosystem_link,
+        "order": item.order,
+        "is_active": item.is_active,
+    }
+
+
+class LinkDeckView(TemplateView):
+    template_name = "link_deck.html"
+
+    def get(self, request, *args, **kwargs):
+        handle = kwargs.get("handle")
+        disc_raw = kwargs.get("disc")
+        did_key = kwargs.get("did_key")
+
+        if did_key:
+            owner = UserModel.objects.filter(username=did_key).first()
+            target_deck = getattr(owner, "link_deck", None) if owner else None
+            if target_deck is not None and target_deck.is_public:
+                return HttpResponsePermanentRedirect(target_deck.canonical_path)
+            owner_did = did_key
+        else:
+            disc = int(disc_raw) if disc_raw else 0
+            target_deck = (
+                UserLinkDeck.objects.select_related("user")
+                .filter(handle=(handle or "").lower(), discriminator=disc)
+                .first()
+            )
+            if target_deck is None or not target_deck.is_public:
+                raise Http404("Unknown handle.")
+            owner_did = target_deck.user.username
+
+        hex_pubkey = did_to_pubkey(owner_did)
+        relays = request.session.get("relays", DEFAULT_RELAYS)
+        profile = fetch_profile_data(hex_pubkey, relay_urls=relays) if hex_pubkey else {}
+
+        items = list(target_deck.items.filter(is_active=True)) if target_deck else []
+
+        context = {
+            "deck": target_deck,
+            "display_handle": target_deck.display_handle if target_deck else "",
+            "headline": target_deck.headline if target_deck else "",
+            "owner_did": owner_did,
+            "hex_pubkey": hex_pubkey,
+            "npub": hex_to_npub(hex_pubkey) if hex_pubkey else owner_did,
+            "profile": profile,
+            "items": items,
+            "feed_url": f"/feed?author={hex_pubkey}" if hex_pubkey else "/feed",
+        }
+        return self.render_to_response(context)
+
+
+@login_required
+def api_deck_handle(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+    raw_handle = data.get("handle")
+    headline = data.get("headline")
+
+    if raw_handle:
+        try:
+            deck = claim_handle(request.user, raw_handle)
+        except HandleValidationError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+    else:
+        deck = _get_user_deck(request.user)
+        if deck is None:
+            return JsonResponse({"error": "Claim a handle first."}, status=400)
+
+    if isinstance(headline, str):
+        deck.headline = headline.strip()[:160]
+        deck.save(update_fields=["headline", "updated_at"])
+
+    return JsonResponse({
+        "ok": True,
+        "handle": deck.handle,
+        "discriminator": deck.discriminator,
+        "display_handle": deck.display_handle,
+        "canonical_url": deck.canonical_path,
+        "headline": deck.headline,
+    })
+
+
+@login_required
+def api_deck_items(request):
+    if request.method == "GET":
+        deck = _get_user_deck(request.user)
+        items = list(deck.items.all()) if deck else []
+        return JsonResponse({
+            "handle": deck.handle if deck else None,
+            "display_handle": deck.display_handle if deck else None,
+            "canonical_url": deck.canonical_path if deck else None,
+            "headline": deck.headline if deck else "",
+            "is_verified": deck.is_verified if deck else False,
+            "verified_source_url": deck.verified_source_url if deck else "",
+            "verified_at": (
+                deck.verified_at.isoformat()
+                if deck and deck.verified_at else None
+            ),
+            "items": [_serialize_deck_item(i) for i in items],
+        })
+
+    if request.method != "POST":
+        return JsonResponse({"error": "GET or POST required"}, status=405)
+
+    deck = _get_user_deck(request.user)
+    if deck is None:
+        return JsonResponse({"error": "Claim a handle first."}, status=400)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+    title = (data.get("title") or "").strip()
+    url = (data.get("url") or "").strip()
+    icon_category = data.get("icon_category") or "link"
+
+    if not title or len(title) > 64:
+        return JsonResponse({"error": "title is required (max 64 chars)"}, status=400)
+    if not url or len(url) > 2048:
+        return JsonResponse({"error": "url is required (max 2048 chars)"}, status=400)
+    if icon_category not in dict(UserLinkItem.ICON_CATEGORY_CHOICES):
+        return JsonResponse({"error": f"unknown icon_category: {icon_category}"}, status=400)
+
+    max_order = deck.items.aggregate(Max("order"))["order__max"]
+    item = UserLinkItem.objects.create(
+        deck=deck,
+        title=title,
+        url=url,
+        icon_category=icon_category,
+        order=0 if max_order is None else max_order + 1,
+    )
+    return JsonResponse({"ok": True, "item": _serialize_deck_item(item)}, status=201)
+
+
+@login_required
+def api_deck_item_detail(request, pk):
+    item = UserLinkItem.objects.select_related("deck").filter(pk=pk).first()
+    if item is None:
+        return JsonResponse({"error": "item not found"}, status=404)
+    if item.deck.user_id != request.user.id:
+        return JsonResponse({"error": "not your deck item"}, status=403)
+
+    if request.method == "PATCH":
+        try:
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+        if "title" in data:
+            title = (data.get("title") or "").strip()
+            if not title or len(title) > 64:
+                return JsonResponse({"error": "title is required (max 64 chars)"}, status=400)
+            item.title = title
+        if "url" in data:
+            url = (data.get("url") or "").strip()
+            if not url or len(url) > 2048:
+                return JsonResponse({"error": "url is required (max 2048 chars)"}, status=400)
+            item.url = url
+        if "icon_category" in data:
+            if data["icon_category"] not in dict(UserLinkItem.ICON_CATEGORY_CHOICES):
+                return JsonResponse(
+                    {"error": f"unknown icon_category: {data['icon_category']}"}, status=400
+                )
+            item.icon_category = data["icon_category"]
+        if "is_active" in data:
+            item.is_active = bool(data["is_active"])
+        item.save()
+        return JsonResponse({"ok": True, "item": _serialize_deck_item(item)})
+
+    if request.method == "DELETE":
+        item.delete()
+        return JsonResponse({"ok": True})
+
+    return JsonResponse({"error": "PATCH or DELETE required"}, status=405)
+
+
+@login_required
+def api_deck_reorder(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+    item_ids = data.get("item_ids")
+    if not isinstance(item_ids, list):
+        return JsonResponse({"error": "item_ids must be a list"}, status=400)
+
+    deck = _get_user_deck(request.user)
+    if deck is None:
+        return JsonResponse({"error": "Claim a handle first."}, status=400)
+
+    valid_ids = [i for i in item_ids if isinstance(i, int)]
+    order_by_id = {iid: pos for pos, iid in enumerate(valid_ids)}
+    updated = 0
+    with transaction.atomic():
+        for item in deck.items.filter(id__in=valid_ids):
+            item.order = order_by_id[item.id]
+            item.save(update_fields=["order"])
+            updated += 1
+    return JsonResponse({"ok": True, "updated": updated})
+
+
+VERIFY_CHALLENGE_TTL_MINUTES = 30
+
+
+@login_required
+def api_deck_verify_challenge(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    deck = _get_user_deck(request.user)
+    if deck is None:
+        return JsonResponse({"error": "Claim a handle first."}, status=400)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+    target_handle = normalize_handle(data.get("target_handle"))
+    if not HANDLE_PATTERN.match(target_handle):
+        return JsonResponse(
+            {"error": "Handle must be 3-32 chars: lowercase letters, digits, '_' or '-'."},
+            status=400,
+        )
+    if target_handle in RESERVED_HANDLES:
+        return JsonResponse({"error": "That handle is reserved."}, status=400)
+
+    external_url = (data.get("external_url") or "").strip()
+    url_allowed, url_reason = validate_external_bio_url(external_url)
+    if not url_allowed:
+        return JsonResponse({"error": url_reason}, status=400)
+
+    token = f"iyou-verify-wun-{uuid.uuid4().hex[:16]}"
+    challenge = HandleVerificationChallenge.objects.create(
+        deck=deck,
+        token=token,
+        target_handle=target_handle,
+        external_url=external_url,
+        expires_at=timezone.now() + timedelta(minutes=VERIFY_CHALLENGE_TTL_MINUTES),
+    )
+    return JsonResponse({
+        "token": challenge.token,
+        "target_handle": challenge.target_handle,
+        "external_url": challenge.external_url,
+        "expires_at": challenge.expires_at.isoformat(),
+        "instructions": (
+            "Paste this token into your public bio on the linked profile, "
+            "then run Check & Claim Handle before it expires."
+        ),
+    })
+
+
+@login_required
+def api_deck_verify_confirm(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    deck = _get_user_deck(request.user)
+    if deck is None:
+        return JsonResponse({"error": "Claim a handle first."}, status=400)
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+
+    token = (data.get("token") or "").strip()
+    if not token:
+        return JsonResponse({"error": "token is required"}, status=400)
+
+    challenge = deck.challenges.filter(token=token).first()
+    if challenge is None:
+        return JsonResponse({"error": "No pending challenge found for this token."}, status=404)
+    if challenge.is_completed:
+        return JsonResponse({"error": "Challenge already completed."}, status=400)
+    if challenge.expires_at <= timezone.now():
+        return JsonResponse(
+            {"error": "Challenge expired. Generate a new token."}, status=400
+        )
+
+    verified, reason = verify_external_profile_token(challenge.external_url, challenge.token)
+    if not verified:
+        return JsonResponse({"valid": False, "error": reason}, status=400)
+
+    try:
+        with transaction.atomic():
+            squatter = (
+                UserLinkDeck.objects.select_for_update()
+                .filter(handle=challenge.target_handle, discriminator=0)
+                .exclude(pk=deck.pk)
+                .first()
+            )
+            if squatter is not None:
+                max_disc = (
+                    UserLinkDeck.objects.filter(handle=challenge.target_handle)
+                    .aggregate(Max("discriminator"))["discriminator__max"]
+                    or 0
+                )
+                squatter.discriminator = max_disc + 1
+                squatter.save(update_fields=["discriminator", "updated_at"])
+
+            deck.handle = challenge.target_handle
+            deck.discriminator = 0
+            deck.is_verified = True
+            deck.verified_source_url = challenge.external_url
+            deck.verified_at = timezone.now()
+            deck.save()
+
+            challenge.is_completed = True
+            challenge.save(update_fields=["is_completed"])
+    except IntegrityError:
+        return JsonResponse(
+            {"valid": False, "error": "Handle ownership changed during verification. Try again."},
+            status=409,
+        )
+
+    return JsonResponse({
+        "valid": True,
+        "handle": deck.handle,
+        "discriminator": deck.discriminator,
+        "is_verified": True,
+        "canonical_url": deck.canonical_path,
+    })
 
 
 def hex_to_npub(hex_pubkey):
@@ -974,7 +1413,7 @@ class MediaUploadProxyView(View):
                 },
                 method="PUT",
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10):
                 pass
         except urllib.error.HTTPError as exc:
             if exc.code in (404, 405):
@@ -988,7 +1427,7 @@ class MediaUploadProxyView(View):
                         },
                         method="PUT",
                     )
-                    with urllib.request.urlopen(req_hash, timeout=10) as resp_hash:
+                    with urllib.request.urlopen(req_hash, timeout=10):
                         pass
                 except Exception:
                     pass

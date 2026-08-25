@@ -16,8 +16,8 @@
 from unittest.mock import patch
 from django.test import TestCase, Client
 from django.urls import reverse
-from apps.core.views import categorize_media, MEDIA_CATEGORIES
-from apps.core.tests.helpers import create_oidc_user, make_event
+from apps.core.views import categorize_media
+from apps.core.tests.helpers import create_oidc_user
 
 
 class CategorizeMediaTest(TestCase):

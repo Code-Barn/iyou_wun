@@ -84,7 +84,7 @@ def build_thread_tree(raw_events, profiles=None):
     if profiles is None:
         profiles = {}
 
-    from .views import hex_to_npub, get_tag_value
+    from .views import hex_to_npub
 
     # --- first pass: parse every Kind 1111 reply ---
     parsed = {}
@@ -140,7 +140,6 @@ def build_thread_tree(raw_events, profiles=None):
         reply_map[pid].sort(key=lambda n: n["created_at"])
 
     # Attach reply counts to root notes and clean up internal keys
-    root_ids = {r["id"] for r in roots}
     for root in roots:
         direct_replies = reply_map.get(root["id"], [])
         root["reply_count"] = _count_all_replies(root["id"], reply_map)

@@ -50,7 +50,6 @@ class DIDKitUnitTest(TestCase):
         self.assertIsInstance(sk, Ed25519PrivateKey)
 
     def test_load_signing_key_64_bytes(self):
-        long_hex = EPHEM_KEY_HEX + "0" * 64  # pad to 64 bytes
         # At 64 bytes (512 bits) this will fail because Ed25519 keys are 32 bytes
         # Let's use a proper 64-byte seed format
         seed = bytes.fromhex(EPHEM_KEY_HEX[:64])  # 32 bytes

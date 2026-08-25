@@ -14,7 +14,6 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import pytest
-from django.contrib.auth.models import User
 
 from .tests.helpers import VALID_PUBKEY_HEX, SAMPLE_DID
 

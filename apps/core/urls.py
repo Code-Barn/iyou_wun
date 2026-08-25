@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from django.urls import path
+from django.urls import path, re_path
 from . import views
 
 urlpatterns = [
@@ -29,5 +29,20 @@ urlpatterns = [
     path('api/media/upload/', views.MediaUploadProxyView.as_view(), name='media_upload_proxy'),
     path('api/credentials/issue/', views.IssueCredentialView.as_view(), name='api_issue_credential'),
     path('api/config/', views.node_config, name='node_config'),
+]
+
+urlpatterns += [
+    re_path(
+        r"^@(?P<handle>[a-z0-9_-]{3,32})(?:\[(?P<disc>\d+)\])?/?$",
+        views.LinkDeckView.as_view(),
+        name="link_deck",
+    ),
+    path("u/<str:did_key>/", views.LinkDeckView.as_view(), name="link_deck_did"),
+    path("api/deck/handle", views.api_deck_handle, name="api_deck_handle"),
+    path("api/deck/items", views.api_deck_items, name="api_deck_items"),
+    path("api/deck/items/<int:pk>", views.api_deck_item_detail, name="api_deck_item_detail"),
+    path("api/deck/reorder", views.api_deck_reorder, name="api_deck_reorder"),
+    path("api/deck/verify/challenge", views.api_deck_verify_challenge, name="api_deck_verify_challenge"),
+    path("api/deck/verify/confirm", views.api_deck_verify_confirm, name="api_deck_verify_confirm"),
 ]
 

@@ -19,7 +19,7 @@ from django.conf import settings
 from django.urls import reverse
 
 from ..auth import MyOIDCAuthenticationBackend
-from .helpers import create_oidc_user, make_claims
+from .helpers import make_claims
 
 
 class MyOIDCAuthenticationBackendTest(TestCase):
