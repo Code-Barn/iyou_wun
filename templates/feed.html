@@ -80,10 +80,17 @@
             {% if notes %}
             <div id="feedContainer" class="space-y-6">
                 {% for note in notes %}
-                <div class="thread-root border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
-                     data-kind="{{ note.kind }}" data-note-id="{{ note.id }}" data-pubkey="{{ note.pubkey }}" data-created-at="{{ note.created_at|date:'U' }}">
+                <article class="feed-note-card thread-root border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow"
+                     data-kind="{{ note.kind }}"
+                     data-note-id="{{ note.id }}"
+                     data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-author-did="{{ note.author_did|default:'' }}"
+                     data-note-tags="{{ note.tags_json|default:'' }}"
+                     data-created-at="{{ note.created_at|date:'U' }}">
                     {% include "includes/_thread_post.html" with note=note show_thread_border=False %}
-                </div>
+                </article>
+
                 {% if note.replies %}
                 <div class="thread-replies ml-6 pl-4 border-l-2 border-indigo-200 space-y-4" data-parent-id="{{ note.id }}" id="replies-{{ note.id }}">
                     {% for reply in note.replies %}
@@ -173,7 +180,10 @@
             }
         });
     </script>
+    <script src="{% static 'js/contact_manager.js' %}" defer></script>
+    <script src="{% static 'js/circle_feed_filter.js' %}" defer></script>
     <script src="{% static 'js/theme.js' %}"></script>
 </body>
+
 </html>
 

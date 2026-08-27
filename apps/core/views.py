@@ -237,9 +237,16 @@ def api_feed(request):
 
 
 def npub_to_hex(npub_str):
-    """Convert npub1... to hex pubkey."""
+    """Convert npub1... to hex pubkey (also accepts hex or DID)."""
+    if not npub_str or not isinstance(npub_str, str):
+        return None
+    clean = npub_str.strip()
+    if re.match(r"^[0-9a-fA-F]{64}$", clean):
+        return clean.lower()
+    if clean.startswith("did:"):
+        return did_to_pubkey(clean)
     try:
-        hrp, data = bech32.bech32_decode(npub_str)
+        hrp, data = bech32.bech32_decode(clean)
         if hrp != "npub" or data is None:
             return None
         decoded = bech32.convertbits(data, 5, 8, False)
@@ -248,6 +255,7 @@ def npub_to_hex(npub_str):
         return bytes(decoded).hex()
     except Exception:
         return None
+
 
 
 def fetch_profile_data(hex_pubkey, relay_urls=None):
@@ -348,6 +356,9 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
             "id": e.get("id", ""),
             "kind": 1063,
             "pubkey": pk,
+            "pubkey_hex": pk,
+            "author_did": f"did:iyou:0x{pk}" if pk else "",
+            "tags_json": json.dumps(tags),
             "npub": npub_val,
             "content": e.get("content", ""),
             "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
@@ -403,17 +414,22 @@ def fetch_text_notes(authors=None, limit=20, relay_urls=None):
         pk = e.get("pubkey", "")
         npub_val = hex_to_npub(pk) if pk else ""
         profile = profiles.get(pk, {})
+        tags = e.get("tags", [])
         result.append({
             "id": e.get("id", ""),
             "kind": 1,
             "pubkey": pk,
+            "pubkey_hex": pk,
+            "author_did": f"did:iyou:0x{pk}" if pk else "",
+            "tags_json": json.dumps(tags),
             "npub": npub_val,
             "content": e.get("content", ""),
             "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
-            "tags": e.get("tags", []),
+            "tags": tags,
             "author_name": profile.get("display_name") or profile.get("name") or "",
             "author_avatar": profile.get("picture", ""),
         })
+
 
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return result[:limit]
@@ -757,7 +773,8 @@ class ProfileView(TemplateView):
         npub = kwargs.get("npub")
         hex_pubkey = npub_to_hex(npub)
         context["hex_pubkey"] = hex_pubkey
-        context["npub"] = npub
+        context["target_nostr_pubkey_hex"] = hex_pubkey
+        context["npub"] = hex_to_npub(hex_pubkey) if hex_pubkey else npub
 
         if not hex_pubkey:
             context["error"] = f"Invalid npub: {npub}"
@@ -783,6 +800,16 @@ class ProfileView(TemplateView):
         owner_deck = getattr(owner_user, "link_deck", None) if owner_user else None
         context["owner_deck"] = owner_deck
         context["deck_items"] = list(owner_deck.items.filter(is_active=True)) if owner_deck else []
+
+        target_did = owner_user.username if owner_user else ""
+        context["target_did"] = target_did
+        context["profile_did"] = target_did
+        context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
+        context["user_pubkey"] = (
+            did_to_pubkey(self.request.user.username)
+            if self.request.user.is_authenticated
+            else ""
+        )
 
         return context
 
@@ -918,10 +945,19 @@ class LinkDeckView(TemplateView):
             "headline": target_deck.headline if target_deck else "",
             "owner_did": owner_did,
             "hex_pubkey": hex_pubkey,
+            "target_nostr_pubkey_hex": hex_pubkey,
+            "target_did": owner_did,
+            "profile_did": owner_did,
+            "profile_handle": target_deck.handle if target_deck else "",
             "npub": hex_to_npub(hex_pubkey) if hex_pubkey else owner_did,
             "profile": profile,
             "items": items,
             "feed_url": f"/feed?author={hex_pubkey}" if hex_pubkey else "/feed",
+            "user_pubkey": (
+                did_to_pubkey(request.user.username)
+                if request.user.is_authenticated
+                else ""
+            ),
         }
         return self.render_to_response(context)
 
@@ -1222,40 +1258,47 @@ def hex_to_npub(hex_pubkey):
 
 
 def did_to_pubkey(did):
-    """Extract Nostr hex pubkey from a DID (did:key:z6Mk...).
+    """Extract Nostr hex pubkey from a DID (did:key:z6Mk..., did:iyou:0x...) or hex string."""
+    if not did or not isinstance(did, str):
+        return None
 
-    DID format: did:key:z6MkqRYqQ273hve3ZxTj1T51G5R163z6Fy2Sx8qYm7tK
-    The part after 'z' is base64url-encoded multibase.
-    We decode it and convert to hex.
-    """
-    if not did or not did.startswith("did:key:z"):
+    did = did.strip()
+    if re.match(r"^[0-9a-fA-F]{64}$", did):
+        return did.lower()
+
+    if did.startswith("did:iyou:0x"):
+        hex_part = did.split("did:iyou:0x", 1)[1].strip()
+        if len(hex_part) == 64 and all(c in "0123456789abcdefABCDEF" for c in hex_part):
+            return hex_part.lower()
+        if len(hex_part) < 64 and all(c in "0123456789abcdefABCDEF" for c in hex_part):
+            return hex_part.zfill(64).lower()
+
+    if not did.startswith("did:key:z"):
         return None
 
     try:
         # Extract the multibase part (after z)
-        encoded = did.split("z")[1]
-
-        # Decode base64url (multibase)
-        # Add padding if needed
-        padding = 4 - len(encoded) % 4
-        if padding != 4:
+        encoded = did.split("z", 1)[1]
+        if len(encoded) % 4 == 1:
+            encoded = encoded[:-1]
+        padding = (4 - len(encoded) % 4) % 4
+        if padding:
             encoded += "=" * padding
 
         # Convert from base64url to standard base64
         decoded_bytes = base64.urlsafe_b64decode(encoded)
 
-        # Convert to hex
-        hex_pubkey = decoded_bytes.hex()
-
         # Nostr pubkeys are 32 bytes (64 hex chars) for secp256k1
-        # DID keys might have a prefix byte, so we take the last 32 bytes
         if len(decoded_bytes) > 32:
-            hex_pubkey = decoded_bytes[-32:].hex()
+            return decoded_bytes[-32:].hex()
+        elif len(decoded_bytes) < 32:
+            return decoded_bytes.hex().rjust(64, "0")
 
-        return hex_pubkey
-    except Exception as e:
-        print(f"Error converting DID to pubkey: {e}")
+        return decoded_bytes.hex()
+    except Exception:
         return None
+
+
 
 
 def did_to_npub(did):

@@ -99,15 +99,34 @@
                     renderBadge(slot, match);
                 });
             });
+            try {
+                window.dispatchEvent(new CustomEvent("trustLensUpdated", { detail: { matches: matches } }));
+            } catch (e) { /* ignore */ }
         }).catch(function () {
             /* Trust Lens is best-effort local enrichment; stay silent. */
         });
+    }
+
+    function getTrustTier(identifier) {
+        if (!identifier) return null;
+        var key = normalizeKey(identifier);
+        var bridge = getBridge();
+        if (bridge && bridge._aliasCache && bridge._aliasCache.has(key)) {
+            var match = bridge._aliasCache.get(key);
+            if (match && match.trust_level) {
+                return match.trust_level;
+            }
+        }
+        return null;
     }
 
     window.trustLens = {
         scan: scanFeedForTrustBadges,
         reset: resetAppliedBadges,
         renderBadge: renderBadge,
+        getTrustTier: getTrustTier,
         BADGE_CONFIG: BADGE_CONFIG
     };
+    window.TrustLens = window.trustLens;
 })();
+

@@ -13,9 +13,15 @@
         {% endif %}
     </div>
     <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-2">
+        <div class="flex items-center gap-2 mb-2 flex-wrap">
             <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
+            {% if note.author_did %}
+            <span class="trust-lens-target font-mono text-[11px] text-slate-400 dark:text-slate-500" data-trust-did="{{ note.author_did }}" title="{{ note.author_did }}">
+                {{ note.author_did|truncatechars:16 }}
+            </span>
+            {% endif %}
             <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
+
             {% if note.kind == 1 %}
             <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
             {% elif note.kind == 1063 %}

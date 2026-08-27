@@ -1,12 +1,69 @@
-<nav class="bg-white shadow-sm border-b">
-    <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-center font-mono">
-        <div class="flex items-center gap-6">
-            <a href="{% url 'feed' %}" class="text-sm text-gray-600 hover:text-indigo-600">Feed</a>
-            <a href="{% url 'gallery' %}" class="text-sm text-gray-600 hover:text-indigo-600">Gallery</a>
-            {% if user.is_authenticated %}
-            <a href="{% url 'dashboard' %}" class="text-sm text-gray-600 hover:text-indigo-600">Dashboard</a>
-            <a href="{% url 'chat' %}" class="text-sm font-bold text-indigo-700 bg-indigo-50 px-3 py-1.5 rounded-md hover:bg-indigo-100 border border-indigo-200">Chat</a>
-            {% endif %}
-        </div>
+{% load static %}
+<nav class="border-b transition-colors duration-200 bg-slate-100/90 border-slate-200 text-slate-800 dark:bg-slate-900/90 dark:border-slate-800 dark:text-slate-200 px-4 sm:px-6 lg:px-8 py-2.5 text-xs font-mono">
+  <div class="max-w-7xl mx-auto flex flex-col gap-2">
+    
+    <!-- Top Action Track: Feature Routes, Compose Action & Real-Time Filter -->
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <!-- Left: Primary App Routes -->
+      <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <a href="{% url 'feed' %}" 
+           class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'feed' %}bg-violet-600 text-white font-bold dark:bg-violet-500/20 dark:text-violet-400 dark:border dark:border-violet-500/40{% else %}text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">
+          [ 📝 Feed ]
+        </a>
+        <a href="{% url 'gallery' %}" 
+           class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'gallery' %}bg-violet-600 text-white font-bold dark:bg-violet-500/20 dark:text-violet-400 dark:border dark:border-violet-500/40{% else %}text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">
+          [ 🖼️ Gallery ]
+        </a>
+        <a href="{% url 'dashboard' %}" 
+           class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'dashboard' %}bg-violet-600 text-white font-bold dark:bg-violet-500/20 dark:text-violet-400 dark:border dark:border-violet-500/40{% else %}text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">
+          [ 📊 Dashboard ]
+        </a>
+        <a href="{% url 'chat' %}" 
+           class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'chat' %}bg-violet-600 text-white font-bold dark:bg-violet-500/20 dark:text-violet-400 dark:border dark:border-violet-500/40{% else %}text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200{% endif %}">
+          [ 💬 Chat ]
+        </a>
+        {% if user.is_authenticated or request.user.is_authenticated %}
+        <button id="btn-compose-note" type="button" class="text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 transition-colors ml-1 font-semibold">
+          + New Note
+        </button>
+        {% endif %}
+      </div>
+
+      <!-- Right: Real-Time Feed Search Input -->
+      <div class="flex items-center gap-2">
+        <input type="text" 
+               id="feed-search-input" 
+               placeholder="[ FILTER_FEED_TAGS:_* ]" 
+               class="bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-violet-400 placeholder-slate-400 dark:placeholder-slate-600 px-2.5 py-1 rounded focus:outline-none focus:border-violet-500 text-xs w-44 sm:w-60">
+      </div>
     </div>
+
+    <!-- Bottom Track: Circle Filters & Active Scope Badge -->
+    <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-800 text-[11px]">
+      <div class="flex flex-wrap items-center gap-1" id="circle-filter-group">
+        <span class="text-slate-400 dark:text-slate-500 mr-1">CIRCLES:</span>
+        <button type="button" data-circle="global" 
+           class="circle-tab px-2 py-0.5 rounded bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950 transition-colors">
+          [ 🌐 Global Mesh ]
+        </button>
+        <button type="button" data-circle="following" 
+           class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200 dark:bg-slate-800/60 transition-colors">
+          [ 👥 Following (L1) ]
+        </button>
+        <button type="button" data-circle="inner" 
+           class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200 dark:bg-slate-800/60 transition-colors">
+          [ 🛡️ Inner Circle (L0) ]
+        </button>
+        <button type="button" data-circle="mutual" 
+           class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200 dark:bg-slate-800/60 transition-colors">
+          [ 🤝 Mutual Friends ]
+        </button>
+      </div>
+
+      <div class="text-slate-500 dark:text-slate-400 text-[10px] tracking-wider uppercase font-mono">
+        SCOPE: [ <span id="active-circle-label" class="text-violet-600 dark:text-violet-400 font-semibold">GLOBAL MESH</span> ]
+      </div>
+    </div>
+
+  </div>
 </nav>

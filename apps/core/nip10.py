@@ -13,18 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-NIP-10 Threading Engine — reply tree builder for Nostr Kind 1111 events.
-
-Implements:
-  - parse_nip10_tags(event)  → root_id, parent_id, reply_marker, mention_ids
-  - build_thread_tree(raw_events, profiles) → {roots: [...], replies_by_parent: {...}, total_reply_count: int}
-
-NIP-10 tag format:
-  ["e", <root_event_id>, <relay_url>, "root"]
-  ["e", <parent_event_id>, <relay_url>, "reply"]
-  ["p", <author_pubkey>, <relay_url>]
-"""
+import json
 
 
 def parse_nip10_tags(tags):
@@ -95,14 +84,18 @@ def build_thread_tree(raw_events, profiles=None):
     def enrich(e):
         pk = e.get("pubkey", "")
         prof = profiles.get(pk, {})
+        tags = e.get("tags", [])
         return {
             "id": e.get("id", ""),
             "kind": e.get("kind"),
             "pubkey": pk,
+            "pubkey_hex": pk,
+            "author_did": f"did:iyou:0x{pk}" if pk else "",
+            "tags_json": json.dumps(tags),
             "npub": hex_to_npub(pk) if pk else "",
             "content": e.get("content", ""),
             "created_at": _ts_to_datetime(e.get("created_at", 0)),
-            "tags": e.get("tags", []),
+            "tags": tags,
             "author_name": prof.get("display_name") or prof.get("name") or "",
             "author_avatar": prof.get("picture", ""),
         }
@@ -174,6 +167,9 @@ def _enrich_root(e, kind, profiles, ts_fn):
         "id": e.get("id", ""),
         "kind": kind,
         "pubkey": pk,
+        "pubkey_hex": pk,
+        "author_did": f"did:iyou:0x{pk}" if pk else "",
+        "tags_json": json.dumps(tags),
         "npub": hex_to_npub(pk) if pk else "",
         "content": e.get("content", ""),
         "created_at": ts_fn(e.get("created_at", 0)),
@@ -184,6 +180,7 @@ def _enrich_root(e, kind, profiles, ts_fn):
         "reactions": [],
         "replies": [],
     }
+
 
     if kind == 1063:
         note["file_url"] = get_tag_value(tags, "url")

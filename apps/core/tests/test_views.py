@@ -348,3 +348,55 @@ class FeedViewTrustLensContractTest(TestCase):
         response = self._get_feed()
         self.assertContains(response, "trustLens.scan")
 
+
+class FeedViewTwoTierToolbarTest(TestCase):
+    """Two-tier Layer 2 toolbar & circle feed filtering contract tests."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.relay_events = {
+            "e1": make_event("e1", 1, content="circle filter test note", tags=[["t", "nostr"], ["t", "mesh"]]),
+        }
+
+    def _get_feed(self):
+        with patch("apps.core.views.relay_req", return_value=self.relay_events):
+            return self.client.get(reverse("feed"))
+
+    def test_feed_renders_layer2_two_tier_toolbar(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="circle-filter-group"')
+        self.assertContains(response, 'data-circle="global"')
+        self.assertContains(response, 'data-circle="following"')
+        self.assertContains(response, 'data-circle="inner"')
+        self.assertContains(response, 'data-circle="mutual"')
+        self.assertContains(response, 'id="active-circle-label"')
+        self.assertContains(response, 'id="feed-search-input"')
+        self.assertContains(response, "[ 🌐 Global Mesh ]")
+        self.assertContains(response, "[ 👥 Following (L1) ]")
+        self.assertContains(response, "[ 🛡️ Inner Circle (L0) ]")
+        self.assertContains(response, "[ 🤝 Mutual Friends ]")
+
+    def test_feed_renders_compose_button_for_authenticated_user(self):
+        user = User.objects.create_user(username="did:key:z6Mktoolbaruser")
+        self.client.force_login(user)
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="btn-compose-note"')
+        self.assertContains(response, "+ New Note")
+
+    def test_feed_note_cards_have_circle_and_trust_metadata(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "feed-note-card")
+        self.assertContains(response, "data-author-pubkey=")
+        self.assertContains(response, "data-author-did=")
+        self.assertContains(response, "data-note-tags=")
+        self.assertContains(response, "trust-lens-target")
+
+    def test_feed_loads_circle_feed_filter_script(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "circle_feed_filter.js")
+
+
