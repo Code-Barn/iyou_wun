@@ -1,47 +1,93 @@
-<style>
-    #sovereign-ecosystem-topbar .sovereign-scroll::-webkit-scrollbar { display: none; }
-    #sovereign-ecosystem-topbar .sovereign-scroll { scrollbar-width: none; }
-</style>
-<div id="sovereign-ecosystem-topbar"
-     class="fixed top-0 left-0 w-full z-[9999] transform -translate-y-[calc(100%-4px)] hover:translate-y-0 transition-all duration-300 ease-in-out bg-slate-950 border-b border-violet-600/50 text-slate-400 px-4 py-1.5 shadow-2xl flex items-center h-9 min-h-[36px] max-h-[40px] font-mono text-[11px]">
-    <span class="text-violet-400 font-bold tracking-wider uppercase shrink-0 mr-3">SOVEREIGN MESH:</span>
-    <div class="sovereign-scroll flex items-center gap-4 overflow-x-auto whitespace-nowrap snap-x snap-mandatory scroll-smooth flex-1 min-w-0 -mb-px pb-px">
-        <a href="https://iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">idp</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://poly.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">poly</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://name.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">name</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://hive.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">hive</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://ride.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">ride</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://dctech.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">dctech</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://safe.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">safe</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://talk.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">talk</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://clar.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">clar</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://play.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">play</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://blog.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">blog</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://help.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">help</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://draw.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">draw</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://life.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">life</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://walk.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">walk</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://stay.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">stay</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://dev.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">dev</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://spot.iyou.me" class="hover:text-white transition-colors duration-150 snap-start shrink-0">spot</a>
-        <span class="text-slate-800 shrink-0">/</span>
-        <a href="https://wun.iyou.me" class="text-white font-bold tracking-normal snap-start shrink-0">wun</a>
+{% load static %}
+<!-- Layer 0: Sovereign Ecosystem Bar -->
+<div id="sovereign-ecosystem-topbar" 
+     class="fixed top-0 left-0 right-0 z-[9999] transition-transform duration-300 ease-in-out -translate-y-[calc(100%-4px)] sm:hover:translate-y-0 bg-[#0B0F19]/95 backdrop-blur-md border-b border-violet-500/50 shadow-2xl">
+  
+  <div class="max-w-7xl mx-auto px-3 sm:px-6 py-2">
+    <!-- Top Row: Ecosystem Title & Close Trigger -->
+    <div class="flex items-center justify-between text-[11px] font-mono text-slate-400 pb-1 mb-1 border-b border-slate-800">
+      <span class="text-violet-400 font-bold tracking-wider">SOVEREIGN MESH ECOSYSTEM</span>
+      <button type="button" 
+              id="close-ecosystem-bar" 
+              class="text-xs text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800/80 hover:bg-slate-700 transition" 
+              onclick="closeEcosystemBar(event)">
+        ✕ Close
+      </button>
     </div>
+
+    <!-- 19-App Links Flow -->
+    <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs font-mono py-1">
+      <a href="https://iyou.me" class="text-slate-400 hover:text-white">idp</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://wun.iyou.me" class="text-violet-400 font-bold underline">wun</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://poly.iyou.me" class="text-purple-400 hover:text-purple-300">poly</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://name.iyou.me" class="text-teal-400 hover:text-teal-300">name</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://hive.iyou.me" class="text-orange-400 hover:text-orange-300">hive</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://ride.iyou.me" class="text-lime-400 hover:text-lime-300">ride</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://dctech.iyou.me" class="text-indigo-400 hover:text-indigo-300">dctech</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://safe.iyou.me" class="text-rose-400 hover:text-rose-300">safe</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://talk.iyou.me" class="text-cyan-400 hover:text-cyan-300">talk</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://clar.iyou.me" class="text-emerald-400 hover:text-emerald-300">clar</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://play.iyou.me" class="text-amber-400 hover:text-amber-300">play</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://blog.iyou.me" class="text-sky-400 hover:text-sky-300">blog</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://help.iyou.me" class="text-red-400 hover:text-red-300">help</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://draw.iyou.me" class="text-fuchsia-400 hover:text-fuchsia-300">draw</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://life.iyou.me" class="text-sky-400 hover:text-sky-300">life</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://walk.iyou.me" class="text-green-400 hover:text-green-300">walk</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://stay.iyou.me" class="text-yellow-400 hover:text-yellow-300">stay</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://dev.iyou.me" class="text-zinc-400 hover:text-zinc-300">dev</a>
+      <span class="text-slate-700">/</span>
+      <a href="https://spot.iyou.me" class="text-pink-400 hover:text-pink-300">spot</a>
+    </div>
+  </div>
+
+  <!-- Mobile Tap / Pull Handle (4px visible lip + centered pill) -->
+  <div class="h-2 w-full bg-violet-500/80 cursor-pointer flex justify-center items-center select-none" onclick="toggleEcosystemBar(event)">
+    <div class="w-8 h-1 bg-violet-300 rounded-full opacity-80"></div>
+  </div>
 </div>
+
+<script>
+  function openEcosystemBar() {
+    const bar = document.getElementById('sovereign-ecosystem-topbar');
+    if (!bar) return;
+    bar.classList.remove('-translate-y-[calc(100%-4px)]');
+    bar.classList.add('translate-y-0');
+  }
+
+  function closeEcosystemBar(e) {
+    if (e) e.stopPropagation();
+    const bar = document.getElementById('sovereign-ecosystem-topbar');
+    if (!bar) return;
+    bar.classList.remove('translate-y-0');
+    bar.classList.add('-translate-y-[calc(100%-4px)]');
+    if (document.activeElement) document.activeElement.blur();
+  }
+
+  function toggleEcosystemBar(e) {
+    if (e) e.stopPropagation();
+    const bar = document.getElementById('sovereign-ecosystem-topbar');
+    if (!bar) return;
+    if (bar.classList.contains('translate-y-0')) {
+      closeEcosystemBar(e);
+    } else {
+      openEcosystemBar();
+    }
+  }
+</script>

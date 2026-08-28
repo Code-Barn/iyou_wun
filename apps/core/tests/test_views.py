@@ -566,10 +566,10 @@ class FeedViewTwoTierToolbarTest(TestCase):
         self.assertContains(response, 'data-circle="mutual"')
         self.assertContains(response, 'id="active-circle-label"')
         self.assertContains(response, 'id="feed-search-input"')
-        self.assertContains(response, "[ 🌐 Global Mesh ]")
-        self.assertContains(response, "[ 👥 Following (L1) ]")
-        self.assertContains(response, "[ 🛡️ Inner Circle (L0) ]")
-        self.assertContains(response, "[ 🤝 Mutual Friends ]")
+        self.assertContains(response, "[ 🌐 Global ]")
+        self.assertContains(response, "[ 👥 Following ]")
+        self.assertContains(response, "[ 🛡️ Inner Circle ]")
+        self.assertContains(response, "[ 🤝 Mutual ]")
 
     def test_feed_renders_compose_button_for_authenticated_user(self):
         user = User.objects.create_user(username="did:key:z6Mktoolbaruser")

@@ -31,6 +31,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic.base import RedirectView
 
 from apps.core.auth_pkce import (
     PKCEOIDCAuthenticationCallbackView,
@@ -39,6 +40,8 @@ from apps.core.auth_pkce import (
 )
 
 urlpatterns = [
+    path('favicon.ico', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
+    path('apple-touch-icon.png', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
     path('admin/', admin.site.urls),
     path('oidc/authenticate/', PKCEOIDCAuthenticationRequestView.as_view(), name='oidc_authentication_init'),
     path('oidc/callback/', PKCEOIDCAuthenticationCallbackView.as_view(), name='oidc_authentication_callback'),

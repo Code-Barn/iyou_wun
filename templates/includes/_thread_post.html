@@ -1,15 +1,15 @@
 {% load static %}
 <div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="{{ note.id }}">
   <!-- Author Avatar -->
-  <div class="flex-shrink-0">
+  <div class="shrink-0">
     {% if note.author_avatar %}
     <a href="{% url 'profile' npub=note.npub %}">
       <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}"
-           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition" />
+           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
     </a>
     {% else %}
     <a href="{% url 'profile' npub=note.npub %}">
-      <div class="w-10 h-10 bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center border border-violet-200 dark:border-violet-800">
+      <div class="w-10 h-10 bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center border border-violet-200 dark:border-violet-800 shrink-0 aspect-square">
         <span class="text-violet-600 dark:text-violet-400 font-mono text-sm font-bold">{{ note.author_name|default:"N"|first|upper }}</span>
       </div>
     </a>
@@ -119,7 +119,7 @@
                alt="{{ media.alt|default:'Attached visual' }}" 
                loading="lazy" 
                class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" 
-               onclick="window.open('{{ media.url }}', '_blank')" />
+               onclick="openImageModal('{{ media.url }}')" />
         </div>
         {% elif media.type == 'video' %}
         <div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-h-[500px]">

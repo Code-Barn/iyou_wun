@@ -17,9 +17,19 @@
       })();
     </script>
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
+    <!-- Favicons & App Icons -->
+    <link rel="icon" type="image/png" href="{% static 'img/logo_square.png' %}">
+    <link rel="apple-touch-icon" href="{% static 'img/logo_square.png' %}">
+
+    <!-- PWA Configuration -->
+    <meta name="theme-color" content="#8B5CF6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Wun">
+    <link rel="manifest" href="{% static 'manifest.json' %}">
     {% block extra_head %}{% endblock %}
 </head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200">
+<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-hidden">
     {% include "includes/_ecosystem_bar.html" %}
     {% include "includes/_standard_header.html" %}
     {% include "_nav.html" %}
@@ -33,6 +43,44 @@
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="{% static 'js/contact_manager.js' %}" defer></script>
     <script src="{% static 'js/circle_feed_filter.js' %}" defer></script>
+    <!-- Fullscreen Media Lightbox Modal -->
+    <div id="image-lightbox-modal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4" onclick="closeImageModal()">
+      <div class="relative max-w-4xl max-h-[90vh] flex flex-col items-center" onclick="event.stopPropagation()">
+        <button type="button" class="absolute -top-10 right-0 text-white/80 hover:text-white text-2xl font-mono p-1" onclick="closeImageModal()">
+          ✕
+        </button>
+        <img id="lightbox-modal-img" src="" alt="Enlarged view" class="max-h-[85vh] max-w-full rounded-xl object-contain shadow-2xl border border-white/10" />
+      </div>
+    </div>
+
+    <script>
+      function openImageModal(src) {
+        if (!src) return;
+        const modal = document.getElementById('image-lightbox-modal');
+        const img = document.getElementById('lightbox-modal-img');
+        if (modal && img) {
+          img.src = src;
+          modal.classList.remove('hidden');
+        }
+      }
+
+      function closeImageModal() {
+        const modal = document.getElementById('image-lightbox-modal');
+        if (modal) modal.classList.add('hidden');
+      }
+
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') closeImageModal();
+      });
+    </script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register("{% static 'js/sw.js' %}")
+            .catch((err) => console.debug('SW registration skipped:', err));
+        });
+      }
+    </script>
 </body>
 
 

@@ -147,7 +147,7 @@
     // ---------- Button Loading State ----------
 
     function setButtonLoading(loading) {
-        var button = document.getElementById("postButton");
+        var button = document.getElementById("btn-publish-note") || document.getElementById("postButton");
         var textSpan = document.getElementById("postButtonText");
         var loadingSpan = document.getElementById("postButtonLoading");
         if (button) button.disabled = loading;
@@ -421,7 +421,7 @@
                 var mUrl = escapeAttr(media.url);
                 if (media.type === "image") {
                     mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/20 max-h-[500px]">' +
-                        '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" onclick="window.open(\'' + mUrl + '\', \'_blank\')" />' +
+                        '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" onclick="openImageModal(\'' + mUrl + '\')" />' +
                         '</div>';
                 } else if (media.type === "video") {
                     mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-h-[500px]">' +
@@ -1352,6 +1352,7 @@
     // ---------- Public API ----------
 
     window.postToNostr = postToNostr;
+    window.publishPost = postToNostr;
     window.showReplyEditor = showReplyEditor;
     window.cancelReply = cancelReply;
     window.submitReply = submitReply;
@@ -1377,6 +1378,7 @@
     window.handleContextualAction = handleContextualAction;
     window.castPollVote = castPollVote;
     window.openPollModal = openPollModal;
+    window.openPollCreateModal = openPollModal;
     window.closePollModal = closePollModal;
     window.addPollOption = addPollOption;
     window.removeOption = removeOption;
