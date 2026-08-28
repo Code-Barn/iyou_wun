@@ -1,54 +1,95 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html>
-<head>
-    <title>Chat - iyou_wun</title>
-    <script>
-      (function() {
-        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
-        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
-        if (theme === 'dark' || theme === 'stealth') {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
-      })();
-    </script>
-    <link rel="stylesheet" href="{% static 'css/output.css' %}">
-    <link rel="stylesheet" type="text/css" href="https://cdn.conversejs.org/10.1.7/dist/converse.min.css">
-    <style>
-        #conversejs { height: calc(100vh - 57px); }
-        .converse-chatrooms, .converse-chatboxes { max-width: 100% !important; }
-    </style>
-</head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200">
-    {% include 'includes/_ecosystem_bar.html' %}
-    {% include 'includes/_standard_header.html' %}
-    {% include '_nav.html' %}
+
+{% block title %}Chat - iyou_wun{% endblock %}
+
+{% block extra_head %}
+<!-- Converse.js CSS -->
+<link rel="stylesheet" href="https://cdn.conversejs.org/dist/converse.min.css">
+<style>
+  /* Prevent Converse CSS from blowing out theme typography */
+  #conversejs-wrap {
+    height: calc(100vh - 145px);
+  }
+  #conversejs .converse-chatbox, #conversejs .converse-controlbox {
+    font-family: inherit;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="max-w-7xl mx-auto px-2 sm:px-4 py-2">
+  <!-- Loading Spinner Overlay -->
+  <div id="chat-loading-overlay" class="flex flex-col items-center justify-center h-[calc(100vh-180px)] bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-800">
+    <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-violet-600 dark:border-violet-400"></div>
+    <p class="mt-3 text-xs font-mono text-slate-500 dark:text-slate-400">Authenticating with sovereign XMPP mesh...</p>
+  </div>
+
+  <!-- Embedded Converse.js Container -->
+  <div id="conversejs-wrap" class="hidden rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
     <div id="conversejs"></div>
-    <script src="https://cdn.conversejs.org/10.1.7/dist/converse.min.js"></script>
-    <script>
-        converse.initialize({
-            bosh_service_url: undefined,
-            websocket_url: '{{ xmpp_ws_url }}',
-            jid: '{{ user_pubkey }}@{{ xmpp_domain }}',
-            password: '{{ xmpp_password }}',
-            authentication: 'login',
-            keepalive: true,
-            persistent_store: 'local',
-            view_mode: 'fullscreen',
-            auto_login: true,
-            allow_registration: false,
-            discover_connection_methods: false,
-            allow_non_roster_messaging: true,
-            archived_messages: false,
-            theme: 'light',
-            show_controlbox_by_default: true,
-            hide_muc_panel: true,
-            allow_logout: false,
-            sticky_controlbox: true,
-        });
-    </script>
-    <script src="{% static 'js/theme.js' %}"></script>
-</body>
-</html>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script type="module">
+  import * as conversePkg from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js';
+
+  document.addEventListener("DOMContentLoaded", function() {
+    const converse = window.converse || conversePkg.converse || conversePkg.default;
+    if (!converse) {
+      console.error("Converse.js module failed to load.");
+      const loader = document.getElementById('chat-loading-overlay');
+      if (loader) loader.innerHTML = '<p class="text-xs font-mono text-rose-400">Failed to load chat client module.</p>';
+      return;
+    }
+
+    const wsUrl = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";
+    const boshUrl = "{{ xmpp_bosh_url|default:'' }}";
+    const jid = "{{ user_jid|default:'' }}";
+    const password = "{{ xmpp_token|default:'' }}";
+
+    function dismissLoadingSpinner() {
+      const loader = document.getElementById('chat-loading-overlay');
+      const wrap = document.getElementById('conversejs-wrap');
+      if (loader) loader.classList.add('hidden');
+      if (wrap) wrap.classList.remove('hidden');
+    }
+
+    try {
+      converse.initialize({
+        bosh_service_url: boshUrl || undefined,
+        websocket_url: wsUrl || undefined,
+        authentication: jid ? 'login' : 'anonymous',
+        jid: jid || undefined,
+        password: password || undefined,
+        view_mode: 'embedded',
+        root: document.getElementById('conversejs'),
+        show_controlbox_by_default: true,
+        allow_non_roster_messaging: true,
+        allow_muc: true,
+        allow_registration: false,
+        auto_away: 0,
+        auto_reconnect: true,
+        keepalive: true,
+        persistent_store: 'local',
+        singleton: true,
+        theme: document.documentElement.classList.contains('dark') ? 'dracula' : 'concord',
+        whitelisted_plugins: []
+      });
+
+      converse.listen('connected', dismissLoadingSpinner);
+      converse.listen('initialized', function() {
+        setTimeout(dismissLoadingSpinner, 800);
+      });
+    } catch (err) {
+      console.error("Converse init error:", err);
+      dismissLoadingSpinner();
+    }
+  });
+</script>
+{% endblock %}
+
+
+

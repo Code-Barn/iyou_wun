@@ -10,20 +10,27 @@
 
     <div class="flex items-center gap-4">
       {% if user.is_authenticated or request.user.is_authenticated %}
-        <span class="flex items-center gap-1.5 text-xs font-mono text-slate-600 dark:text-gray-400">
-          <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" title="Sovereign Key Active"></span>
-          <span class="max-w-[140px] sm:max-w-[220px] truncate" title="{{ user.username|default:request.user.username }}">
-            {{ user.username|default:request.user.username|truncatechars:24 }}
-          </span>
-        </span>
-        <a href="{% url 'oidc_logout' %}" class="text-sm text-slate-400 hover:text-violet-400 dark:text-gray-400 dark:hover:text-violet-400 transition">Sign Out</a>
+        <div class="flex items-center gap-2 font-mono">
+          <a href="{% if user_profile_url %}{{ user_profile_url }}{% elif user_npub %}{% url 'profile' npub=user_npub %}{% else %}{% url 'dashboard' %}{% endif %}"
+             class="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 transition group shadow-sm"
+             title="View My Sovereign Profile">
+            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" title="Sovereign Key Active"></span>
+            <span class="max-w-[120px] sm:max-w-[180px] truncate font-medium">
+              {% if user_handle %}@{{ user_handle }}{% else %}{{ user.username|default:request.user.username|truncatechars:18 }}{% endif %}
+            </span>
+            <span class="text-[10px] text-slate-400 group-hover:text-violet-400">↗</span>
+          </a>
+          <a href="{% url 'dashboard' %}" class="text-xs text-slate-400 hover:text-violet-400 hidden sm:inline transition" title="Edit Profile & Settings">
+            [ ⚙️ Edit ]
+          </a>
+          <a href="{% url 'oidc_logout' %}" class="text-xs text-slate-400 hover:text-rose-400 transition ml-1">Sign Out</a>
+        </div>
       {% else %}
-        <span class="flex items-center gap-1.5 text-xs text-slate-400 dark:text-gray-500">
-          <span class="w-2 h-2 rounded-full bg-amber-500 inline-block" title="Sovereign Key Required"></span>
-          <span class="hidden sm:inline italic">Sovereign Key Required</span>
-        </span>
-        <a href="{% url 'oidc_authentication_init' %}" class="text-sm text-violet-400 hover:text-violet-300 font-medium transition">Sign In</a>
+        <a href="{% url 'oidc_authentication_init' %}" class="text-xs uppercase tracking-wider font-semibold text-violet-600 hover:text-violet-500 dark:text-violet-400 transition-colors">
+          Sign In
+        </a>
       {% endif %}
+
 
       <button id="theme-toggle" type="button" class="text-slate-400 hover:text-violet-400 dark:text-gray-400 dark:hover:text-violet-400 transition focus:outline-none" aria-label="Toggle theme">
         <svg id="icon-sun" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">

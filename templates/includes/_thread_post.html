@@ -1,110 +1,248 @@
 {% load static %}
-{# Shared post renderer for threaded feed. #}
-{# Usage: {% include "includes/_thread_post.html" with note=note show_thread_border=False %} #}
-{# Expected: note dict with id, kind, pubkey, npub, content, created_at, tags, author_name, author_avatar, reactions, replies, reply_count #}
-<div class="flex items-start gap-4">
-    <div class="flex-shrink-0">
-        {% if note.author_avatar %}
-        <a href="{% url 'profile' npub=note.npub %}"><img src="{{ note.author_avatar }}" alt="{{ note.author_name }}" class="w-10 h-10 rounded-full object-cover hover:ring-2 hover:ring-indigo-300" /></a>
+<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="{{ note.id }}">
+  <!-- Author Avatar -->
+  <div class="flex-shrink-0">
+    {% if note.author_avatar %}
+    <a href="{% url 'profile' npub=note.npub %}">
+      <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}"
+           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition" />
+    </a>
+    {% else %}
+    <a href="{% url 'profile' npub=note.npub %}">
+      <div class="w-10 h-10 bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center border border-violet-200 dark:border-violet-800">
+        <span class="text-violet-600 dark:text-violet-400 font-mono text-sm font-bold">{{ note.author_name|default:"N"|first|upper }}</span>
+      </div>
+    </a>
+    {% endif %}
+  </div>
+
+  <!-- Note Body Container -->
+  <div class="flex-1 min-w-0">
+    <!-- Header: Author Metadata, Badges & Kebab Dropdown -->
+    <div class="flex items-center justify-between gap-2 mb-1.5">
+      <div class="flex items-center gap-2 flex-wrap min-w-0">
+        <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 truncate">
+          {{ note.author_name|default:note.npub|truncatechars:16 }}
+        </a>
+
+        <!-- NIP-05 Badge -->
+        {% if note.nip05 %}
+        <span class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 rounded border border-violet-200 dark:border-violet-800/60" title="{{ note.nip05 }}">
+          <svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+          {{ note.nip05 }}
+        </span>
+        {% elif note.author_did %}
+        <!-- Sovereign DID -->
+        <span class="font-mono text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[120px]" title="{{ note.author_did }}">
+          {{ note.author_did|truncatechars:14 }}
+        </span>
         {% else %}
-        <a href="{% url 'profile' npub=note.npub %}"><div class="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center hover:ring-2 hover:ring-indigo-300">
-            <span class="text-indigo-600 font-mono text-sm">{{ note.author_name|default:"N"|first|upper }}</span>
-        </div></a>
+        <!-- Shortened External npub -->
+        <span class="font-mono text-[10px] text-slate-400 dark:text-slate-500" title="{{ note.npub }}">
+          {{ note.npub|truncatechars:12 }}
+        </span>
         {% endif %}
+
+        <!-- Dynamic Trust Lens Slot (No static green pill) -->
+        <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
+
+        <!-- Sovereign Storage Badge for Kind 1063 Media -->
+        {% if note.kind == 1063 and note.is_sovereign %}
+        <span class="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] font-mono px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-700">Sovereign</span>
+        {% endif %}
+      </div>
+
+      <!-- Right Header Actions: Relative Timestamp & Kebab Dropdown -->
+      <div class="flex items-center gap-2">
+        <a href="{% url 'feed' %}?thread={{ note.id }}" 
+           class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition"
+           title="View full conversation thread">
+          {{ note.created_at|date:"M j, H:i" }}
+        </a>
+
+        <div class="relative kebab-menu-wrap">
+          <button type="button" class="kebab-toggle-btn text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Post actions" onclick="toggleKebabMenu(event)">
+            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path></svg>
+          </button>
+
+          <div class="kebab-dropdown hidden absolute right-0 top-full mt-1 w-52 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl py-1 text-xs font-mono z-40">
+            <button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-950/50 hover:text-violet-600 dark:hover:text-violet-400 flex items-center gap-2" onclick="suggestToDev('{{ note.id }}', '{{ note.pubkey }}', '{{ note.content|truncatechars:100|escapejs }}')">
+              💡 Suggest to Dev
+            </button>
+            <button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/50 hover:text-amber-600 dark:hover:text-amber-400 flex items-center gap-2" onclick="nominatePostOfTheDay('{{ note.id }}', '{{ note.pubkey }}')">
+              🏆 Post of the Day
+            </button>
+            <button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-2" onclick="setEnclavePetname('{{ note.pubkey }}', '{{ note.author_name|default:''|escapejs }}')">
+              🛡️ Set Enclave Petname
+            </button>
+            <div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>
+            <button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="viewRawEventJson('{{ note.id }}')">
+              📄 View Raw JSON
+            </button>
+            <button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="copyNotePermalink('{{ note.id }}')">
+              🔗 Copy Event ID / Link
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
-    <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2 mb-2 flex-wrap">
-            <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-gray-900 hover:text-indigo-600">{{ note.author_name|default:note.npub|default:note.pubkey|truncatechars:12 }}</a>
-            {% if note.author_did %}
-            <span class="trust-lens-target font-mono text-[11px] text-slate-400 dark:text-slate-500" data-trust-did="{{ note.author_did }}" title="{{ note.author_did }}">
-                {{ note.author_did|truncatechars:16 }}
-            </span>
-            {% endif %}
-            <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
 
-            {% if note.kind == 1 %}
-            <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
-            {% elif note.kind == 1063 %}
-                {% if note.is_sovereign %}
-                <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Sovereign</span>
-                {% else %}
-                <span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>
-                {% endif %}
-            {% elif note.kind == 1111 %}
-            <span class="bg-gray-100 text-gray-600 text-xs font-medium px-2 py-0.5 rounded-full">Reply</span>
-            {% elif note.kind == 30023 %}
-            <span class="bg-amber-100 text-amber-800 text-xs font-medium px-2 py-0.5 rounded-full">Poll</span>
-            {% endif %}
-            <span class="text-xs text-gray-500">{{ note.created_at|date:"Y-m-d H:i" }}</span>
-        </div>
-
-        {# --- Content by kind --- #}
-        {% if note.kind == 1 %}
-        <p class="text-gray-700 whitespace-pre-wrap">{{ note.content|linebreaksbr }}</p>
-        {% endif %}
-
-        {% if note.kind == 1063 %}
-        {% with mime=note.mime_type|default:"" %}
-        {% if "image" in mime %}
-        <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
-            <img src="{{ note.file_url }}" alt="{{ note.alt_text|default:note.content }}" class="w-full h-auto max-h-96 object-contain" loading="lazy" />
-        </div>
-        {% elif "video" in mime %}
-        <div class="mb-3 rounded-lg overflow-hidden bg-gray-100">
-            <video src="{{ note.file_url }}" controls class="w-full max-h-96" preload="metadata">Your browser does not support the video tag.</video>
-        </div>
-        {% elif "audio" in mime %}
-        <div class="mb-3">
-            <audio src="{{ note.file_url }}" controls class="w-full" preload="metadata">Your browser does not support the audio tag.</audio>
-        </div>
-        {% elif note.file_url %}
-        <div class="mb-3 p-4 bg-gray-50 rounded-lg border border-gray-200">
-            <a href="{{ note.file_url }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 underline break-all">📎 {{ note.file_url }}</a>
-        </div>
-        {% endif %}
-        {% endwith %}
-        {% if note.content %}
-        <p class="text-gray-700 whitespace-pre-wrap mb-2">{{ note.content }}</p>
-        {% endif %}
-        {% endif %}
-
-        {% if note.kind == 30023 %}
-        <p class="text-gray-900 font-medium mb-3">{{ note.content }}</p>
-        {% if user_pubkey %}
-        <form class="poll-vote-form" data-poll-id="{{ note.id }}">
-            {% csrf_token %}
-            <div class="space-y-2">
-                {% for option in note.poll_options %}
-                <label class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">
-                    <input type="radio" name="selection" value="{{ option }}" class="accent-amber-600">
-                    <span class="text-sm text-gray-700">{{ option }}</span>
-                </label>
-                {% endfor %}
-            </div>
-            <button type="submit" class="mt-3 bg-amber-600 hover:bg-amber-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Cast Vote</button>
-        </form>
-        {% else %}
-        <div class="space-y-2 opacity-60">
-            {% for option in note.poll_options %}
-            <div class="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
-                <span class="w-4 h-4 rounded-full border-2 border-gray-300 inline-block"></span>
-                <span class="text-sm text-gray-500">{{ option }}</span>
-            </div>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% endif %}
-
-        {# --- Reactions bar --- #}
-        {% if note.reactions or note.reply_count %}
-        <div class="flex items-center gap-4 mt-3 pt-3 border-t border-gray-100">
-            {% if note.reactions %}
-            <span class="flex items-center gap-1 text-sm text-pink-600">❤️ {{ note.reactions|length }}</span>
-            {% endif %}
-            {% if note.reply_count %}
-            <span class="flex items-center gap-1 text-sm text-indigo-600 font-medium">💬 {{ note.reply_count }}</span>
-            {% endif %}
-        </div>
-        {% endif %}
+    <!-- Replying to Subheader (if reply) -->
+    {% if note.parent_id %}
+    <div class="text-xs font-mono text-slate-400 dark:text-slate-500 mb-1 flex items-center gap-1">
+      <span>↳ Replying to</span>
+      <a href="{% if note.reply_to_npub %}{% url 'profile' npub=note.reply_to_npub %}{% else %}{% url 'feed' %}?thread={{ note.parent_id }}{% endif %}" 
+         class="text-violet-600 dark:text-violet-400 hover:underline">
+        @{{ note.reply_to_name|default:note.reply_to_npub|default:note.parent_id|truncatechars:14 }}
+      </a>
     </div>
+    {% endif %}
+
+    <!-- Content Body -->
+    {% if note.display_content %}
+    <div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
+      {{ note.display_content|linebreaksbr }}
+    </div>
+    {% elif note.content and not note.media_attachments %}
+    <div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
+      {{ note.content|linebreaksbr }}
+    </div>
+    {% endif %}
+
+    <!-- Inline Media Attachments (Images, Video, Audio) -->
+    {% if note.media_attachments %}
+    <div class="mt-3 space-y-2">
+      {% for media in note.media_attachments %}
+        {% if media.type == 'image' %}
+        <div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/20 max-h-[500px]">
+          <img src="{{ media.url }}" 
+               alt="{{ media.alt|default:'Attached visual' }}" 
+               loading="lazy" 
+               class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" 
+               onclick="window.open('{{ media.url }}', '_blank')" />
+        </div>
+        {% elif media.type == 'video' %}
+        <div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-h-[500px]">
+          <video src="{{ media.url }}" 
+                 controls 
+                 playsinline 
+                 preload="metadata" 
+                 class="w-full max-h-[500px]"></video>
+        </div>
+        {% elif media.type == 'audio' %}
+        <div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center gap-3">
+          <span class="text-xl">🎵</span>
+          <audio src="{{ media.url }}" controls class="w-full"></audio>
+        </div>
+        {% elif media.url %}
+        <div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60">
+          <a href="{{ media.url }}" target="_blank" rel="noopener noreferrer" class="text-indigo-600 dark:text-violet-400 hover:underline break-all text-xs font-mono">📎 {{ media.url }}</a>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% elif note.kind == 1063 and note.media_url %}
+    <div class="mt-2.5 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 max-h-96 bg-gray-100 dark:bg-slate-900">
+      <img src="{{ note.media_url|default:note.file_url }}" alt="{{ note.alt_text|default:'Media attachment' }}" class="w-full h-full object-contain max-h-96" loading="lazy" />
+    </div>
+    {% endif %}
+
+
+    <!-- Kind 30023 Poll Rendering (if present) -->
+    {% if note.kind == 30023 and note.poll_options %}
+    <div class="mt-3">
+      {% if user_pubkey %}
+      <form class="poll-vote-form" data-poll-id="{{ note.id }}">
+        {% csrf_token %}
+        <div class="space-y-2">
+          {% for option in note.poll_options %}
+          <label class="flex items-center gap-3 p-2.5 border border-slate-200 dark:border-slate-700 rounded-lg cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors text-xs font-medium text-slate-800 dark:text-slate-200">
+            <input type="radio" name="selection" value="{{ option }}" class="accent-amber-600">
+            <span>{{ option }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <button type="submit" class="mt-2.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors">Cast Vote</button>
+      </form>
+      {% else %}
+      <div class="space-y-2 opacity-60">
+        {% for option in note.poll_options %}
+        <div class="flex items-center gap-3 p-2.5 border border-slate-200 dark:border-slate-700 rounded-lg bg-slate-50 dark:bg-slate-900 text-xs text-slate-600 dark:text-slate-400">
+          <span class="w-3.5 h-3.5 rounded-full border-2 border-slate-400 inline-block"></span>
+          <span>{{ option }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- 5-Button Action Bar -->
+    <div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">
+      <!-- 1. Reply Button -->
+      <button type="button" 
+              class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" 
+              onclick="showReplyEditor('{{ note.id }}')">
+        <span>💬</span>
+        <span class="action-count reply-count-label">
+          {% if note.reply_count and note.reply_count > 0 %}
+            {{ note.reply_count }}
+          {% else %}
+            Reply
+          {% endif %}
+        </span>
+      </button>
+
+
+
+      <!-- 2. Repost / Boost -->
+      <button type="button" class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote('{{ note.id }}', '{{ note.pubkey }}')">
+        <span>🔁</span>
+        <span class="action-count repost-count-label">{% if note.repost_count %}{{ note.repost_count }}{% else %}Repost{% endif %}</span>
+      </button>
+
+      <!-- 3. Like / Heart -->
+      <button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote('{{ note.id }}', '{{ note.pubkey }}')">
+        <span class="heart-icon">❤️</span>
+        <span class="action-count like-count-label">{% if note.reactions %}{{ note.reactions|length }}{% else %}Like{% endif %}</span>
+      </button>
+
+      <!-- 4. Contextual Vote / Fund -->
+      {% if note.kind == 30023 or note.is_proposal or note.lud16 %}
+      <button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction('{{ note.id }}', '{{ note.kind }}', '{{ note.lud16|default:'' }}')">
+        <span>{% if note.kind == 30023 or note.is_proposal %}🗳️ Vote{% else %}⚡ Tip{% endif %}</span>
+      </button>
+      {% endif %}
+
+      <!-- 5. Share Permalink -->
+      <button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote('{{ note.id }}')">
+        <span>↗️</span>
+        <span class="hidden sm:inline">Share</span>
+      </button>
+    </div>
+
+    <!-- Inline Reply Drawer Container (Hidden by default) -->
+    <div id="reply-box-{{ note.id }}" class="hidden mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
+      <div class="flex items-start gap-2.5">
+        <textarea id="reply-input-{{ note.id }}" 
+                  class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" 
+                  rows="2" 
+                  placeholder="Write a sovereign reply..."></textarea>
+        <div class="flex flex-col gap-1.5 flex-shrink-0">
+          <button type="button" 
+                  id="reply-btn-{{ note.id }}"
+                  class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-mono font-medium transition" 
+                  onclick="submitReply('{{ note.id }}', '{{ note.pubkey }}')">
+            Reply
+          </button>
+          <button type="button" 
+                  class="px-3 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-mono transition" 
+                  onclick="cancelReply('{{ note.id }}')">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
+

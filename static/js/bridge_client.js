@@ -315,15 +315,17 @@
                 return;
             }
 
-            if (message.type === "signed_event" && this.pendingEvent) {
+            if (message.type === "signed_event") {
                 var signedEvent = message.event;
-                this.pendingEvent.id = signedEvent.id;
-                this.pendingEvent.sig = signedEvent.sig;
-
+                if (this.pendingEvent && signedEvent) {
+                    this.pendingEvent.id = signedEvent.id;
+                    this.pendingEvent.sig = signedEvent.sig;
+                }
                 if (this._onMessage) {
-                    this._onMessage(this.pendingEvent, signedEvent);
+                    this._onMessage(this.pendingEvent || signedEvent, signedEvent);
                 }
             }
+
         } catch (err) {
             console.error("Error handling Tauri message:", err);
             showToast("Error processing bridge response.", true);
@@ -493,22 +495,34 @@
 
     // ---------- Tab Switching ----------
 
-    function switchTab(name) {
-        document.querySelectorAll(".tab-panel").forEach(function (el) {
-            el.classList.add("hidden");
+    function switchTab(tabName) {
+        var validTabs = ["profile", "deck", "settings", "account"];
+        if (validTabs.indexOf(tabName) === -1) tabName = "profile";
+
+        document.querySelectorAll(".tab-panel").forEach(function (panel) {
+            panel.classList.toggle("hidden", panel.id !== ("tab-" + tabName));
         });
-        var panel = document.getElementById("tab-" + name);
-        if (panel) panel.classList.remove("hidden");
+
         document.querySelectorAll(".tab-btn").forEach(function (btn) {
-            btn.classList.remove("text-indigo-600", "border-indigo-600");
-            btn.classList.add("text-gray-500", "border-transparent");
+            var isActive = btn.dataset.tab === tabName;
+            btn.classList.toggle("border-violet-600", isActive);
+            btn.classList.toggle("text-violet-600", isActive);
+            btn.classList.toggle("dark:text-violet-400", isActive);
+            btn.classList.toggle("font-bold", isActive);
+            btn.classList.toggle("border-transparent", !isActive);
+            btn.classList.toggle("text-slate-500", !isActive);
         });
-        var active = document.querySelector('.tab-btn[data-tab="' + name + '"]');
-        if (active) {
-            active.classList.remove("text-gray-500", "border-transparent");
-            active.classList.add("text-indigo-600", "border-indigo-600");
+
+        if (window.history && window.history.replaceState) {
+            window.history.replaceState(null, null, "#" + tabName);
+        } else {
+            window.location.hash = "#" + tabName;
         }
+        try {
+            localStorage.setItem("wun_dashboard_active_tab", tabName);
+        } catch (e) { /* ignore */ }
     }
+
 
     // ---------- Public API ----------
 

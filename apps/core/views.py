@@ -51,6 +51,19 @@ from .utils import validate_external_bio_url, verify_external_profile_token
 UserModel = get_user_model()
 
 
+def get_relays_for_request(request=None):
+    """Retrieve default relays, omitting unencrypted ws:// if request is served over HTTPS."""
+    relays = DEFAULT_RELAYS
+    if request and hasattr(request, "session"):
+        relays = request.session.get("relays", DEFAULT_RELAYS)
+
+    if request:
+        is_https = request.is_secure() or request.META.get("HTTP_X_FORWARDED_PROTO") == "https"
+        if is_https:
+            relays = [r for r in relays if not r.startswith("ws://")]
+    return relays
+
+
 def home(request):
     return redirect("feed")
 
@@ -59,7 +72,7 @@ def home(request):
 def dashboard(request):
     user_pubkey = did_to_pubkey(request.user.username)
     user_npub = did_to_npub(request.user.username)
-    relays = request.session.get("relays", DEFAULT_RELAYS)
+    relays = get_relays_for_request(request)
     profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
     deck = UserLinkDeck.objects.filter(user=request.user).first()
     return render(request, "dashboard.html", {
@@ -80,7 +93,7 @@ class FeedView(TemplateView):
 
         user_pubkey = did_to_pubkey(self.request.user.username) if self.request.user.is_authenticated else None
         user_npub = did_to_npub(self.request.user.username) if self.request.user.is_authenticated else None
-        relays = self.request.session.get("relays", DEFAULT_RELAYS)
+        relays = get_relays_for_request(self.request)
 
         context["user_pubkey"] = user_pubkey
         context["user_npub"] = user_npub
@@ -88,32 +101,58 @@ class FeedView(TemplateView):
         context["relays_json"] = json.dumps(relays)
         context["user_credentials"] = {}
 
-        thread_id = self.request.GET.get("thread")
+
+        thread_id = self.request.GET.get("thread") or self.request.GET.get("note") or self.request.GET.get("e")
         context["thread_id"] = thread_id
 
         if thread_id:
             thread_data = fetch_thread(thread_id, relay_urls=relays)
             context["thread_mode"] = True
             context["feed_mode"] = "thread"
-            context["notes"] = thread_data["roots"]
-            context["thread_replies"] = thread_data["replies"]
-            context["thread_reply_count"] = thread_data["total_replies"]
+            context["thread_root"] = thread_data.get("thread_root") or {}
+            context["ancestors"] = thread_data.get("ancestors", [])
+            context["notes"] = []  # Empty so flat feed loop never executes in thread mode
+            context["thread_replies"] = thread_data.get("replies", {})
+            context["thread_reply_count"] = thread_data.get("total_replies", 0)
+            context["oldest_timestamp"] = None
         else:
-            mode = self.request.GET.get("mode", "network")
-            context["feed_mode"] = mode
+            circle = self.request.GET.get("circle") or self.request.GET.get("mode") or "global"
+            context["feed_mode"] = circle
+            context["feed_circle"] = circle
 
-            if mode == "network" and user_pubkey:
+            if circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
                 if contacts:
                     feed_data = fetch_unified_feed(authors=contacts, relay_urls=relays)
                 else:
                     feed_data = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
+            elif circle in ("following", "network") and not user_pubkey:
+                feed_data = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
             else:
                 feed_data = fetch_unified_feed(relay_urls=relays)
 
-            context["notes"] = feed_data["roots"]
+
+            notes = feed_data["roots"]
+            notes = attach_reply_counts(notes, relay_urls=relays)
+            timestamps = []
+            for n in notes:
+                ts = n.get("created_at")
+                if isinstance(ts, datetime):
+                    epoch = int(ts.timestamp())
+                elif isinstance(ts, (int, float)):
+                    epoch = int(ts)
+                else:
+                    epoch = None
+                if epoch is not None:
+                    n["created_at_epoch"] = epoch
+                    timestamps.append(epoch)
+
+            context["notes"] = notes
             context["thread_replies"] = feed_data["replies"]
             context["thread_reply_count"] = feed_data["total_replies"]
+            context["oldest_timestamp"] = min(timestamps) if timestamps else None
+
+
 
         return context
 
@@ -135,28 +174,44 @@ class ChatView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        user_pubkey = did_to_pubkey(self.request.user.username)
+        is_auth = self.request.user.is_authenticated
+        user_pubkey = did_to_pubkey(self.request.user.username) if is_auth else ""
         context["user_pubkey"] = user_pubkey
-        context["user_did"] = self.request.user.username
+        context["user_did"] = self.request.user.username if is_auth else ""
 
-        level = settings.WUN_USER_LEVEL
+        level = getattr(settings, "WUN_USER_LEVEL", "2")
         context["user_level"] = level
         if level == "1":
-            context["xmpp_domain"] = "iyou.me"
-            context["xmpp_ws_url"] = "wss://xmpp.iyou.me:5222/xmpp-websocket"
+            xmpp_domain = "iyou.me"
+            xmpp_ws_url = "wss://xmpp.iyou.me:5222/xmpp-websocket"
         else:
-            context["xmpp_domain"] = "127.0.0.1"
-            context["xmpp_ws_url"] = "wss://home.iyou.me:5222/xmpp-websocket"
+            xmpp_domain = "127.0.0.1"
+            xmpp_ws_url = "wss://home.iyou.me:5222/xmpp-websocket"
 
-        context["xmpp_password"] = settings.XMPP_PASSWORD or user_pubkey
+        context["xmpp_domain"] = xmpp_domain
+        context["xmpp_ws_url"] = xmpp_ws_url
+        context["xmpp_bosh_url"] = getattr(settings, "XMPP_BOSH_URL", "")
+
+        user_jid = ""
+        if user_pubkey:
+            user_jid = f"{user_pubkey}@{xmpp_domain}"
+        elif is_auth and self.request.user.username:
+            user_jid = f"{self.request.user.username}@{xmpp_domain}"
+
+        xmpp_token = getattr(settings, "XMPP_PASSWORD", "") or user_pubkey
+        context["user_jid"] = user_jid
+        context["xmpp_token"] = xmpp_token
+        context["xmpp_password"] = xmpp_token
         return context
+
+
 
 
 @login_required
 @csrf_exempt
 def api_relays(request):
     if request.method == 'GET':
-        relays = request.session.get('relays', DEFAULT_RELAYS)
+        relays = get_relays_for_request(request)
         return JsonResponse({'relays': relays})
     data = json.loads(request.body)
     relays = data.get('relays', DEFAULT_RELAYS)
@@ -164,36 +219,66 @@ def api_relays(request):
     return JsonResponse({'relays': relays})
 
 
-@login_required
 def api_feed(request):
-    until = request.GET.get('until')
-    mode = request.GET.get('mode', 'network')
-    limit = 30
+    mode = request.GET.get("mode", "")
+    circle = request.GET.get("circle") or mode or "global"
+    until = request.GET.get("until")
+    limit = request.GET.get("limit", 25)
+    tag = request.GET.get("tag")
 
-    user_pubkey = did_to_pubkey(request.user.username)
-    relays = request.session.get('relays', DEFAULT_RELAYS)
+    try:
+        limit = int(limit)
+    except (ValueError, TypeError):
+        limit = 25
+
+    user_pubkey = did_to_pubkey(request.user.username) if (request.user and request.user.is_authenticated) else None
+    relays = get_relays_for_request(request)
+
 
     filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
     if until:
-        filter_obj["until"] = int(until)
+        try:
+            filter_obj["until"] = int(until)
+        except (ValueError, TypeError):
+            pass
 
-    if mode == "network" and user_pubkey:
+    if tag:
+        clean_tag = tag.lstrip("#")
+        filter_obj["#t"] = [clean_tag]
+
+    if circle in ("following", "network") and user_pubkey:
         contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
         if contacts:
             filter_obj["authors"] = contacts
         else:
             filter_obj["authors"] = CURATED_AUTHORS
+    elif circle in ("following", "network") and not user_pubkey:
+        filter_obj["authors"] = CURATED_AUTHORS
 
     raw_events = relay_req(filter_obj, relay_urls=relays)
+
+    # Multi-relay event deduplication by ID
+    deduped_events = {}
+    if isinstance(raw_events, dict):
+        for eid, e in raw_events.items():
+            real_id = e.get("id") or eid
+            if real_id and real_id not in deduped_events:
+                deduped_events[real_id] = e
+    elif isinstance(raw_events, list):
+        for e in raw_events:
+            real_id = e.get("id")
+            if real_id and real_id not in deduped_events:
+                deduped_events[real_id] = e
+    raw_events = deduped_events
 
     pubkeys = set()
     for e in raw_events.values():
         pk = e.get("pubkey")
         if pk:
             pubkeys.add(pk)
-        for tag in e.get("tags", []):
-            if tag and tag[0] == "p" and len(tag) > 1:
-                pubkeys.add(tag[1])
+        for t in e.get("tags", []):
+            if t and t[0] == "p" and len(t) > 1:
+                pubkeys.add(t[1])
 
     profiles = {}
     if pubkeys:
@@ -205,20 +290,61 @@ def api_feed(request):
             pk = e.get("pubkey", "")
             try:
                 profiles[pk] = json.loads(e.get("content", "{}"))
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 profiles[pk] = {}
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data["roots"] = attach_reply_counts(feed_data["roots"], relay_urls=relays)
+
 
     def _serialize(note):
         result = dict(note)
-        result["created_at"] = note["created_at"].timestamp()
+        dt = note.get("created_at")
+        if isinstance(dt, datetime):
+            epoch = int(dt.timestamp())
+            formatted_date = dt.strftime("%b %d, %H:%M")
+            iso_date = dt.isoformat()
+        elif isinstance(dt, (int, float)):
+            epoch = int(dt)
+            dt_obj = datetime.fromtimestamp(epoch)
+            formatted_date = dt_obj.strftime("%b %d, %H:%M")
+            iso_date = dt_obj.isoformat()
+        else:
+            epoch = 0
+            formatted_date = ""
+            iso_date = ""
+
+        result["created_at"] = epoch
+        result["created_at_epoch"] = epoch
+        result["created_at_formatted"] = formatted_date
+        result["created_at_iso"] = iso_date
+
+        result["pubkey_hex"] = note.get("pubkey_hex") or note.get("pubkey") or ""
+        result["author_did"] = note.get("author_did") or ""
+        result["is_sovereign"] = note.get("is_sovereign", False)
+        result["nip05"] = note.get("nip05") or ""
+        result["author_name"] = note.get("author_name") or ""
+        result["author_avatar"] = note.get("author_avatar") or ""
+        result["display_content"] = note.get("display_content", note.get("content", ""))
+        result["media_attachments"] = [dict(m) for m in note.get("media_attachments", [])]
+        result["media_url"] = note.get("media_url") or note.get("file_url") or ""
+        result["mime_type"] = note.get("mime_type") or ""
+        result["parent_id"] = note.get("parent_id") or ""
+        result["reply_to_name"] = note.get("reply_to_name") or ""
+        result["reply_to_npub"] = note.get("reply_to_npub") or ""
+        result["repost_count"] = note.get("repost_count", 0)
+
         if note.get("votes"):
             result["votes"] = [dict(v) for v in note["votes"]]
         if note.get("reactions"):
             result["reactions"] = [{"id": r["id"], "pubkey": r["pubkey"], "content": r["content"]} for r in note["reactions"]]
+        else:
+            result["reactions"] = []
         if note.get("replies"):
             result["replies"] = [_serialize(r) for r in note["replies"]]
+            result["reply_count"] = note.get("reply_count", 0)
+        else:
+            result["replies"] = []
             result["reply_count"] = note.get("reply_count", 0)
         return result
 
@@ -229,10 +355,84 @@ def api_feed(request):
     for pid, replies in feed_data.get("replies", {}).items():
         replies_serialized[pid] = [_serialize(r) for r in replies]
 
+    oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
+    has_more = bool(roots and len(roots) > 0)
+
     return JsonResponse({
+        "success": True,
         "notes": roots,
         "replies": replies_serialized,
         "total_replies": feed_data["total_replies"],
+        "oldest_timestamp": oldest_timestamp,
+        "has_more": has_more,
+    })
+
+
+def api_save_profile(request):
+    """Server-side profile save fallback endpoint for browser sessions."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    if not request.user.is_authenticated:
+        return JsonResponse({"error": "Authentication required"}, status=401)
+
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, TypeError):
+        data = request.POST.dict()
+
+    name = data.get("name") or data.get("display_name", "")
+    about = data.get("about", "")
+    picture = data.get("picture", "")
+    banner = data.get("banner", "")
+    nip05 = data.get("nip05", "")
+    lud16 = data.get("lud16", "")
+
+    deck = UserLinkDeck.objects.filter(user=request.user).first()
+    if deck:
+        if name:
+            deck.display_name = name[:100]
+        if about is not None:
+            deck.headline = about[:160]
+        if picture is not None:
+            deck.avatar_url = picture[:2048]
+        if banner is not None:
+            deck.banner_url = banner[:2048]
+        if nip05 is not None:
+            deck.nip05 = nip05[:300]
+        if lud16 is not None:
+            deck.lud16 = lud16[:300]
+        deck.save(update_fields=["display_name", "headline", "avatar_url", "banner_url", "nip05", "lud16"])
+    else:
+        # Create deck if not exists with a safe default handle
+        default_handle = request.user.username.split(":")[-1][:32] or "user"
+        clean_handle = re.sub(r"[^a-z0-9_-]", "", default_handle.lower()) or "user"
+        deck = UserLinkDeck.objects.create(
+            user=request.user,
+            handle=clean_handle[:32],
+            display_name=name[:100],
+            headline=about[:160],
+            avatar_url=picture[:2048],
+            banner_url=banner[:2048],
+            nip05=nip05[:300],
+            lud16=lud16[:300],
+        )
+
+    profile_data = {
+        "name": deck.display_name or deck.handle or name,
+        "display_name": deck.display_name or name,
+        "about": deck.headline or about,
+        "picture": deck.avatar_url or picture,
+        "banner": deck.banner_url or banner,
+        "nip05": deck.nip05 or nip05,
+        "lud16": deck.lud16 or lud16,
+    }
+    request.session["user_profile_cache"] = profile_data
+
+    return JsonResponse({
+        "success": True,
+        "message": "Profile saved successfully.",
+        "profile": profile_data,
     })
 
 
@@ -257,24 +457,64 @@ def npub_to_hex(npub_str):
         return None
 
 
-
 def fetch_profile_data(hex_pubkey, relay_urls=None):
-    """Fetch Kind 0 profile metadata for a pubkey."""
-    events = relay_req({"kinds": [0], "authors": [hex_pubkey], "limit": 1}, relay_urls=relay_urls)
-    for e in events.values():
-        try:
-            content = json.loads(e.get("content", "{}"))
-        except (json.JSONDecodeError, TypeError):
-            content = {}
-        return {
-            "name": content.get("display_name") or content.get("name", ""),
-            "about": content.get("about", ""),
-            "picture": content.get("picture", ""),
-            "banner": content.get("banner", ""),
-            "nip05": content.get("nip05", ""),
-            "lud16": content.get("lud16", ""),
+    """Fetch Kind 0 profile metadata for a pubkey across relays, picking latest, sanitizing URLs, and resolving local UserLinkDeck."""
+    from .nip10 import sanitize_media_url
+
+    # 1. Resolve local UserLinkDeck baseline if available
+    local_deck = None
+    if hex_pubkey:
+        for deck in UserLinkDeck.objects.select_related("user").all():
+            if did_to_pubkey(deck.user.username) == hex_pubkey or deck.user.username == hex_pubkey:
+                local_deck = deck
+                break
+
+    profile = {}
+    if local_deck:
+        profile = {
+            "name": getattr(local_deck, "display_name", "") or local_deck.handle or "",
+            "display_name": getattr(local_deck, "display_name", "") or "",
+            "about": local_deck.headline or "",
+            "picture": sanitize_media_url(getattr(local_deck, "avatar_url", "")) if getattr(local_deck, "avatar_url", "") else "",
+            "banner": sanitize_media_url(getattr(local_deck, "banner_url", "")) if getattr(local_deck, "banner_url", "") else "",
+            "nip05": getattr(local_deck, "nip05", "") or "",
+            "lud16": getattr(local_deck, "lud16", "") or "",
         }
-    return {}
+
+    # 2. Query relays for Kind 0 metadata events
+    events = relay_req({"kinds": [0], "authors": [hex_pubkey], "limit": 5}, relay_urls=relay_urls) if hex_pubkey else {}
+    if not events:
+        return profile
+
+    raw_list = list(events.values()) if isinstance(events, dict) else (events if isinstance(events, list) else [])
+    k0_events = [e for e in raw_list if e.get("kind") == 0]
+    candidate_list = k0_events if k0_events else raw_list
+    latest_event = max(candidate_list, key=lambda e: e.get("created_at", 0)) if candidate_list else {}
+
+    try:
+        content = json.loads(latest_event.get("content", "{}"))
+    except (json.JSONDecodeError, TypeError):
+        content = {}
+
+    if content:
+        name = content.get("display_name") or content.get("name", "")
+        if name or not profile.get("name"):
+            profile["name"] = name or profile.get("name", "")
+            profile["display_name"] = content.get("display_name") or name or profile.get("display_name", "")
+        if content.get("about"):
+            profile["about"] = content.get("about")
+        if content.get("picture"):
+            profile["picture"] = sanitize_media_url(content.get("picture"))
+        if content.get("banner"):
+            profile["banner"] = sanitize_media_url(content.get("banner"))
+        if content.get("nip05"):
+            profile["nip05"] = content.get("nip05")
+        if content.get("lud16"):
+            profile["lud16"] = content.get("lud16")
+
+    return profile
+
+
 
 
 MEDIA_CATEGORIES = {
@@ -318,17 +558,81 @@ def _extract_nip94_tags(tags):
     }
 
 
+def resolve_author_did(hex_pubkey):
+    """Resolve a Nostr hex pubkey to a registered sovereign User DID, or return empty string."""
+    if not hex_pubkey:
+        return ""
+    try:
+        from django.contrib.auth import get_user_model
+        UserModel = get_user_model()
+        for u in UserModel.objects.filter(username__startswith="did:").only("username").iterator():
+            if did_to_pubkey(u.username) == hex_pubkey:
+                return u.username
+    except Exception:
+        pass
+    return ""
+
+
+def _extract_display_title(content, summary="", alt_text=""):
+    """Extract a clean, human-readable display title from content, summary, or alt_text.
+
+    If content or summary is a JSON string (e.g. {"title": "...", "queryKey": "..."}),
+    safely parse the JSON and extract relevant title / caption keys without curly braces.
+    """
+    for candidate in (content, summary, alt_text):
+        if not candidate or not isinstance(candidate, str):
+            continue
+        trimmed = candidate.strip()
+        if trimmed.startswith("{") and trimmed.endswith("}"):
+            try:
+                data = json.loads(trimmed)
+                if isinstance(data, dict):
+                    extracted = (
+                        data.get("title")
+                        or data.get("caption")
+                        or data.get("text")
+                        or data.get("queryKey")
+                        or data.get("prompt")
+                        or data.get("alt")
+                        or data.get("description")
+                        or data.get("name")
+                    )
+                    if extracted and isinstance(extracted, str):
+                        return extracted.strip()
+            except (json.JSONDecodeError, TypeError):
+                pass
+        elif trimmed:
+            return trimmed
+    return ""
+
+
 def fetch_media_assets(authors=None, limit=50, relay_urls=None):
-    """Fetch only Kind 1063 media events, flat sorted list."""
+    """Fetch Kind 1063 media attachments and resolve Kind 0 profiles."""
     filter_obj = {"kinds": [1063], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
+
 
     raw_events = relay_req(filter_obj, relay_urls=relay_urls)
     if not raw_events:
         return []
 
+    # Multi-relay event deduplication by ID
+    deduped_events = {}
+    if isinstance(raw_events, dict):
+        for eid, e in raw_events.items():
+            real_id = e.get("id") or eid
+            if real_id and real_id not in deduped_events:
+                deduped_events[real_id] = e
+    elif isinstance(raw_events, list):
+        for e in raw_events:
+            real_id = e.get("id")
+            if real_id and real_id not in deduped_events:
+                deduped_events[real_id] = e
+    raw_events = deduped_events
+
     pubkeys = set()
+
     for e in raw_events.values():
         pk = e.get("pubkey")
         if pk:
@@ -350,32 +654,41 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
         pk = e.get("pubkey", "")
         npub_val = hex_to_npub(pk) if pk else ""
         profile = profiles.get(pk, {})
-        file_url = get_tag_value(tags, "url")
+        file_url = sanitize_media_url(get_tag_value(tags, "url"))
         nip94 = _extract_nip94_tags(tags)
+        raw_content = e.get("content", "")
+        alt_val = get_tag_value(tags, "alt") or get_tag_value(tags, "summary") or ""
+        display_title = _extract_display_title(raw_content, nip94["summary"], alt_val)
+
         note = {
             "id": e.get("id", ""),
             "kind": 1063,
             "pubkey": pk,
             "pubkey_hex": pk,
-            "author_did": f"did:iyou:0x{pk}" if pk else "",
+            "author_did": resolve_author_did(pk),
             "tags_json": json.dumps(tags),
             "npub": npub_val,
-            "content": e.get("content", ""),
+            "nip05": profile.get("nip05") or "",
+            "lud16": profile.get("lud16") or "",
+            "content": raw_content,
+            "display_title": display_title,
             "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
             "tags": tags,
             "file_url": file_url,
+            "media_url": file_url or "",
             "mime_type": get_tag_value(tags, "m"),
             "dimensions": get_tag_value(tags, "dim"),
-            "thumbnail_url": get_tag_value(tags, "thumb"),
-            "alt_text": get_tag_value(tags, "alt") or get_tag_value(tags, "summary") or "",
+            "thumbnail_url": sanitize_media_url(get_tag_value(tags, "thumb")),
+            "alt_text": alt_val,
             "is_sovereign": bool(file_url and "127.0.0.1" in file_url),
             "author_name": profile.get("display_name") or profile.get("name") or "",
-            "author_avatar": profile.get("picture", ""),
+            "author_avatar": sanitize_media_url(profile.get("picture", "")),
             "duration": nip94["duration"],
             "blossom_hash": nip94["blossom_hash"],
             "blurhash": nip94["blurhash"],
             "summary": nip94["summary"],
         }
+
         note["media_type"] = categorize_media(note)
         result.append(note)
 
@@ -383,9 +696,10 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
     return result[:limit]
 
 
+
 def fetch_text_notes(authors=None, limit=20, relay_urls=None):
-    """Fetch Kind 1 text notes for given authors, with profile enrichment."""
-    filter_obj = {"kinds": [1], "limit": limit}
+    """Fetch Kind 1 & 1063 notes for given authors, with profile and media enrichment."""
+    filter_obj = {"kinds": [1, 1063], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
 
@@ -409,45 +723,76 @@ def fetch_text_notes(authors=None, limit=20, relay_urls=None):
             except (json.JSONDecodeError, TypeError):
                 profiles[pk] = {}
 
+    from .nip10 import extract_media_from_note
+
     result = []
     for e in raw_events.values():
         pk = e.get("pubkey", "")
         npub_val = hex_to_npub(pk) if pk else ""
         profile = profiles.get(pk, {})
         tags = e.get("tags", [])
-        result.append({
+        note_dict = {
             "id": e.get("id", ""),
-            "kind": 1,
+            "kind": e.get("kind", 1),
             "pubkey": pk,
             "pubkey_hex": pk,
-            "author_did": f"did:iyou:0x{pk}" if pk else "",
+            "author_did": resolve_author_did(pk),
             "tags_json": json.dumps(tags),
             "npub": npub_val,
+            "nip05": profile.get("nip05") or "",
+            "lud16": profile.get("lud16") or "",
             "content": e.get("content", ""),
             "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
             "tags": tags,
             "author_name": profile.get("display_name") or profile.get("name") or "",
             "author_avatar": profile.get("picture", ""),
-        })
-
+        }
+        result.append(extract_media_from_note(note_dict))
 
     result.sort(key=lambda x: x["created_at"], reverse=True)
     return result[:limit]
 
 
-def fetch_thread(parent_id, relay_urls=None):
-    """Fetch a parent event and its replies, return threaded feed dict."""
-    parent_raw = relay_req({"ids": [parent_id], "limit": 1}, relay_urls=relay_urls)
-    if not parent_raw:
-        return {"roots": [], "replies": {}, "total_replies": 0, "flat": []}
 
-    comments_raw = relay_req({"#e": [parent_id], "kinds": [1111], "limit": 50}, relay_urls=relay_urls)
+def fetch_thread(thread_id, relay_urls=None):
+    """Fetch a target event (Hero), its ordered ancestor chain, and direct 1-level replies."""
+    from .nip10 import parse_nip10_tags
+
+
+    target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=relay_urls)
+    if not target_raw:
+        return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
+
+    target_event = list(target_raw.values())[0]
+    tags = target_event.get("tags", [])
+    root_id, parent_id, marker, mention_ids, _ = parse_nip10_tags(tags)
+
+    ancestor_ids = []
+    if parent_id and parent_id != thread_id:
+        ancestor_ids.append(parent_id)
+    if root_id and root_id != thread_id and root_id not in ancestor_ids:
+        ancestor_ids.insert(0, root_id)
+
+    ancestors_raw = {}
+    if ancestor_ids:
+        ancestors_raw = relay_req({"ids": ancestor_ids, "limit": len(ancestor_ids)}, relay_urls=relay_urls)
+
+    query_ids = [thread_id]
+    if root_id and root_id != thread_id:
+        query_ids.append(root_id)
+
+    descendants_raw = relay_req({"#e": query_ids, "kinds": [1, 1111], "limit": 100}, relay_urls=relay_urls)
+
+    combined = {**target_raw, **ancestors_raw, **descendants_raw}
 
     pubkeys = set()
-    for e in list(parent_raw.values()) + list(comments_raw.values()):
+    for e in combined.values():
         pk = e.get("pubkey")
         if pk:
             pubkeys.add(pk)
+        for tag in e.get("tags", []):
+            if tag and len(tag) > 1 and tag[0] == "p":
+                pubkeys.add(tag[1])
 
     profiles = {}
     if pubkeys:
@@ -459,8 +804,89 @@ def fetch_thread(parent_id, relay_urls=None):
             except (json.JSONDecodeError, TypeError):
                 profiles[pk] = {}
 
-    combined = {**parent_raw, **comments_raw}
-    return process_into_feed(combined, profiles, max_items=50)
+    from .nip10 import _enrich_root
+
+    all_enriched = {}
+    for eid, e in combined.items():
+        kind = e.get("kind", 1)
+        tags = e.get("tags", [])
+        root_id, parent_id, marker, mention_ids, reply_to_pubkey = parse_nip10_tags(tags)
+        all_enriched[eid] = _enrich_root(
+            e,
+            kind,
+            profiles,
+            datetime.fromtimestamp,
+            root_id=root_id or "",
+            parent_id=parent_id or root_id or "",
+            reply_to_pubkey=reply_to_pubkey or "",
+        )
+
+    # 1. Resolve Target Note (Hero)
+    thread_root = all_enriched.get(thread_id)
+    if not thread_root:
+        return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
+
+    # 2. Ancestor Resolution: Build strictly ordered list [grandparent, parent, ...]
+    ancestors = []
+    curr_id = thread_root.get("parent_id") or thread_root.get("root_id")
+    visited_ancestors = set()
+    while curr_id and curr_id not in visited_ancestors and curr_id != thread_id:
+        visited_ancestors.add(curr_id)
+        anc = all_enriched.get(curr_id)
+        if anc:
+            ancestors.insert(0, anc)
+            curr_id = anc.get("parent_id")
+            if not curr_id and anc.get("root_id") and anc.get("root_id") != anc.get("id"):
+                curr_id = anc.get("root_id")
+        else:
+            break
+
+    # 3. Direct Replies Only (1-Level Down)
+    direct_replies = []
+    parent_cite_counts = {}
+    for eid, note in all_enriched.items():
+        pid = note.get("parent_id")
+        if pid:
+            parent_cite_counts[pid] = parent_cite_counts.get(pid, 0) + 1
+
+    for eid, note in all_enriched.items():
+        if eid == thread_id:
+            continue
+        if any(a["id"] == eid for a in ancestors):
+            continue
+
+        p_id = note.get("parent_id")
+        r_id = note.get("root_id")
+
+        if p_id == thread_id or (not p_id and r_id == thread_id):
+            sub_count = parent_cite_counts.get(eid, 0)
+            note["reply_count"] = sub_count
+            direct_replies.append(note)
+
+    direct_replies.sort(key=lambda x: x["created_at"])
+    thread_root["replies"] = direct_replies
+    thread_root["reply_count"] = len(direct_replies)
+
+    return {
+        "thread_root": thread_root,
+        "ancestors": ancestors,
+        "roots": [thread_root],
+        "replies": {thread_id: direct_replies},
+        "total_replies": len(direct_replies),
+    }
+
+
+
+
+
+def sanitize_media_url(url):
+    """Ensure media attachments, Blossom assets, and avatars use HTTPS unless local."""
+    if not url:
+        return ""
+    url = str(url).strip()
+    if url.startswith("http://") and not ("127.0.0.1" in url or "localhost" in url):
+        return "https://" + url[7:]
+    return url
 
 
 def get_tag_value(tags, tag_name, index=1, default=""):
@@ -474,7 +900,16 @@ def get_tag_value(tags, tag_name, index=1, default=""):
     return default
 
 
-DEFAULT_RELAYS = ["wss://nos.lol", "wss://relay.iyou.me", "ws://127.0.0.1:9003"]
+DEFAULT_RELAYS = [
+    "wss://nos.lol",
+    "wss://relay.damus.io",
+    "wss://relay.primal.net",
+    "wss://relay.nostr.band",
+    "wss://relay.iyou.me",
+    "ws://127.0.0.1:9003",
+]
+
+
 
 CURATED_AUTHORS = [
     "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
@@ -568,6 +1003,23 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
 
     from .nip10 import build_thread_tree
     from datetime import datetime
+
+    # Normalize and deduplicate input raw_events
+    if isinstance(raw_events, list):
+        deduped_raw = {}
+        for e in raw_events:
+            if isinstance(e, dict) and e.get("id"):
+                if e["id"] not in deduped_raw:
+                    deduped_raw[e["id"]] = e
+        raw_events = deduped_raw
+    elif isinstance(raw_events, dict):
+        deduped_raw = {}
+        for eid, e in raw_events.items():
+            if isinstance(e, dict):
+                real_id = e.get("id") or eid
+                if real_id not in deduped_raw:
+                    deduped_raw[real_id] = e
+        raw_events = deduped_raw
 
     def _ts_to_dt(ts):
         if isinstance(ts, datetime):
@@ -666,11 +1118,23 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     for pid, replies in reply_map.items():
         if pid not in root_by_id:
             for reply_note in replies:
-                reply_note["reactions"] = []
-                reply_note["reply_count"] = 0
-                reply_note["replies"] = []
-                root_by_id[reply_note["id"]] = reply_note
-                roots.append(reply_note)
+                if reply_note["id"] not in root_by_id:
+                    reply_note["reactions"] = []
+                    reply_note["reply_count"] = 0
+                    reply_note["replies"] = []
+                    root_by_id[reply_note["id"]] = reply_note
+                    roots.append(reply_note)
+
+    # Deduplicate roots strictly by ID and ensure reply_count is set
+    seen_final_root_ids = set()
+    unique_roots = []
+    for r in roots:
+        if r["id"] not in seen_final_root_ids:
+            seen_final_root_ids.add(r["id"])
+            r["reply_count"] = r.get("reply_count") or len(r.get("replies", []))
+            unique_roots.append(r)
+    roots = unique_roots
+
 
     roots.sort(key=lambda x: x["created_at"], reverse=True)
 
@@ -682,7 +1146,46 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     }
 
 
+def attach_reply_counts(notes, relay_urls=None):
+    """
+    Given a list of note dictionaries, performs a single batch relay query
+    for all events tagging these notes in an 'e' tag, and sets note['reply_count'].
+    """
+    if not notes:
+        return notes
+
+    root_ids = [n["id"] for n in notes if n.get("id")]
+    if not root_ids:
+        return notes
+
+    relays = relay_urls or DEFAULT_RELAYS
+    filter_obj = {
+        "kinds": [1, 1111],
+        "#e": root_ids,
+        "limit": 500,
+    }
+
+    raw_events = relay_req(filter_obj, relay_urls=relays)
+    reply_events = list(raw_events.values()) if isinstance(raw_events, dict) else (raw_events if isinstance(raw_events, list) else [])
+
+    counts = {rid: 0 for rid in root_ids}
+    for event in reply_events:
+        for tag in event.get("tags", []):
+            if len(tag) >= 2 and tag[0] == "e":
+                target_id = tag[1]
+                if target_id in counts:
+                    counts[target_id] += 1
+
+    for note in notes:
+        nid = note.get("id")
+        existing_replies = len(note.get("replies", []))
+        note["reply_count"] = max(existing_replies, counts.get(nid, 0))
+
+    return notes
+
+
 def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
+
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
     Phase 1: Fetch kinds [1, 7, 1063, 1111] with optional authors filter.
@@ -735,8 +1238,9 @@ class GalleryView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         user_pubkey = did_to_pubkey(self.request.user.username) if self.request.user.is_authenticated else ""
-        relays = self.request.session.get("relays", DEFAULT_RELAYS)
+        relays = get_relays_for_request(self.request)
         context["user_pubkey"] = user_pubkey
+
         context["user_did"] = self.request.user.username if self.request.user.is_authenticated else ""
 
         filter_pubkey = self.request.GET.get("pubkey")
@@ -772,9 +1276,12 @@ class ProfileView(TemplateView):
         context = super().get_context_data(**kwargs)
         npub = kwargs.get("npub")
         hex_pubkey = npub_to_hex(npub)
+        target_npub = hex_to_npub(hex_pubkey) if hex_pubkey else npub
         context["hex_pubkey"] = hex_pubkey
+        context["target_pubkey_hex"] = hex_pubkey
         context["target_nostr_pubkey_hex"] = hex_pubkey
-        context["npub"] = hex_to_npub(hex_pubkey) if hex_pubkey else npub
+        context["npub"] = target_npub
+        context["target_npub"] = target_npub
 
         if not hex_pubkey:
             context["error"] = f"Invalid npub: {npub}"
@@ -783,35 +1290,121 @@ class ProfileView(TemplateView):
         profile = fetch_profile_data(hex_pubkey)
         context["profile"] = profile
 
-        broadcasts = fetch_text_notes(authors=[hex_pubkey])
-        context["broadcasts"] = broadcasts
-
-        media = fetch_media_assets(authors=[hex_pubkey])
-        context["media"] = media
-
-        sovereign_score = sum(1 for m in media if m.get("is_sovereign"))
-        context["sovereign_score"] = sovereign_score
-
+        # Owner resolution & UserLinkDeck
         owner_user = None
         for candidate in UserModel.objects.only("username").iterator():
             if did_to_pubkey(candidate.username) == hex_pubkey:
                 owner_user = candidate
                 break
+
+        author_did = owner_user.username if owner_user else ""
+        context["target_did"] = author_did
+        context["profile_did"] = author_did
+
+        is_owner = bool(
+            self.request.user.is_authenticated and (
+                self.request.user.username == author_did
+                or did_to_pubkey(self.request.user.username) == hex_pubkey
+            )
+        )
+        context["is_owner"] = is_owner
+
         owner_deck = getattr(owner_user, "link_deck", None) if owner_user else None
         context["owner_deck"] = owner_deck
+        context["link_deck"] = owner_deck
         context["deck_items"] = list(owner_deck.items.filter(is_active=True)) if owner_deck else []
-
-        target_did = owner_user.username if owner_user else ""
-        context["target_did"] = target_did
-        context["profile_did"] = target_did
         context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
+
         context["user_pubkey"] = (
             did_to_pubkey(self.request.user.username)
             if self.request.user.is_authenticated
             else ""
         )
 
+        # Author Activity Streams: query notes authored by this user
+        from .nip10 import parse_nip10_tags, _enrich_root
+        raw_events = relay_req({"kinds": [1, 1063, 1111, 30023], "authors": [hex_pubkey], "limit": 50})
+
+        deduped_events = {}
+        if isinstance(raw_events, dict):
+            for eid, e in raw_events.items():
+                real_id = e.get("id") or eid
+                if real_id and real_id not in deduped_events:
+                    deduped_events[real_id] = e
+        elif isinstance(raw_events, list):
+            for e in raw_events:
+                real_id = e.get("id")
+                if real_id and real_id not in deduped_events:
+                    deduped_events[real_id] = e
+
+        profiles_cache = {hex_pubkey: profile}
+
+        def _ts_to_dt(ts):
+            if isinstance(ts, datetime):
+                return ts
+            return datetime.fromtimestamp(ts or 0)
+
+        posts = []
+        replies = []
+        media_assets = []
+
+        for eid, e in deduped_events.items():
+            kind = e.get("kind", 1)
+            if kind not in (1, 1063, 1111, 30023):
+                continue
+            tags = e.get("tags", [])
+
+            root_id, parent_id, marker, mention_ids, reply_to_pubkey = parse_nip10_tags(tags)
+
+            note = _enrich_root(e, kind, profiles_cache, _ts_to_dt, root_id=root_id, parent_id=parent_id, reply_to_pubkey=reply_to_pubkey)
+            note["author_avatar"] = profile.get("picture", "")
+            note["author_name"] = profile.get("name", "")
+
+            # If Kind 1063 or has media attachments
+            if note.get("media_attachments") or kind == 1063 or note.get("media_url"):
+                for m in note.get("media_attachments", []):
+                    media_assets.append({
+                        "id": note["id"],
+                        "media_url": m.get("url"),
+                        "media_type": m.get("type", "image"),
+                        "display_title": note.get("display_content", note.get("content", "")),
+                        "is_sovereign": note.get("is_sovereign", False),
+                        "created_at": note["created_at"],
+                    })
+                if kind == 1063 and not note.get("media_attachments") and note.get("media_url"):
+                    media_assets.append({
+                        "id": note["id"],
+                        "media_url": note.get("media_url"),
+                        "media_type": note.get("media_type", "image"),
+                        "display_title": note.get("alt_text", "") or note.get("content", ""),
+                        "is_sovereign": note.get("is_sovereign", False),
+                        "created_at": note["created_at"],
+                    })
+
+            is_reply = bool(kind == 1111 or parent_id or marker == "reply")
+            if is_reply:
+                replies.append(note)
+            else:
+                posts.append(note)
+
+        relays = get_relays_for_request(self.request)
+        posts = attach_reply_counts(posts, relay_urls=relays)
+        posts.sort(key=lambda x: x["created_at"], reverse=True)
+        replies.sort(key=lambda x: x["created_at"], reverse=True)
+        media_assets.sort(key=lambda x: x["created_at"], reverse=True)
+
+
+        context["posts"] = posts
+        context["replies"] = replies
+        context["media_assets"] = media_assets
+        context["broadcasts"] = posts  # backwards compatibility
+
+        sovereign_score = sum(1 for m in media_assets if m.get("is_sovereign"))
+        context["sovereign_score"] = sovereign_score
+        context["media"] = media_assets
+
         return context
+
 
 
 RESERVED_HANDLES = {

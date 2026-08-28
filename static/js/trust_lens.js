@@ -31,6 +31,21 @@
         return key;
     }
 
+    function getBridgeWsUrl() {
+        if (typeof window !== "undefined" && window.talkContext && window.talkContext.bridgeWsUrl) {
+            return window.talkContext.bridgeWsUrl;
+        }
+        if (window.TAURI_SIGNING_BRIDGE) return window.TAURI_SIGNING_BRIDGE;
+        if (window.BRIDGE_WS_URL) return window.BRIDGE_WS_URL;
+        var scriptTag = typeof document !== "undefined" ? document.querySelector('script[data-bridge-url]') : null;
+        if (scriptTag && scriptTag.getAttribute('data-bridge-url')) {
+            return scriptTag.getAttribute('data-bridge-url');
+        }
+        return (typeof window !== "undefined" && window.location && window.location.protocol === 'https:')
+            ? 'wss://home.iyou.me:9001/'
+            : 'ws://127.0.0.1:9001/';
+    }
+
     function getBridge() {
         if (window.tauriBridge && typeof window.tauriBridge.resolvePeerAliases === "function") {
             return window.tauriBridge;
@@ -41,16 +56,22 @@
         return null;
     }
 
+
     function collectBadgeSlots(rootElement) {
         var root = rootElement || document;
-        var cards = root.querySelectorAll("[data-pubkey]");
         var slotsByKey = {};
 
-        cards.forEach(function (card) {
-            var key = normalizeKey(card.getAttribute("data-pubkey"));
+        var slots = root.querySelectorAll(".author-badge-slot");
+        slots.forEach(function (slot) {
+            if (slot.getAttribute("data-trust-applied")) return;
+            var key = normalizeKey(slot.getAttribute("data-author-slot"));
+            if (!key) {
+                var card = slot.closest("[data-pubkey], [data-author-pubkey]");
+                if (card) {
+                    key = normalizeKey(card.getAttribute("data-author-pubkey") || card.getAttribute("data-pubkey"));
+                }
+            }
             if (!key) return;
-            var slot = card.querySelector(".author-badge-slot");
-            if (!slot || slot.getAttribute("data-trust-applied")) return;
             if (!slotsByKey[key]) slotsByKey[key] = [];
             slotsByKey[key].push(slot);
         });
@@ -122,11 +143,21 @@
 
     window.trustLens = {
         scan: scanFeedForTrustBadges,
+        scanDOM: scanFeedForTrustBadges,
         reset: resetAppliedBadges,
         renderBadge: renderBadge,
         getTrustTier: getTrustTier,
         BADGE_CONFIG: BADGE_CONFIG
     };
     window.TrustLens = window.trustLens;
+
+    if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", function () {
+            scanFeedForTrustBadges();
+        });
+    } else {
+        scanFeedForTrustBadges();
+    }
 })();
+
 

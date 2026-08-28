@@ -23,10 +23,13 @@
           [ 💬 Chat ]
         </a>
         {% if user.is_authenticated or request.user.is_authenticated %}
+        {% if not thread_mode and not thread_id and feed_mode != 'thread' %}
         <button id="btn-compose-note" type="button" class="text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 transition-colors ml-1 font-semibold">
           + New Note
         </button>
         {% endif %}
+        {% endif %}
+
       </div>
 
       <!-- Right: Real-Time Feed Search Input -->
@@ -38,10 +41,11 @@
       </div>
     </div>
 
-    <!-- Bottom Track: Circle Filters & Active Scope Badge -->
+    <!-- Bottom Track: Circle Filters & Active Scope Badge (Feed & Gallery only) -->
+    {% if request.resolver_match.url_name in 'feed gallery' %}
     <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-slate-200 dark:border-slate-800 text-[11px]">
       <div class="flex flex-wrap items-center gap-1" id="circle-filter-group">
-        <span class="text-slate-400 dark:text-slate-500 mr-1">CIRCLES:</span>
+        <span class="text-slate-400 dark:text-slate-500 mr-1 font-semibold">CIRCLES:</span>
         <button type="button" data-circle="global" 
            class="circle-tab px-2 py-0.5 rounded bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950 transition-colors">
           [ 🌐 Global Mesh ]
@@ -64,6 +68,8 @@
         SCOPE: [ <span id="active-circle-label" class="text-violet-600 dark:text-violet-400 font-semibold">GLOBAL MESH</span> ]
       </div>
     </div>
+    {% endif %}
+
 
   </div>
 </nav>

@@ -1,520 +1,642 @@
+{% extends "base.html" %}
 {% load static %}
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Dashboard - iyou_wun</title>
-    <script>
-      (function() {
-        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
-        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
-        if (theme === 'dark' || theme === 'stealth') {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
-      })();
-    </script>
-    <link rel="stylesheet" href="{% static 'css/output.css' %}">
-    <style>
-        .toast { animation: slideIn 0.3s ease-out; }
-        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        .toast.hide { animation: slideOut 0.3s ease-out forwards; }
-        @keyframes slideOut { from { transform: translateX(0); opacity: 1; } to { transform: translateX(100%); opacity: 0; } }
-    </style>
-</head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200">
-    {% include 'includes/_ecosystem_bar.html' %}
-    {% include 'includes/_standard_header.html' %}
-    {% include '_nav.html' %}
 
-    <main class="max-w-4xl mx-auto px-4 py-10">
-        {% if user.is_authenticated %}
-            <div class="bg-white rounded-lg shadow-md p-8 mb-6">
-                <h1 class="text-2xl font-bold mb-2">Dashboard</h1>
-                <p class="text-gray-500 mb-6">You are authenticated with iyou_wun.</p>
-                <div class="bg-gray-50 border border-gray-200 rounded-lg p-6">
-                    <p class="text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Decentralized Identifier</p>
-                    <p class="text-lg font-mono font-semibold text-indigo-600 break-all">{{ user_did }}</p>
-                    {% if user_npub %}
-                    <p class="text-xs font-mono text-gray-400 mt-1 break-all">{{ user_npub }}</p>
-                    {% endif %}
-                </div>
-                {% if user_npub %}
-                <div class="mt-4">
-                    <a href="{% url 'profile' npub=user_npub %}" class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">View My Sovereign Profile</a>
-                </div>
-                {% endif %}
-            </div>
+{% block title %}Dashboard — iyou_wun{% endblock %}
 
-            <div class="bg-white rounded-lg shadow-md p-8 mb-6">
-                <div class="flex border-b border-gray-200 mb-6">
-                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors" data-tab="profile" onclick="switchTab('profile')">Profile</button>
-                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="deck" onclick="switchTab('deck')">Link Deck</button>
-                    <button type="button" class="tab-btn px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors text-gray-500 border-transparent hover:text-gray-700" data-tab="settings" onclick="switchTab('settings')">Settings</button>
-                </div>
-
-                <div id="tab-profile" class="tab-panel">
-                    <h2 class="text-lg font-semibold mb-4">Sovereign Profile</h2>
-                    <div id="profilePreview" class="mb-6">
-                        <div id="previewBanner" class="h-32 rounded-t-lg bg-gradient-to-r from-indigo-500 to-violet-500 bg-cover bg-center" style="display:none;"></div>
-                        <div class="{% if profile.banner %}rounded-b-lg border border-t-0 border-gray-200{% else %}rounded-lg{% endif %} bg-gray-50 p-4">
-                            <div class="flex items-start gap-4">
-                                {% if profile.picture %}
-                                <img id="previewAvatar" src="{{ profile.picture }}" alt="" class="w-16 h-16 rounded-full object-cover border-2 border-gray-200 -mt-8 relative z-10">
-                                {% else %}
-                                <div id="previewAvatarPlaceholder" class="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center border-2 border-gray-200 -mt-8 relative z-10">
-                                    <span id="previewAvatarLetter" class="text-indigo-600 text-xl font-bold">{{ profile.name|default:"?"|first }}</span>
-                                </div>
-                                {% endif %}
-                                <div class="flex-1 min-w-0 pt-2">
-                                    <p id="previewName" class="font-semibold text-gray-900">{{ profile.name|default:"No display name set" }}</p>
-                                    {% if profile.nip05 %}
-                                    <p id="previewNip05" class="text-xs text-indigo-600 mt-0.5">{{ profile.nip05 }}</p>
-                                    {% else %}
-                                    <p id="previewNip05" class="text-xs text-indigo-600 mt-0.5 hidden"></p>
-                                    {% endif %}
-                                    <p id="previewAbout" class="text-sm text-gray-500 mt-1">{{ profile.about|default:"No bio"|truncatechars:100 }}</p>
-                                    {% if profile.lud16 %}
-                                    <p id="previewLud16" class="text-xs text-amber-600 mt-1">&#9834; {{ profile.lud16 }}</p>
-                                    {% else %}
-                                    <p id="previewLud16" class="text-xs text-amber-600 mt-1 hidden">&#9834; </p>
-                                    {% endif %}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <form id="profileForm" onsubmit="return editProfile(event)">
-                        {% csrf_token %}
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Display Name</label>
-                                <input type="text" id="profileName" value="{{ profile.name|escape }}" maxlength="100" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" oninput="updatePreview()">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Picture URL</label>
-                                <input type="url" id="profilePicture" value="{{ profile.picture|escape }}" maxlength="2048" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="https://example.com/avatar.jpg" oninput="updatePreview()">
-                            </div>
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Bio / About</label>
-                            <textarea id="profileAbout" rows="3" maxlength="500" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" oninput="updatePreview()">{{ profile.about|escape }}</textarea>
-                        </div>
-                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4">
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">Banner URL</label>
-                                <input type="url" id="profileBanner" value="{{ profile.banner|escape }}" maxlength="2048" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="https://example.com/banner.jpg" oninput="updatePreview()">
-                            </div>
-                            <div>
-                                <label class="block text-xs font-medium text-gray-600 mb-1">NIP-05 Identifier</label>
-                                <input type="text" id="profileNip05" value="{{ profile.nip05|escape }}" maxlength="300" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="user@iyou.me" oninput="updatePreview()">
-                            </div>
-                        </div>
-                        <div class="mb-4">
-                            <label class="block text-xs font-medium text-gray-600 mb-1">Lightning Address (lud16)</label>
-                            <input type="text" id="profileLud16" value="{{ profile.lud16|escape }}" maxlength="300" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none" placeholder="user@getalby.com" oninput="updatePreview()">
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <button type="submit" id="profileSaveBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">
-                                <span id="profileBtnText">Publish Profile</span>
-                                <span id="profileBtnLoading" class="hidden">Waiting for Signature...</span>
-                            </button>
-                            <span id="profileStatus" class="text-xs text-gray-500 hidden"></span>
-                        </div>
-                    </form>
-                </div>
-
-                <div id="tab-settings" class="tab-panel hidden">
-                    <h2 class="text-lg font-semibold mb-4">Sovereign Switchboard</h2>
-                    <p class="text-sm text-gray-500 mb-4">Manage your Nostr relay connections. Events are broadcast to all active relays.</p>
-                    <div id="relayList" class="space-y-2 mb-4"></div>
-                    <div class="flex items-center gap-2 mb-4">
-                        <input type="text" id="relayInput" placeholder="wss://example.com" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                        <button type="button" onclick="addRelay()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg transition-colors border border-gray-300">Add Relay</button>
-                    </div>
-                    <div class="flex items-center gap-3">
-                        <button type="button" onclick="saveRelays()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-6 py-2 rounded-lg transition-colors">Save Relays</button>
-                        <span id="relayStatus" class="text-xs text-gray-500 hidden"></span>
-                    </div>
-                </div>
-
-                <div id="tab-deck" class="tab-panel hidden">
-                    <h2 class="text-lg font-semibold mb-4">Link Deck Manager</h2>
-
-                    <div id="deckHandleBanner" class="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-                        <p class="text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Sovereign Handle</p>
-                        <p id="deckHandleDisplay" class="text-lg font-mono font-semibold text-indigo-600">Unclaimed</p>
-                        <p class="text-xs text-gray-500 mt-1 break-all">
-                            <span class="font-medium">Canonical URL:</span>
-                            <span id="deckCanonicalUrl" class="font-mono">—</span>
-                            <button type="button" onclick="copyDeckUrl()" class="ml-2 text-indigo-600 hover:text-indigo-800 text-xs font-medium">Copy</button>
-                        </p>
-                    </div>
-                    <form onsubmit="return claimDeckHandle(event)" class="flex items-center gap-2 mb-6">
-                        {% csrf_token %}
-                        <span class="text-sm text-gray-500">@</span>
-                        <input type="text" id="deckHandleInput" placeholder="your-handle" maxlength="32"
-                               class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                        <button type="submit" id="deckClaimBtn" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors flex-shrink-0">Claim Handle</button>
-                    </form>
-
-                    <div id="deckVerifyCard" class="rounded-lg p-4 mb-6 bg-emerald-50 border border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800">
-                        <p class="text-xs font-medium uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-2">Proof-of-Authority Verification</p>
-                        <div id="deckVerifyBadge" class="hidden">
-                            <p class="text-sm font-mono font-semibold text-emerald-600 dark:text-emerald-400">&#10003; VERIFIED</p>
-                            <p class="text-xs text-gray-500 mt-1 break-all">
-                                <span class="font-medium">Source:</span>
-                                <a id="deckVerifySource" href="#" target="_blank" rel="noopener noreferrer" class="text-indigo-600 hover:text-indigo-800 break-all"></a>
-                            </p>
-                        </div>
-                        <div id="deckVerifyPrompt">
-                            <p class="text-xs text-gray-600 dark:text-gray-300 mb-3">Prove ownership of an external bio (GitHub, X, Mastodon&hellip;) to claim the canonical @handle with discriminator 0.</p>
-                            <button type="button" onclick="openVerifyModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors">Verify Profile / Claim Canonical Handle</button>
-                        </div>
-                    </div>
-
-                    <div class="mb-6">
-                        <label class="block text-xs font-medium text-gray-600 mb-1">Deck Headline</label>
-                        <div class="flex items-center gap-2">
-                            <input type="text" id="deckHeadlineInput" maxlength="160" placeholder="One-line bio for your deck card"
-                                   class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                            <button type="button" onclick="saveDeckHeadline()" class="bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-4 py-2 rounded-lg border border-gray-300 transition-colors flex-shrink-0">Save</button>
-                        </div>
-                        <span id="deckStatus" class="text-xs text-gray-500 hidden"></span>
-                    </div>
-
-                    <h3 class="text-sm font-semibold text-gray-700 mb-2">Your Links</h3>
-                    <div id="deckItemsList" class="space-y-2 mb-4"></div>
-
-                    <form onsubmit="return addDeckItem(event)" class="border border-gray-200 rounded-lg p-4 bg-gray-50">
-                        {% csrf_token %}
-                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_2fr] gap-3 mb-3">
-                            <input type="text" id="deckItemTitle" placeholder="Title (e.g. My X)" maxlength="64"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                            <input type="text" id="deckItemUrl" placeholder="https://x.com/you  |  nostr:...  |  did:..." maxlength="2048"
-                                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                        </div>
-                        <div class="flex items-center gap-3">
-                            <select id="deckItemIcon" class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none">
-                                <option value="x">X</option>
-                                <option value="github">GitHub</option>
-                                <option value="mastodon">Mastodon</option>
-                                <option value="website">Website</option>
-                                <option value="blog">Blog</option>
-                                <option value="talk">Talk</option>
-                                <option value="poly">Poly</option>
-                                <option value="gallery">Gallery</option>
-                                <option value="link" selected>Link</option>
-                            </select>
-                            <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors ml-auto">Add Link</button>
-                        </div>
-                    </form>
-                </div>
-            </div>
-
-            <div class="bg-white rounded-lg shadow-md p-8">
-                <h2 class="text-lg font-semibold mb-2">Session</h2>
-                <dl class="divide-y">
-                    <div class="py-2 flex"><dt class="w-32 text-sm text-gray-500">Username</dt><dd class="text-sm font-mono">{{ user.username }}</dd></div>
-                    <div class="py-2 flex"><dt class="w-32 text-sm text-gray-500">Email</dt><dd class="text-sm">{{ user.email|default:"—" }}</dd></div>
-                    <div class="py-2 flex"><dt class="w-32 text-sm text-gray-500">Joined</dt><dd class="text-sm">{{ user.date_joined|date:"Y-m-d H:i" }}</dd></div>
-                </dl>
-            </div>
-        {% else %}
-            <div class="bg-white rounded-lg shadow-md p-8 text-center">
-                <p class="text-red-500 mb-4">You are not authenticated.</p>
-                <a href="{% url 'home' %}" class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Go to Home</a>
-            </div>
-        {% endif %}
-    </main>
-
-    <div id="fallbackModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div class="p-6 border-b border-gray-200">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900">Signing Bridge Unavailable</h3>
-                    <button type="button" onclick="bridgeClient.closeFallbackModal()" class="text-gray-400 hover:text-gray-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-                </div>
-                <p class="text-sm text-gray-500 mt-2">The Tauri signing bridge could not be reached. You can manually sign the event below using an external tool, then paste the signed JSON.</p>
-            </div>
-            <div class="p-6">
-                <label class="block text-xs font-medium text-gray-600 mb-1">Unsigned Event JSON</label>
-                <textarea id="fallbackUnsigned" rows="8" readonly class="w-full border border-gray-200 rounded-lg px-3 py-2 text-xs font-mono text-gray-600 bg-gray-50 resize-none"></textarea>
-                <label class="block text-xs font-medium text-gray-600 mb-1 mt-4">Paste Signed Event JSON</label>
-                <textarea id="fallbackSigned" rows="8" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs font-mono text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none resize-none" placeholder='{"id":"...","sig":"...","kind":0,...}'></textarea>
-            </div>
-            <div class="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
-                <button type="button" onclick="bridgeClient.closeFallbackModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
-                <button type="button" onclick="bridgeClient.submitSignedEvent()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">Broadcast Signed Event</button>
-            </div>
+{% block content %}
+<div class="max-w-6xl mx-auto px-3 sm:px-6 py-6 sm:py-8">
+  {% if user.is_authenticated %}
+  <!-- Unified Command Card -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+    
+    <!-- Top Identity Header Bar -->
+    <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60 dark:bg-slate-950/40">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 flex items-center justify-center font-mono font-bold text-violet-600 dark:text-violet-400 text-sm">
+          {% if deck and deck.display_name %}{{ deck.display_name|first|upper }}{% elif deck and deck.handle %}{{ deck.handle|first|upper }}{% elif profile and profile.name %}{{ profile.name|first|upper }}{% else %}S{% endif %}
         </div>
+        <div>
+
+          <div class="flex items-center gap-2 flex-wrap">
+            <h1 class="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100">
+              {% if deck.handle %}@{{ deck.handle }}{% else %}Sovereign Dashboard{% endif %}
+            </h1>
+            {% if deck.is_verified %}
+            <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">✓ VERIFIED</span>
+            {% endif %}
+          </div>
+          <p class="text-xs font-mono text-slate-400 truncate max-w-xs sm:max-w-md" title="{{ user_did }}">
+            {{ user_did|truncatechars:36 }}
+          </p>
+        </div>
+      </div>
+
+      <a href="{% if user_npub %}{% url 'profile' npub=user_npub %}{% else %}#{% endif %}" 
+         class="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-violet-50 dark:bg-violet-950/40 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800/60 text-xs font-mono font-medium hover:bg-violet-100 dark:hover:bg-violet-900/50 transition">
+        <span>↗ View Live Profile</span>
+      </a>
     </div>
 
-    <div id="verifyModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4">
-        <div class="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
-            <div class="p-6 border-b border-gray-200">
-                <div class="flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900">Verify Profile / Claim Canonical Handle</h3>
-                    <button type="button" onclick="closeVerifyModal()" class="text-gray-400 hover:text-gray-600 transition-colors"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg></button>
-                </div>
-                <p class="text-sm text-gray-500 mt-2">1. Pick the @handle you want to own canonically. 2. Point to a public bio on an allowlisted domain. 3. Paste the generated token into that bio. 4. Check &amp; Claim &mdash; if a squatter holds the handle they are demoted to the next discriminator.</p>
-            </div>
-            <div class="p-6 space-y-4">
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Target Handle (canonical, no discriminator)</label>
-                    <div class="flex items-center gap-2">
-                        <span class="text-sm text-gray-500">@</span>
-                        <input type="text" id="verifyTargetHandle" maxlength="32" placeholder="testcreator" class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Public Bio URL (https, allowlisted domain)</label>
-                    <input type="url" id="verifyExternalUrl" list="verifyDomainSuggestions" placeholder="https://github.com/you" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-                    <datalist id="verifyDomainSuggestions">
-                        <option value="https://github.com/"></option>
-                        <option value="https://x.com/"></option>
-                        <option value="https://mastodon.social/@"></option>
-                        <option value="https://bsky.app/profile/"></option>
-                        <option value="https://threads.net/@"></option>
-                    </datalist>
-                </div>
-                <div id="verifyTokenBox" class="hidden bg-gray-50 border border-gray-200 rounded-lg p-4">
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Verification Token</label>
-                    <p id="verifyTokenValue" class="font-mono text-xs text-gray-800 break-all select-all"></p>
-                    <p id="verifyTokenExpiry" class="text-[11px] text-gray-400 mt-1"></p>
-                    <button type="button" onclick="copyVerifyToken()" class="mt-2 text-xs font-medium text-indigo-600 hover:text-indigo-800">Copy token</button>
-                </div>
-                <span id="verifyStatus" class="text-xs text-gray-500 hidden block"></span>
-            </div>
-            <div class="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
-                <button type="button" onclick="closeVerifyModal()" class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
-                <button type="button" id="generateTokenBtn" onclick="generateVerifyToken()" class="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors">Generate Token</button>
-                <button type="button" id="confirmVerifyBtn" onclick="confirmVerification()" disabled class="px-4 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:hover:bg-emerald-600 rounded-lg transition-colors">Check &amp; Claim Handle</button>
-            </div>
-        </div>
+    <!-- Tab Bar Switcher -->
+    <div class="flex items-center gap-2 sm:gap-6 px-5 border-b border-slate-200 dark:border-slate-800 text-xs font-mono bg-white dark:bg-slate-900 overflow-x-auto">
+      <button type="button" class="tab-btn py-3.5 border-b-2 border-violet-600 text-violet-600 dark:text-violet-400 font-bold transition whitespace-nowrap" data-tab="profile" onclick="switchTab('profile')">
+        👤 Sovereign Profile
+      </button>
+      <button type="button" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition whitespace-nowrap" data-tab="deck" onclick="switchTab('deck')">
+        🔗 Link Deck Manager
+      </button>
+      <button type="button" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition whitespace-nowrap" data-tab="settings" onclick="switchTab('settings')">
+        ⚙️ Relays & Switchboard
+      </button>
+      <button type="button" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition whitespace-nowrap" data-tab="account" onclick="switchTab('account')">
+        🛡️ Account & Key Info
+      </button>
     </div>
 
-    <div id="toast" class="fixed top-4 right-4 bg-green-500 text-white px-6 py-3 rounded-lg shadow-lg toast hide" role="alert"><span class="font-medium">Profile updated successfully.</span></div>
+    <!-- TAB 1: Profile Editor (2-Column Split) -->
+    <div id="tab-profile" class="tab-panel p-5 sm:p-6">
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        
+        <!-- Left Column: Form Fields -->
+        <div class="lg:col-span-7 space-y-4">
+          <form id="profileForm" onsubmit="return editProfile(event)" class="space-y-4">
+            {% csrf_token %}
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Display Name (Mutable)</label>
+                <input type="text" id="profileName" value="{% firstof deck.display_name profile.display_name profile.name '' %}"
+                       placeholder="e.g. Alice Crypto" maxlength="100" oninput="updatePreview()"
+                       class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Picture URL (Avatar)</label>
+                <input type="url" id="profilePicture" value="{% firstof deck.avatar_url profile.picture '' %}"
+                       placeholder="https://.../avatar.jpg" maxlength="2048" oninput="updatePreview()"
+                       class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+              </div>
+            </div>
 
-    <script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ idp_home_ws_url|escapejs }}"></script>
-    <script>
-        var userPubkey = "{{ user_pubkey|default:""|escapejs }}";
-        window.userPubkey = userPubkey;
-        var pendingEvent = null;
-        var isProcessing = false;
-        var pendingSignedPayload = null;
+            <div>
+              <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Bio / Headline</label>
+              <textarea id="profileAbout" rows="3" placeholder="Tell the sovereign mesh about yourself..." maxlength="500" oninput="updatePreview()"
+                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500 resize-none">{% firstof deck.headline profile.about '' %}</textarea>
+            </div>
 
-        function broadcastProfile(signedEvent) {
-            var relays = getRelays();
-            var remaining = relays.length;
-            var anySuccess = false;
-            if (remaining === 0) {
-                showToast("No relays configured. Profile saved locally.", true);
-                applyOptimisticRefresh(signedEvent);
-                resetState();
-                return;
-            }
-            relays.forEach(function (relayUrl) {
-                var finished = false;
-                var done = function () {
-                    if (finished) return;
-                    finished = true;
-                    remaining--;
-                    if (remaining === 0) {
-                        if (anySuccess) {
-                            applyOptimisticRefresh(signedEvent);
-                            showToast("Profile updated & broadcasted.");
-                        } else {
-                            showToast("Broadcast failed on all relays. Saving locally.", true);
-                            applyOptimisticRefresh(signedEvent);
-                        }
-                        resetState();
-                    }
-                };
-                try {
-                    var ws = new WebSocket(relayUrl);
-                    ws.onopen = function () { ws.send(JSON.stringify(["EVENT", signedEvent])); };
-                    ws.onmessage = function (e) {
-                        try { var msg = JSON.parse(e.data); if (msg[0] === "OK") anySuccess = true; } catch (x) {}
-                        try { ws.close(); } catch (x) {}
-                        done();
-                    };
-                    ws.onerror = function () { done(); };
-                    ws.onclose = function () { done(); };
-                    setTimeout(function () { try { ws.close(); } catch (x) {} done(); }, 3000);
-                } catch (err) { done(); }
-            });
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Banner URL</label>
+                <input type="url" id="profileBanner" value="{% firstof deck.banner_url profile.banner '' %}"
+                       placeholder="https://.../banner.jpg" maxlength="2048" oninput="updatePreview()"
+                       class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+              </div>
+              <div>
+                <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">NIP-05 Identifier</label>
+                <input type="text" id="profileNip05" value="{% firstof deck.nip05 profile.nip05 '' %}"
+                       placeholder="user@domain.com" maxlength="300" oninput="updatePreview()"
+                       class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Lightning Address (LUD-16)</label>
+              <input type="text" id="profileLud16" value="{% firstof deck.lud16 profile.lud16 '' %}"
+                     placeholder="user@getalby.com" maxlength="300" oninput="updatePreview()"
+                     class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+            </div>
+
+            <div class="pt-2 flex items-center gap-3">
+              <button type="submit" id="profileSaveBtn" class="px-5 py-2.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-mono font-semibold transition shadow-sm">
+                <span id="profileBtnText">Publish Profile</span>
+                <span id="profileBtnLoading" class="hidden">Waiting for Signature...</span>
+              </button>
+              <span id="profileStatus" class="text-xs font-mono text-slate-400 hidden"></span>
+            </div>
+          </form>
+        </div>
+
+        <!-- Right Column: Live Responsive Mini-Hero Preview -->
+        <div class="lg:col-span-5 bg-slate-50 dark:bg-slate-950/80 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+          <div class="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-3">Live Preview (profile.html)</div>
+          
+          <div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
+            <!-- Banner Preview -->
+            <div id="previewBanner" class="h-24 w-full bg-gradient-to-r from-violet-900 via-slate-900 to-slate-950 bg-cover bg-center relative"
+                 {% if deck.banner_url or profile.banner %}style="background-image: url('{% firstof deck.banner_url profile.banner %}');"{% endif %}></div>
+            
+            <div class="px-4 pb-4 -mt-8 relative">
+              <div class="flex items-end justify-between gap-2 mb-2">
+                <div class="relative">
+                  <img id="previewAvatar" src="{% firstof deck.avatar_url profile.picture '' %}" alt="Avatar Preview" 
+                       class="w-16 h-16 rounded-full object-cover border-2 border-white dark:border-slate-900 bg-slate-800 {% if not deck.avatar_url and not profile.picture %}hidden{% endif %}" />
+                  <div id="previewAvatarPlaceholder" class="w-16 h-16 rounded-full border-2 border-white dark:border-slate-900 bg-violet-950 flex items-center justify-center {% if deck.avatar_url or profile.picture %}hidden{% endif %}">
+                    <span id="previewInitial" class="text-xl font-bold font-mono text-violet-400">
+                      {% if deck and deck.display_name %}{{ deck.display_name|first|upper }}{% elif deck and deck.handle %}{{ deck.handle|first|upper }}{% elif profile and profile.name %}{{ profile.name|first|upper }}{% else %}N{% endif %}
+                    </span>
+                  </div>
+
+                </div>
+
+                <div class="text-right">
+                  <span id="previewLud16Badge" class="inline-flex items-center gap-1 text-[10px] font-mono text-amber-600 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 px-1.5 py-0.5 rounded {% if not deck.lud16 and not profile.lud16 %}hidden{% endif %}">
+                    ⚡ Tip
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <h3 id="previewDisplayName" class="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
+                  {% firstof deck.display_name profile.display_name profile.name "Anonymous" %}
+                </h3>
+                <div class="flex items-center gap-1.5 mt-0.5">
+                  <span class="text-[11px] font-mono text-slate-400">@{{ deck.handle|default:"user" }}</span>
+                  <span id="previewNip05Badge" class="inline-flex items-center gap-0.5 text-[10px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/60 px-1 py-0.5 rounded border border-violet-200 dark:border-violet-800/60 {% if not deck.nip05 and not profile.nip05 %}hidden{% endif %}">
+                    ✓ <span id="previewNip05Text">{% firstof deck.nip05 profile.nip05 '' %}</span>
+                  </span>
+                </div>
+                <p id="previewBio" class="text-xs text-slate-600 dark:text-slate-300 mt-2 line-clamp-3 leading-relaxed">
+                  {% firstof deck.headline profile.about "No bio provided." %}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB 2: Link Deck Manager -->
+    <div id="tab-deck" class="tab-panel hidden p-5 sm:p-6 space-y-6">
+      {% include "includes/_deck_manager.html" %}
+    </div>
+
+    <!-- TAB 3: Relays & Switchboard -->
+    <div id="tab-settings" class="tab-panel hidden p-5 sm:p-6 space-y-6">
+      {% include "includes/_relay_manager.html" %}
+    </div>
+
+    <!-- TAB 4: Account & Key Info -->
+    <div id="tab-account" class="tab-panel hidden p-5 sm:p-6">
+      <div class="max-w-xl space-y-3 text-xs font-mono">
+        <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-slate-400">Decentralized Identifier (DID):</span>
+          <span class="text-slate-900 dark:text-slate-100 font-semibold truncate max-w-xs sm:max-w-sm">{{ user_did }}</span>
+        </div>
+        <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-slate-400">Public Key (Nostr Hex):</span>
+          <span class="text-slate-900 dark:text-slate-100 font-semibold truncate max-w-xs sm:max-w-sm">{{ user_pubkey }}</span>
+        </div>
+        <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-slate-400">Nostr npub:</span>
+          <span class="text-slate-900 dark:text-slate-100 font-semibold truncate max-w-xs sm:max-w-sm">{{ user_npub }}</span>
+        </div>
+        <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-800">
+          <span class="text-slate-400">Joined Mesh:</span>
+          <span class="text-slate-600 dark:text-slate-400">{{ request.user.date_joined|date:"Y-m-d H:i" }}</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  {% else %}
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-8 text-center">
+    <p class="text-rose-500 mb-4 text-sm font-mono">You are not authenticated with iyou_wun.</p>
+    <a href="{% url 'home' %}" class="bg-violet-600 hover:bg-violet-700 text-white font-mono text-xs font-semibold py-2 px-4 rounded-lg transition">Go to Home</a>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Tauri Bridge Fallback Modal -->
+<div id="fallbackModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+    <div class="p-6 border-b border-slate-200 dark:border-slate-800">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-mono font-bold text-slate-900 dark:text-slate-100">Signing Bridge Unavailable</h3>
+        <button type="button" onclick="bridgeClient.closeFallbackModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">The Tauri signing bridge could not be reached. You can manually sign the event below using an external tool, then paste the signed JSON.</p>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Unsigned Event JSON</label>
+        <textarea id="fallbackUnsigned" rows="6" readonly class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-600 dark:text-slate-400 resize-none"></textarea>
+      </div>
+      <div>
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Paste Signed Event JSON</label>
+        <textarea id="fallbackSigned" rows="6" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500 resize-none" placeholder='{"id":"...","sig":"...","kind":0,...}'></textarea>
+      </div>
+    </div>
+    <div class="p-6 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+      <button type="button" onclick="bridgeClient.closeFallbackModal()" class="px-4 py-2 text-xs font-mono font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors">Cancel</button>
+      <button type="button" onclick="bridgeClient.submitSignedEvent()" class="px-4 py-2 text-xs font-mono font-semibold text-white bg-violet-600 hover:bg-violet-500 rounded-lg transition-colors shadow-sm">Broadcast Signed Event</button>
+    </div>
+  </div>
+</div>
+
+<!-- Proof-of-Authority Verification Modal -->
+<div id="verifyModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto">
+    <div class="p-6 border-b border-slate-200 dark:border-slate-800">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-mono font-bold text-slate-900 dark:text-slate-100">Verify Profile / Claim Canonical Handle</h3>
+        <button type="button" onclick="closeVerifyModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">1. Pick your desired @handle. 2. Point to a public bio on an allowlisted domain. 3. Paste the generated token into that bio. 4. Check & Claim.</p>
+    </div>
+    <div class="p-6 space-y-4">
+      <div>
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Target Handle (canonical, no discriminator)</label>
+        <div class="flex items-center bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 focus-within:border-violet-500">
+          <span class="text-xs font-mono text-slate-400 mr-1">@</span>
+          <input type="text" id="verifyTargetHandle" maxlength="32" placeholder="testcreator"
+                 class="flex-1 bg-transparent text-xs text-slate-900 dark:text-slate-100 focus:outline-none" />
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Public Bio URL (https, allowlisted domain)</label>
+        <input type="url" id="verifyExternalUrl" list="verifyDomainSuggestions" placeholder="https://github.com/you"
+               class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+        <datalist id="verifyDomainSuggestions">
+          <option value="https://github.com/"></option>
+          <option value="https://x.com/"></option>
+          <option value="https://mastodon.social/@"></option>
+          <option value="https://bsky.app/profile/"></option>
+          <option value="https://threads.net/@"></option>
+        </datalist>
+      </div>
+      <div id="verifyTokenBox" class="hidden bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-3">
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Verification Token</label>
+        <p id="verifyTokenValue" class="font-mono text-xs text-violet-600 dark:text-violet-400 break-all select-all"></p>
+        <p id="verifyTokenExpiry" class="text-[10px] font-mono text-slate-400 mt-1"></p>
+        <button type="button" onclick="copyVerifyToken()" class="mt-2 text-xs font-mono font-medium text-violet-600 dark:text-violet-400 hover:underline">Copy token</button>
+      </div>
+      <span id="verifyStatus" class="text-xs font-mono text-slate-400 hidden block"></span>
+    </div>
+    <div class="p-6 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-3">
+      <button type="button" onclick="closeVerifyModal()" class="px-4 py-2 text-xs font-mono font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors">Cancel</button>
+      <button type="button" id="generateTokenBtn" onclick="generateVerifyToken()" class="px-4 py-2 text-xs font-mono font-semibold text-white bg-violet-600 hover:bg-violet-500 rounded-lg transition-colors shadow-sm">Generate Token</button>
+      <button type="button" id="confirmVerifyBtn" onclick="confirmVerification()" disabled class="px-4 py-2 text-xs font-mono font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg transition-colors shadow-sm">Check & Claim Handle</button>
+    </div>
+  </div>
+</div>
+
+<!-- Global Toast Notification -->
+<div id="toast" class="fixed top-4 right-4 bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-lg toast hide z-50 text-xs font-mono" role="alert">
+  <span class="font-medium">Profile updated successfully.</span>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ idp_home_ws_url|escapejs }}"></script>
+<script>
+  var userPubkey = "{{ user_pubkey|default:''|escapejs }}";
+  window.userPubkey = userPubkey;
+  var userHandle = "{{ deck.handle|default:''|escapejs }}";
+  var pendingEvent = null;
+  var isProcessing = false;
+
+  function broadcastProfile(signedEvent) {
+    var relays = (typeof getRelays === "function") ? getRelays() : ["wss://nos.lol", "wss://relay.damus.io", "wss://relay.primal.net"];
+    var remaining = relays.length;
+    var anySuccess = false;
+    if (remaining === 0) {
+      showToast("No relays configured. Profile saved locally.", true);
+      applyOptimisticRefresh(signedEvent);
+      resetState();
+      return;
+    }
+    relays.forEach(function (relayUrl) {
+      var finished = false;
+      var done = function () {
+        if (finished) return;
+        finished = true;
+        remaining--;
+        if (remaining === 0) {
+          if (anySuccess) {
+            applyOptimisticRefresh(signedEvent);
+            showToast("Profile updated & broadcasted.");
+          } else {
+            showToast("Broadcast failed on all relays. Saving locally.", true);
+            applyOptimisticRefresh(signedEvent);
+          }
+          resetState();
         }
+      };
+      try {
+        var ws = new WebSocket(relayUrl);
+        ws.onopen = function () { ws.send(JSON.stringify(["EVENT", signedEvent])); };
+        ws.onmessage = function (e) {
+          try { var msg = JSON.parse(e.data); if (msg[0] === "OK") anySuccess = true; } catch (x) {}
+          try { ws.close(); } catch (x) {}
+          done();
+        };
+        ws.onerror = function () { done(); };
+        ws.onclose = function () { done(); };
+        setTimeout(function () { try { ws.close(); } catch (x) {} done(); }, 3000);
+      } catch (err) { done(); }
+    });
+  }
 
-        function handleTauriMessage(data) {
-            try {
-                var message = JSON.parse(data);
-                if (message.type === "profile_sync") { window.activeProfile = message.profile; return; }
-                if (message.type === "signed_event" && pendingEvent) {
-                    var signedEvent = message.event;
-                    pendingEvent.id = signedEvent.id;
-                    pendingEvent.sig = signedEvent.sig;
-                    broadcastProfile(pendingEvent);
-                }
-            } catch (err) {
-                console.error("Error handling Tauri message:", err);
-                showToast("Error processing bridge response.", true);
-                resetState();
-            }
+  function handleTauriMessage(eventOrData, signedEvent) {
+    try {
+      var message = (typeof eventOrData === "string") ? JSON.parse(eventOrData) : eventOrData;
+      if (message && message.type === "profile_sync") { window.activeProfile = message.profile; return; }
+      
+      var signed = signedEvent || (message && message.event) || (message && message.sig ? message : null);
+      if (signed && (pendingEvent || signed.id)) {
+        var targetEvent = pendingEvent || signed;
+        targetEvent.id = signed.id;
+        targetEvent.sig = signed.sig;
+        broadcastProfile(targetEvent);
+      } else if (message && message.type === "signed_event" && message.event) {
+        if (pendingEvent) {
+          pendingEvent.id = message.event.id;
+          pendingEvent.sig = message.event.sig;
+          broadcastProfile(pendingEvent);
         }
+      }
+    } catch (err) {
+      console.error("Error handling Tauri message:", err);
+      fallbackServerSave();
+    }
+  }
 
-        function applyOptimisticRefresh(signedEvent) {
-            try {
-                var content = JSON.parse(signedEvent.content);
-                var nameEl = document.getElementById("previewName");
-                var aboutEl = document.getElementById("previewAbout");
-                var nip05El = document.getElementById("previewNip05");
-                var lud16El = document.getElementById("previewLud16");
-                var bannerEl = document.getElementById("previewBanner");
-                if (nameEl) nameEl.textContent = content.display_name || content.name || "Anonymous";
-                if (aboutEl) aboutEl.textContent = content.about || "No bio";
-                if (content.nip05) { nip05El.textContent = content.nip05; nip05El.classList.remove("hidden"); } else { nip05El.classList.add("hidden"); }
-                if (content.lud16) { lud16El.innerHTML = "&#9834; " + escapeHtml(content.lud16); lud16El.classList.remove("hidden"); } else { lud16El.classList.add("hidden"); }
-                if (content.banner) { bannerEl.style.backgroundImage = "url(" + escapeAttr(content.banner) + ")"; bannerEl.style.display = "block"; }
-                if (content.picture) {
-                    var existingImg = document.getElementById("previewAvatar");
-                    var placeholder = document.getElementById("previewAvatarPlaceholder");
-                    if (!existingImg && placeholder) {
-                        var img = document.createElement("img"); img.id = "previewAvatar"; img.src = content.picture; img.alt = "";
-                        img.className = "w-16 h-16 rounded-full object-cover border-2 border-gray-200 -mt-8 relative z-10";
-                        placeholder.parentNode.replaceChild(img, placeholder);
-                    } else if (existingImg) { existingImg.src = content.picture; }
-                }
-            } catch (e) { console.error("Optimistic refresh failed:", e); }
+  function fallbackServerSave() {
+    var name = (document.getElementById("profileName") ? document.getElementById("profileName").value : "").trim();
+    var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
+    var picture = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
+    var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
+    var nip05 = (document.getElementById("profileNip05") ? document.getElementById("profileNip05").value : "").trim();
+    var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
+
+    var contentObj = {
+      name: name,
+      display_name: name,
+      about: about,
+      picture: picture,
+      banner: banner,
+      nip05: nip05,
+      lud16: lud16,
+    };
+    var csrfToken = document.querySelector("[name=csrfmiddlewaretoken]") ? document.querySelector("[name=csrfmiddlewaretoken]").value : "";
+    fetch("/api/profile/save/", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CSRFToken": csrfToken
+      },
+      body: JSON.stringify(contentObj)
+    })
+    .then(function (r) { return r.json(); })
+    .then(function (res) {
+      if (res.success) {
+        showToast("Profile saved successfully.");
+        applyOptimisticRefresh({ content: JSON.stringify(contentObj) });
+      } else {
+        showToast(res.error || "Failed to save profile.", true);
+      }
+      resetState();
+    })
+    .catch(function (err) {
+      console.error("Server save error:", err);
+      showToast("Server save error. Check network.", true);
+      resetState();
+    });
+  }
+
+  function applyOptimisticRefresh(signedEvent) {
+    try {
+      var content = JSON.parse(signedEvent.content);
+      var nameEl = document.getElementById("previewDisplayName");
+      var aboutEl = document.getElementById("previewBio");
+      var nip05Badge = document.getElementById("previewNip05Badge");
+      var nip05Text = document.getElementById("previewNip05Text");
+      var lud16Badge = document.getElementById("previewLud16Badge");
+      var bannerEl = document.getElementById("previewBanner");
+      var avatarImg = document.getElementById("previewAvatar");
+      var placeholder = document.getElementById("previewAvatarPlaceholder");
+
+      if (nameEl) nameEl.textContent = content.display_name || content.name || "Anonymous";
+      if (aboutEl) aboutEl.textContent = content.about || "No bio provided.";
+      if (content.nip05) {
+        if (nip05Text) nip05Text.textContent = content.nip05;
+        if (nip05Badge) nip05Badge.classList.remove("hidden");
+      } else if (nip05Badge) {
+        nip05Badge.classList.add("hidden");
+      }
+      if (content.lud16 && lud16Badge) {
+        lud16Badge.classList.remove("hidden");
+      } else if (lud16Badge) {
+        lud16Badge.classList.add("hidden");
+      }
+      if (bannerEl) {
+        bannerEl.style.backgroundImage = content.banner ? "url(" + escapeAttr(content.banner) + ")" : "";
+      }
+      if (content.picture) {
+        if (avatarImg) {
+          avatarImg.src = content.picture;
+          avatarImg.classList.remove("hidden");
         }
+        if (placeholder) placeholder.classList.add("hidden");
+      }
+    } catch (e) { console.error("Optimistic refresh failed:", e); }
+  }
 
-        function editProfile(event) {
-            event.preventDefault();
-            if (!userPubkey || userPubkey.length !== 64) { showToast("User public key not available or invalid.", true); return false; }
-            var contentObj = {
-                name: document.getElementById("profileName").value.trim(),
-                display_name: document.getElementById("profileName").value.trim(),
-                about: document.getElementById("profileAbout").value.trim(),
-                picture: document.getElementById("profilePicture").value.trim(),
-            };
-            var banner = document.getElementById("profileBanner").value.trim();
-            var nip05 = document.getElementById("profileNip05").value.trim();
-            var lud16 = document.getElementById("profileLud16").value.trim();
-            if (banner) contentObj.banner = banner;
-            if (nip05) contentObj.nip05 = nip05;
-            if (lud16) contentObj.lud16 = lud16;
+  function editProfile(event) {
+    if (event && event.preventDefault) event.preventDefault();
+    var name = (document.getElementById("profileName") ? document.getElementById("profileName").value : "").trim();
+    var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
+    var picture = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
+    var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
+    var nip05 = (document.getElementById("profileNip05") ? document.getElementById("profileNip05").value : "").trim();
+    var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
 
-            pendingEvent = {
-                kind: 0,
-                content: JSON.stringify(contentObj),
-                pubkey: userPubkey,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: [],
-            };
+    var contentObj = {
+      name: name,
+      display_name: name,
+      about: about,
+      picture: picture,
+    };
+    if (banner) contentObj.banner = banner;
+    if (nip05) contentObj.nip05 = nip05;
+    if (lud16) contentObj.lud16 = lud16;
 
-            isProcessing = true;
-            document.getElementById("profileBtnText").classList.add("hidden");
-            document.getElementById("profileBtnLoading").classList.remove("hidden");
-            document.getElementById("profileSaveBtn").disabled = true;
+    if (!userPubkey || userPubkey.length !== 64) {
+      fallbackServerSave();
+      return false;
+    }
 
-            bridgeClient.connect(handleTauriMessage);
-            var checkSocket = setInterval(function () {
-                if (bridgeClient.socket && bridgeClient.socket.readyState === WebSocket.OPEN) {
-                    clearInterval(checkSocket);
-                    try {
-                        bridgeClient.socket.send(JSON.stringify({ type: "sign_event", event: pendingEvent }));
-                    } catch (err) {
-                        clearInterval(checkSocket);
-                        bridgeClient.showFallbackModal();
-                    }
-                }
-            }, 100);
-            setTimeout(function () { if (isProcessing) { clearInterval(checkSocket); bridgeClient.showFallbackModal(); } }, 6000);
-            return false;
+    pendingEvent = {
+      kind: 0,
+      content: JSON.stringify(contentObj),
+      pubkey: userPubkey,
+      created_at: Math.floor(Date.now() / 1000),
+      tags: [],
+    };
+
+    isProcessing = true;
+    var btnText = document.getElementById("profileBtnText");
+    var btnLoading = document.getElementById("profileBtnLoading");
+    var saveBtn = document.getElementById("profileSaveBtn");
+    if (btnText) btnText.classList.add("hidden");
+    if (btnLoading) btnLoading.classList.remove("hidden");
+    if (saveBtn) saveBtn.disabled = true;
+
+    bridgeClient.pendingEvent = pendingEvent;
+    bridgeClient.connect(handleTauriMessage);
+    var checkSocket = setInterval(function () {
+      if (bridgeClient.socket && bridgeClient.socket.readyState === WebSocket.OPEN) {
+        clearInterval(checkSocket);
+        try {
+          bridgeClient.socket.send(JSON.stringify({ type: "sign_event", event: pendingEvent }));
+        } catch (err) {
+          clearInterval(checkSocket);
+          fallbackServerSave();
         }
+      }
+    }, 100);
+    setTimeout(function () {
+      if (isProcessing) {
+        clearInterval(checkSocket);
+        fallbackServerSave();
+      }
+    }, 2500);
+    return false;
+  }
 
-        function updatePreview() {
-            var name = document.getElementById("profileName").value.trim();
-            var about = document.getElementById("profileAbout").value.trim();
-            var nip05 = document.getElementById("profileNip05").value.trim();
-            var lud16 = document.getElementById("profileLud16").value.trim();
-            var banner = document.getElementById("profileBanner").value.trim();
-            var nameEl = document.getElementById("previewName");
-            var aboutEl = document.getElementById("previewAbout");
-            var nip05El = document.getElementById("previewNip05");
-            var lud16El = document.getElementById("previewLud16");
-            var bannerEl = document.getElementById("previewBanner");
-            nameEl.textContent = name || "No display name set";
-            aboutEl.textContent = about || "No bio";
-            if (nip05) { nip05El.textContent = nip05; nip05El.classList.remove("hidden"); } else { nip05El.classList.add("hidden"); }
-            if (lud16) { lud16El.innerHTML = "&#9834; " + escapeHtml(lud16); lud16El.classList.remove("hidden"); } else { lud16El.classList.add("hidden"); }
-            if (banner) { bannerEl.style.backgroundImage = "url(" + escapeAttr(banner) + ")"; bannerEl.style.display = "block"; } else { bannerEl.style.display = "none"; }
-        }
+  function publishProfile() {
+    return editProfile();
+  }
 
-        function resetState() {
-            isProcessing = false;
-            pendingEvent = null;
-            document.getElementById("profileBtnText").classList.remove("hidden");
-            document.getElementById("profileBtnLoading").classList.add("hidden");
-            document.getElementById("profileSaveBtn").disabled = false;
-        }
+  function updatePreview() {
+    var name = (document.getElementById("profileName") ? document.getElementById("profileName").value : "").trim();
+    var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
+    var pic = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
+    var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
+    var nip05 = (document.getElementById("profileNip05") ? document.getElementById("profileNip05").value : "").trim();
+    var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
 
-        // --- Relay Management ---
-        var userRelays = [];
-        function renderRelayList() {
-            var list = document.getElementById("relayList");
-            list.innerHTML = "";
-            userRelays.forEach(function (url, i) {
-                var div = document.createElement("div");
-                div.className = "flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-4 py-2";
-                div.innerHTML = '<span class="text-sm font-mono text-gray-700 break-all">' + escapeHtml(url) + '</span><button type="button" onclick="removeRelay(' + i + ')" class="text-red-500 hover:text-red-700 text-sm font-medium ml-2 flex-shrink-0">Remove</button>';
-                list.appendChild(div);
-            });
-        }
-        function addRelay() {
-            var input = document.getElementById("relayInput");
-            var url = input.value.trim();
-            if (!url) return;
-            if (!url.startsWith("ws://") && !url.startsWith("wss://")) { showRelayStatus("Relay URL must start with ws:// or wss://", true); return; }
-            if (userRelays.indexOf(url) !== -1) { showRelayStatus("Relay already in list", true); return; }
-            userRelays.push(url);
-            input.value = "";
-            renderRelayList();
-        }
-        function removeRelay(index) { userRelays.splice(index, 1); renderRelayList(); }
-        function saveRelays() {
-            localStorage.setItem("wun_relays", JSON.stringify(userRelays));
-            fetch("/api/relays", {
-                method: "POST",
-                headers: { "Content-Type": "application/json", "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
-                body: JSON.stringify({ relays: userRelays }),
-            }).then(function (r) { return r.json(); }).then(function () { showRelayStatus("Relays saved successfully."); })
-            .catch(function () { showRelayStatus("Saved locally. Server sync failed.", true); });
-        }
-        function showRelayStatus(message, isError) {
-            var el = document.getElementById("relayStatus");
-            el.textContent = message;
-            el.className = "text-xs " + (isError ? "text-red-500" : "text-green-600");
-            el.classList.remove("hidden");
-            setTimeout(function () { el.classList.add("hidden"); }, 3000);
-        }
-        function loadRelays() {
-            fetch("/api/relays").then(function (r) { return r.json(); }).then(function (data) {
-                userRelays = data.relays || getRelays();
-                localStorage.setItem("wun_relays", JSON.stringify(userRelays));
-                renderRelayList();
-            }).catch(function () { userRelays = getRelays(); renderRelayList(); });
-        }
+    var nameEl = document.getElementById("previewDisplayName");
+    var aboutEl = document.getElementById("previewBio");
+    var nip05Badge = document.getElementById("previewNip05Badge");
+    var nip05Text = document.getElementById("previewNip05Text");
+    var lud16Badge = document.getElementById("previewLud16Badge");
+    var bannerEl = document.getElementById("previewBanner");
+    var avatarImg = document.getElementById("previewAvatar");
+    var placeholder = document.getElementById("previewAvatarPlaceholder");
+    var previewInitial = document.getElementById("previewInitial");
 
-        document.addEventListener("DOMContentLoaded", function () {
-            switchTab("profile");
-            loadRelays();
-            updatePreview();
-            if (typeof initDeckManager === "function") { initDeckManager(); }
-        });
-    </script>
-    <script src="{% static 'js/link_deck_manager.js' %}"></script>
-    <script src="{% static 'js/theme.js' %}"></script>
-</body>
-</html>
+    if (nameEl) nameEl.textContent = name || (userHandle ? ("@" + userHandle) : "Anonymous");
+    if (aboutEl) aboutEl.textContent = about || "No bio provided.";
 
+    if (pic) {
+      if (avatarImg) {
+        avatarImg.src = pic;
+        avatarImg.classList.remove("hidden");
+      }
+      if (placeholder) placeholder.classList.add("hidden");
+    } else {
+      if (avatarImg) avatarImg.classList.add("hidden");
+      if (placeholder) {
+        placeholder.classList.remove("hidden");
+        if (previewInitial) previewInitial.textContent = (name || userHandle || "N").charAt(0).toUpperCase();
+      }
+    }
+
+    if (bannerEl) {
+      bannerEl.style.backgroundImage = banner ? "url('" + escapeAttr(banner) + "')" : "";
+    }
+
+    if (nip05) {
+      if (nip05Text) nip05Text.textContent = nip05;
+      if (nip05Badge) nip05Badge.classList.remove("hidden");
+    } else if (nip05Badge) {
+      nip05Badge.classList.add("hidden");
+    }
+
+    if (lud16) {
+      if (lud16Badge) lud16Badge.classList.remove("hidden");
+    } else if (lud16Badge) {
+      lud16Badge.classList.add("hidden");
+    }
+  }
+
+  function resetState() {
+    isProcessing = false;
+    pendingEvent = null;
+    var btnText = document.getElementById("profileBtnText");
+    var btnLoading = document.getElementById("profileBtnLoading");
+    var saveBtn = document.getElementById("profileSaveBtn");
+    if (btnText) btnText.classList.remove("hidden");
+    if (btnLoading) btnLoading.classList.add("hidden");
+    if (saveBtn) saveBtn.disabled = false;
+  }
+
+  // --- Relay Management ---
+  var userRelays = [];
+  function renderRelayList() {
+    var list = document.getElementById("relayList");
+    if (!list) return;
+    list.innerHTML = "";
+    userRelays.forEach(function (url, i) {
+      var div = document.createElement("div");
+      div.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2";
+      div.innerHTML = '<span class="text-xs font-mono text-slate-700 dark:text-slate-300 break-all flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>' + escapeHtml(url) + '</span><button type="button" onclick="removeRelay(' + i + ')" class="text-rose-500 hover:text-rose-600 text-xs font-mono font-medium ml-2 flex-shrink-0">Remove</button>';
+      list.appendChild(div);
+    });
+  }
+  function addRelay() {
+    var input = document.getElementById("relayInput");
+    if (!input) return;
+    var url = input.value.trim();
+    if (!url) return;
+    if (!url.startsWith("ws://") && !url.startsWith("wss://")) { showRelayStatus("Relay URL must start with ws:// or wss://", true); return; }
+    if (userRelays.indexOf(url) !== -1) { showRelayStatus("Relay already in list", true); return; }
+    userRelays.push(url);
+    input.value = "";
+    renderRelayList();
+  }
+  function removeRelay(index) { userRelays.splice(index, 1); renderRelayList(); }
+  function saveRelays() {
+    localStorage.setItem("wun_relays", JSON.stringify(userRelays));
+    var csrfToken = document.querySelector("[name=csrfmiddlewaretoken]") ? document.querySelector("[name=csrfmiddlewaretoken]").value : "";
+    fetch("/api/relays", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
+      body: JSON.stringify({ relays: userRelays }),
+    }).then(function (r) { return r.json(); }).then(function () { showRelayStatus("Relays saved successfully."); })
+    .catch(function () { showRelayStatus("Saved locally. Server sync failed.", true); });
+  }
+  function showRelayStatus(message, isError) {
+    var el = document.getElementById("relayStatus");
+    if (!el) return;
+    el.textContent = message;
+    el.className = "text-xs font-mono " + (isError ? "text-rose-500" : "text-emerald-500");
+    el.classList.remove("hidden");
+    setTimeout(function () { el.classList.add("hidden"); }, 3000);
+  }
+  function loadRelays() {
+    fetch("/api/relays").then(function (r) { return r.json(); }).then(function (data) {
+      userRelays = data.relays || (typeof getRelays === "function" ? getRelays() : []);
+      localStorage.setItem("wun_relays", JSON.stringify(userRelays));
+      renderRelayList();
+    }).catch(function () {
+      userRelays = (typeof getRelays === "function") ? getRelays() : [];
+      renderRelayList();
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    var initialTab = (window.location.hash ? window.location.hash.replace("#", "") : "") || localStorage.getItem("wun_dashboard_active_tab") || "profile";
+    switchTab(initialTab);
+    loadRelays();
+    updatePreview();
+    if (typeof initDeckManager === "function") { initDeckManager(); }
+  });
+</script>
+<script src="{% static 'js/link_deck_manager.js' %}"></script>
+{% endblock %}

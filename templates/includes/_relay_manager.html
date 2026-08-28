@@ -1,0 +1,25 @@
+<div class="space-y-6">
+  <div>
+    <h2 class="text-sm font-mono font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100 mb-1">Sovereign Switchboard</h2>
+    <p class="text-xs text-slate-500 dark:text-slate-400">Manage your connected Nostr relays. Notes and profile updates are broadcasted across all active relays.</p>
+  </div>
+
+  <div id="relayList" class="space-y-2"></div>
+
+  <div class="flex flex-wrap items-center gap-2 pt-2">
+    <input type="text" id="relayInput" placeholder="wss://relay.example.com"
+           class="flex-1 min-w-[220px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+    <button type="button" onclick="addRelay()"
+            class="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-mono font-medium px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors flex-shrink-0">
+      Add Relay
+    </button>
+  </div>
+
+  <div class="flex items-center gap-3 pt-2">
+    <button type="button" onclick="saveRelays()"
+            class="bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold px-5 py-2.5 rounded-lg transition-colors shadow-sm">
+      Save Relays
+    </button>
+    <span id="relayStatus" class="text-xs font-mono text-slate-400 hidden"></span>
+  </div>
+</div>

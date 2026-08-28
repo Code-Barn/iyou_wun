@@ -1,0 +1,98 @@
+{% load static %}
+<div class="space-y-6">
+  <!-- Sovereign Handle Banner -->
+  <div id="deckHandleBanner" class="bg-slate-50 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-5">
+    <p class="text-[11px] font-mono uppercase tracking-wider text-slate-400 mb-1.5">Sovereign Canonical Handle</p>
+    <p id="deckHandleDisplay" class="text-lg font-mono font-bold text-violet-600 dark:text-violet-400">
+      {% if deck and deck.handle %}{{ deck.display_handle }}{% else %}Unclaimed{% endif %}
+    </p>
+    <div class="text-xs font-mono text-slate-500 dark:text-slate-400 mt-2 flex flex-wrap items-center gap-2">
+      <span class="font-medium text-slate-400">Canonical URL:</span>
+      <span id="deckCanonicalUrl" class="text-slate-700 dark:text-slate-300 break-all">
+        {% if deck and deck.handle %}{{ request.scheme }}://{{ request.get_host }}{{ deck.canonical_path }}{% else %}—{% endif %}
+      </span>
+      <button type="button" onclick="copyDeckUrl()" class="text-violet-600 dark:text-violet-400 hover:underline text-xs font-medium">Copy</button>
+    </div>
+  </div>
+
+  <!-- Claim Handle Form -->
+  <form onsubmit="return claimDeckHandle(event)" class="flex flex-wrap items-center gap-2">
+    {% csrf_token %}
+    <div class="flex items-center flex-1 min-w-[220px] bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5 focus-within:border-violet-500">
+      <span class="text-xs font-mono text-slate-400 mr-1">@</span>
+      <input type="text" id="deckHandleInput" value="{{ deck.handle|default:'' }}" placeholder="your-handle" maxlength="32"
+             class="flex-1 bg-transparent text-xs text-slate-900 dark:text-slate-100 focus:outline-none" />
+    </div>
+    <button type="submit" id="deckClaimBtn" class="bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold px-4 py-2.5 rounded-lg transition-colors flex-shrink-0 shadow-sm">
+      Claim Handle
+    </button>
+  </form>
+
+  <!-- Proof-of-Authority Verification Card -->
+  <div id="deckVerifyCard" class="rounded-xl p-4 sm:p-5 bg-emerald-50/80 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/60">
+    <p class="text-[11px] font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-400 mb-2">Proof-of-Authority Verification</p>
+    <div id="deckVerifyBadge" class="{% if not deck or not deck.is_verified %}hidden{% endif %}">
+      <p class="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">✓ VERIFIED CANONICAL OWNER</p>
+      <p class="text-xs font-mono text-slate-500 dark:text-slate-400 mt-1 break-all">
+        <span class="font-medium">Source:</span>
+        <a id="deckVerifySource" href="{{ deck.verified_source_url|default:'#' }}" target="_blank" rel="noopener noreferrer" class="text-violet-600 dark:text-violet-400 hover:underline break-all">
+          {{ deck.verified_source_url|default:'' }}
+        </a>
+      </p>
+    </div>
+    <div id="deckVerifyPrompt" class="{% if deck and deck.is_verified %}hidden{% endif %}">
+      <p class="text-xs text-slate-600 dark:text-slate-300 mb-3">
+        Prove ownership of an external bio (GitHub, X, Mastodon, Bluesky...) to claim the canonical <span class="font-mono font-semibold">@handle</span> with discriminator 0.
+      </p>
+      <button type="button" onclick="openVerifyModal()" class="bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-mono font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm">
+        Verify Profile / Claim Canonical Handle
+      </button>
+    </div>
+  </div>
+
+  <!-- Deck Headline Form -->
+  <div>
+    <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1.5">Deck Headline</label>
+    <div class="flex items-center gap-2">
+      <input type="text" id="deckHeadlineInput" value="{{ deck.headline|default:'' }}" maxlength="160" placeholder="One-line bio for your sovereign link deck card"
+             class="flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+      <button type="button" onclick="saveDeckHeadline()" class="bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 text-xs font-mono font-medium px-4 py-2.5 rounded-lg border border-slate-200 dark:border-slate-700 transition-colors flex-shrink-0">
+        Save
+      </button>
+    </div>
+    <span id="deckStatus" class="text-xs font-mono text-slate-400 hidden mt-1.5 block"></span>
+  </div>
+
+  <!-- Your Links Section -->
+  <div class="pt-2">
+    <h3 class="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3">Your Links</h3>
+    <div id="deckItemsList" class="space-y-2 mb-4"></div>
+
+    <!-- Add Link Form -->
+    <form onsubmit="return addDeckItem(event)" class="border border-slate-200 dark:border-slate-800 rounded-xl p-4 bg-slate-50/70 dark:bg-slate-950/60">
+      {% csrf_token %}
+      <div class="grid grid-cols-1 sm:grid-cols-[1fr_2fr] gap-3 mb-3">
+        <input type="text" id="deckItemTitle" placeholder="Title (e.g. My GitHub)" maxlength="64"
+               class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+        <input type="text" id="deckItemUrl" placeholder="https://...  |  nostr:...  |  did:..." maxlength="2048"
+               class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+      </div>
+      <div class="flex items-center justify-between gap-3">
+        <select id="deckItemIcon" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-700 dark:text-slate-300 focus:outline-none focus:border-violet-500">
+          <option value="x">𝕏 X</option>
+          <option value="github">💻 GitHub</option>
+          <option value="mastodon">🐘 Mastodon</option>
+          <option value="website">🌐 Website</option>
+          <option value="blog">✍️ Blog</option>
+          <option value="talk">💬 Talk</option>
+          <option value="poly">🗳️ Poly</option>
+          <option value="gallery">🖼️ Gallery</option>
+          <option value="link" selected>🔗 Link</option>
+        </select>
+        <button type="submit" class="bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm">
+          Add Link
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

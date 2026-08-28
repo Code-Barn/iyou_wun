@@ -322,24 +322,33 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
 
 ## Omni-Social Feed (Nostr)
 
-**File:** `apps/core/views.py` — `FeedView`, `relay_req()`
+**File:** `apps/core/views.py` — `FeedView`, `api_feed()`, `attach_reply_counts()`, `relay_req()`
 
 ### How It Works Today
 
-1. `FeedView.get_context_data()` fetches a multi-kind feed: Kind 1 (text), Kind 7 (reactions), Kind 1063 (media), Kind 1111 (comments), Kind 30023 (poll definitions), Kind 1112 (vote envelopes)
-2. A `WebSocketApp` connects to `wss://nos.lol` and sends a NIP-01 `REQ` message
-3. `EOSE` or a 10-second timeout signals completion
-4. `process_into_feed()` groups reactions/comments/votes under parents, injects Kind 0 profile data, and sorts reverse-chronologically
-5. **Double-Broadcast**: When posting, the signed event is sent simultaneously to:
+1. `FeedView.get_context_data()` fetches a multi-kind feed: Kind 1 (text notes), Kind 7 (reactions), Kind 1063 (file metadata / Blossom media), Kind 1111 (comments), Kind 30023 (poll definitions), Kind 1112 (vote envelopes).
+2. **Batch NIP-10 Reply Ingestion (`attach_reply_counts`)**:
+   - Queries connected relays with a single batch `filter_obj = {"kinds": [1, 1111], "#e": root_ids, "limit": 500}` across all discovered root notes.
+   - Tallies replies per root note ID and sets `note["reply_count"] = max(existing_replies, counts.get(nid, 0))`.
+   - Ensures fast, single-pass reply counter accuracy for both server-rendered feed/profile templates and `/api/feed` JSON streams without N+1 relay queries.
+3. **Inline URL Unfurling & Media Extraction (`extract_media_from_note()`)**:
+   - Parses raw Kind 1 note content for embedded image, video, and audio URLs (`.png`, `.jpg`, `.mp4`, `.mp3`, Blossom URLs, etc.).
+   - Extracts URLs into structured `media_attachments` dictionaries and strips URLs from the note's main text body to render clean text with embedded media cards.
+4. **Hero-Centric Conversation Threading (`?thread=<event_id>`)**:
+   - When `?thread=<id>` (or `?note=<id>`) is provided, `FeedView` activates focused thread mode.
+   - Displays the target note in a prominent hero container, renders recursive ancestor chains (`ancestors`), and loads 1-level direct descendant replies (`thread_replies`) with full interaction bars.
+5. **Deduplication Guard**:
+   - Ingests raw events from all configured relays in `DEFAULT_RELAYS` and filters duplicate IDs in memory before tree processing in `apps/core/nip10.py`.
+6. **Double-Broadcast**: When posting or replying, the signed event is sent simultaneously to:
    - `ws://127.0.0.1:9003` (local relay — triggers "Sovereign Copy Saved" toast)
    - `wss://relay.iyou.me` (project relay)
-   - `wss://nos.lol` (global relay)
-6. Broadcasting is **parallel** — one relay failure does not block others
-7. **Thread View**: `?thread=<event_id>` fetches a parent event and its children for focused conversation viewing
+   - `wss://nos.lol`, `wss://relay.damus.io`, `wss://relay.primal.net` (global relays)
+7. Broadcasting is **parallel** — one relay failure does not block others.
 
 ### Media Support (Kind 1063)
 
 Media files are uploaded to the local Blossom server at `http://127.0.0.1:9002/<sha256>` via HTTP PUT. A signed Kind 1063 event is then broadcast with the URL and MIME type. Events with `file_url` containing `127.0.0.1` are marked `is_sovereign` and display an amber badge.
+
 
 ### Gallery View
 
@@ -501,40 +510,56 @@ The `proofValue` is a hex-encoded Ed25519 signature (matching iyou_poly's verifi
 
 ---
 
-## Sovereign Profile Pages
+## Sovereign Profile Pages & Identity Resolution
 
-**Routes:** `/profile/<npub>/`
+**Routes:** `/profile/<npub>/`, `/u/<did>/`, `/@<handle>`
 
-**File:** `apps/core/views.py` — `ProfileView`, `fetch_profile_data()`, `fetch_text_notes()`, `fetch_media_assets()`
+**Files:** `apps/core/views.py` — `ProfileView`, `fetch_profile_data()`, `apps/core/models.py` (`UserLinkDeck`, `UserLinkItem`)
 
-Each profile page displays:
-- **Kind 0 metadata**: Avatar (picture), display name, bio, nip05 identifier
-- **Sovereign Score**: Count of the user's Kind 1063 events whose `file_url` points to `127.0.0.1` (local Blossom server)
-- **Recent Broadcasts**: Kind 1 text notes, enriched with profile data
-- **Media Assets**: Kind 1063 media in a compact grid with sovereign/verified badges
+### Hybrid Profile Resolution
 
-Profile pages are public (no login required).
-
-### Dashboard — Edit Profile
-
-**Files:** `templates/dashboard.html`, `static/js/bridge_client.js`
-
-Authenticated users can publish a Kind 0 profile event from the Dashboard:
-1. Form fields: Display Name, NIP-05 Identifier, Picture URL, Banner URL, Bio/About, Lightning Address (lud16)
-2. On submit, constructs a Kind 0 event with JSON-stringified content
-3. Signs via `bridgeClient.signEvent()` through the Tauri WebSocket bridge
-4. Broadcasts the signed event to all three relays in parallel
-5. Toast feedback on success/failure
+`ProfileView` uses a hybrid resolution pipeline to guarantee profile data availability even when external relays have not yet indexed or returned a Kind 0 metadata event:
+1. **Local DB Baseline**: Checks for a registered `UserLinkDeck` matching the user's DID or pubkey hex. Populates `display_name`, `headline`, `avatar_url`, `banner_url`, `nip05`, and `lud16` from local PostgreSQL/SQLite storage.
+2. **Relay Kind 0 Overlay**: Queries connected relays for Kind 0 events and non-destructively overlays fresh metadata.
+3. **Handle vs Display Name Separation**:
+   - `@handle`: Canonical, immutable/claimed routing anchor (`/@handle`) managed via the Sovereign Link Deck system.
+   - `Display Name`: Mutable, human-friendly presentation label rendered throughout feed cards and profile heroes.
+4. **Sovereign Link Deck & Proof-of-Authority (POA)**:
+   - Users can link external bios (GitHub, X, Mastodon, Bluesky) and verify them using one-time challenge tokens to claim canonical `@handle` identities (discriminator 0).
+   - Serves structured links with custom icons and bio badges.
 
 ---
 
-## XMPP Chat
+## Unified Dashboard Command Center
+
+**Route:** `/dashboard`
+
+**Files:** `templates/dashboard.html`, `templates/includes/_deck_manager.html`, `templates/includes/_relay_manager.html`, `static/js/bridge_client.js`, `static/js/link_deck_manager.js`
+
+The dashboard is structured as a unified command center extending `base.html` within a single responsive container:
+1. **Stateful URL-Hash Navigation**:
+   - Manages four stateful tab panels (`#profile`, `#deck`, `#settings`, `#account`) synced to `window.location.hash` and `localStorage.getItem('wun_dashboard_active_tab')`.
+   - Uses `history.replaceState` to maintain smooth tab transitions without jump scrolling.
+2. **Reactive 2-Column Profile Editor (`#tab-profile`)**:
+   - **Left Column**: Form inputs for Display Name, Avatar URL, Bio/Headline, Banner URL, NIP-05, and Lightning Address (LUD-16).
+   - **Right Column (Live Preview)**: Reactive mini-hero card with immediate 2-way data binding on `updatePreview()` (swaps avatar image vs initial monogram placeholder, dynamically updates banner background, displays NIP-05/LUD-16 badges).
+   - **Tauri Bridge Signing with Server Fallback**: Submitting signs a Kind 0 event via the local Tauri bridge (`ws://127.0.0.1:9001`) and broadcasts across relays; automatically falls back to `/api/profile/save/` if the bridge is offline.
+3. **Link Deck Manager (`#tab-deck`)**:
+   - Integrated handle claiming, POA bio verification modal, headline editor, and link item CRUD/reordering.
+4. **Sovereign Switchboard (`#tab-settings`)**:
+   - Active relay status indicators, dynamic relay addition/removal, and session sync.
+5. **Account & Key Info (`#tab-account`)**:
+   - Displays DID string, Nostr pubkey hex, npub, and mesh join date.
+
+---
+
+## XMPP Sovereign Chat
 
 **Route:** `/chat`
 
-**File:** `templates/chat.html`
+**Files:** `templates/chat.html`
 
-A minimal sovereign chat interface using [Converse.js](https://conversejs.org/) loaded via CDN.
+A minimal sovereign chat interface using [Converse.js](https://conversejs.org/) integrated via ES Module imports (`* as conversePkg`) with embedded 3-tier layout preservation.
 The XMPP endpoint is selected dynamically based on `WUN_USER_LEVEL`:
 
 | Level | Mode | XMPP Domain | WebSocket Endpoint |
@@ -542,13 +567,15 @@ The XMPP endpoint is selected dynamically based on `WUN_USER_LEVEL`:
 | `1` | Managed (cluster) | `iyou.me` | `wss://xmpp.iyou.me:5222/xmpp-websocket` |
 | `2` | Sovereign (local enclave) | `127.0.0.1` | `wss://home.iyou.me:5222/xmpp-websocket` |
 
-- **JID format**: `{nostr_pubkey_hex}@{domain}` (hex pubkey derived from DID, RFC 7622 nodeprep compliant)
-- **Password**: `{nostr_hex_pubkey}` (derived from the DID)
-- **Fullscreen mode**: Converse.js fills the viewport below the nav bar
-- **Auto-login**: Connects on page load using the derived credentials
-- **Discovery disabled**: `discoverConnectionMethods: false` eliminates host-meta loops
+- **ES Module Loading**: Loaded via `<script type="module">` importing from CDN and binding `converse` to `window.converse`.
+- **JID format**: `{nostr_pubkey_hex}@{domain}` (hex pubkey derived from DID, RFC 7622 nodeprep compliant).
+- **Password**: `{nostr_hex_pubkey}` (derived from the DID).
+- **Fullscreen Embedded Viewport**: Converse.js fits seamlessly into the responsive app shell below the unified navigation bar.
+- **Auto-login**: Connects on page load using derived credentials.
+- **Discovery disabled**: `discoverConnectionMethods: false` eliminates host-meta loops.
 
 All messages remain local to the :5222 XMPP server and are NEVER stored in the WUN database.
+
 
 ---
 
@@ -674,10 +701,10 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 ## Running Tests
 
 ```bash
-uv run python manage.py test apps.core.tests
+uv run python manage.py test apps.core
 ```
 
-Tests cover (115 total across 5 modules):
+Tests cover (**279 total across 6 test modules**):
 
 ### `test_auth.py` (17 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5 tests)
@@ -685,19 +712,21 @@ Tests cover (115 total across 5 modules):
 - `PasswordRejectionTest` — OIDC users have unusable passwords, ModelBackend rejects them (4 tests)
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3 tests)
 
-### `test_views.py` (21 tests)
+### `test_views.py` (62 tests)
 - `HomeViewTest` — root redirect to /feed (1 test)
 - `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link (5 tests)
 - `ChatViewTest` — anonymous redirect to IdP, XMPP init, nav links (6 tests)
 - `GalleryViewTest` — media heading, nav links, anonymous access, tab context (5 tests — public-read)
-- `ProfileViewTest` — invalid npub error, valid npub page render (2 tests)
-- `DashboardProfileTest` — profile section, publish button (2 tests)
+- `ProfileViewTest` — invalid npub error, valid npub page render, hybrid local DB baseline fallback (4 tests)
+- `DashboardProfileTest` — profile section, publish button, independent handle vs display name persistence (3 tests)
+- `FeedModernizationAndExternalAttributionTest` — Kind 1 inline media extraction, hero conversation threading, 5-button action bar, cursor pagination, batch reply counter rendering, kebab dropdown actions (38 tests)
 
-### `test_feed.py` (31 tests)
+### `test_feed.py` (48 tests)
 - `ProcessIntoFeedTest` — empty input, kind 1/1063/7/1111/30023/1112 routing, reaction grouping/dedup,
   orphan comment preservation, sovereign flag, profile enrichment, sort order,
   max_items truncation, malformed events, missing fields, mixed kinds, npub generation,
-  poll option extraction, scope tags, vote grouping under parent poll, orphan vote dropped
+  poll option extraction, scope tags, vote grouping under parent poll, orphan vote dropped,
+  multi-relay event deduplication, NIP-10 thread tree builder, batch reply count tallying via `attach_reply_counts`
 
 ### `test_gallery.py` (26 tests)
 - `CategorizeMediaTest` — 21 tests: image/video/audio MIME grouping, NIP-94 tag extraction, missing tags, `duration` field, `blurhash`, `blossom_hash`, mixed media, long audio, glob wildcard, unknown MIME
@@ -707,6 +736,13 @@ Tests cover (115 total across 5 modules):
 ### `test_issuance.py` (19 tests)
 - `DIDKitUnitTest` — key loading (32/64 hex), VC structure, sign/verify round-trip, wrong-key rejection, tamper detection (6 tests)
 - `IssueCredentialAPITest` — anonymous 302, non-staff 403, staff can issue, cryptographically valid response, GET returns 405, missing field validation, invalid DID, invalid JSON, fidelity score bounds, DB persistence (13 tests)
+
+### `test_deck.py` (107 tests)
+- `UserLinkDeckModelTest` & `UserLinkItemModelTest` — model creation, handle constraints, canonical URL helpers
+- `ClaimHandleTest` — handle availability, reserved handles, discriminator assignment (#0 vs #1-9999)
+- `ProofOfAuthorityVerificationTest` — external bio challenge token generation, cryptographic validity, token expiration, allowlisted domains (GitHub, X, Mastodon, Bluesky), proof verification
+- `LinkDeckAPITest` — Link item CRUD, toggle active status, reorder position, headline persistence, public `/@<handle>` view rendering
+
 
 ---
 

@@ -1,198 +1,231 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html>
-<head>
-    <title>{% if profile.name %}{{ profile.name }}{% else %}{{ npub|truncatechars:20 }}{% endif %} - Profile</title>
-    <script>
-      (function() {
-        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
-        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
-        if (theme === 'dark' || theme === 'stealth') {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
-      })();
-    </script>
-    <link rel="stylesheet" href="{% static 'css/output.css' %}">
-</head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200">
-    {% include 'includes/_ecosystem_bar.html' %}
-    {% include 'includes/_standard_header.html' %}
-    {% include '_nav.html' %}
 
-    <main class="max-w-4xl mx-auto px-4 py-10">
-        {% if error %}
-        <div class="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-            <p class="text-red-600 font-medium">{{ error }}</p>
-            <a href="{% url 'feed' %}" class="text-sm text-indigo-600 hover:text-indigo-800 mt-2 inline-block">&larr; Back to Feed</a>
+{% block title %}{{ profile.name|default:target_npub }} — iyou_wun{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
+  {% if error %}
+  <div class="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl p-6 text-center">
+    <p class="text-red-600 dark:text-red-400 font-medium">{{ error }}</p>
+    <a href="{% url 'feed' %}" class="text-sm text-violet-600 dark:text-violet-400 hover:underline mt-2 inline-block">&larr; Back to Feed</a>
+  </div>
+  {% else %}
+  <!-- Profile Hero Header -->
+  <div class="relative bg-white dark:bg-slate-900 rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800 shadow-sm mb-6">
+    <!-- Banner -->
+    <div class="h-40 sm:h-56 w-full bg-gradient-to-r from-violet-900 via-slate-900 to-slate-950 overflow-hidden relative">
+      {% if profile.banner %}
+      <img src="{{ profile.banner }}" alt="Profile banner" class="w-full h-full object-cover" />
+      {% endif %}
+    </div>
+
+
+    <!-- Profile Details & Action Bar -->
+    <div class="px-4 sm:px-6 pb-6 relative pt-0">
+      <div class="flex flex-col sm:flex-row sm:items-end justify-between gap-4 -mt-16 sm:-mt-20 mb-4">
+        <!-- Avatar & Basic Identity -->
+        <div class="flex items-end gap-3.5 sm:gap-4">
+          <div class="relative">
+            {% if profile.picture %}
+            <img src="{{ profile.picture }}" alt="{{ profile.name }}" 
+                 class="w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover border-4 border-white dark:border-slate-900 shadow-xl bg-slate-800" />
+            {% else %}
+            <div class="w-24 h-24 sm:w-32 sm:h-32 rounded-full border-4 border-white dark:border-slate-900 shadow-xl bg-violet-950 flex items-center justify-center">
+              <span class="text-3xl font-bold font-mono text-violet-400">{{ profile.name|default:"N"|first|upper }}</span>
+            </div>
+            {% endif %}
+          </div>
+          <div class="mb-1">
+            <h1 class="text-xl sm:text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2 flex-wrap">
+              <span>{% firstof profile.display_name profile.name owner_deck.display_name target_npub|truncatechars:18 %}</span>
+              {% if owner_deck and owner_deck.handle %}
+              <a href="/@{{ owner_deck.handle }}" class="text-xs font-mono text-violet-600 dark:text-violet-400 hover:underline">@{{ owner_deck.handle }}</a>
+              {% endif %}
+              {% if profile.nip05 %}
+              <span class="inline-flex items-center gap-1 text-xs font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/60 px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800/80">
+                <svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                {{ profile.nip05 }}
+              </span>
+              {% endif %}
+              {% if owner_deck.is_verified %}
+              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-500/30" title="Verified Sovereign Ownership via {{ owner_deck.verified_source_url }}">
+                ✓ VERIFIED
+              </span>
+              {% endif %}
+              <span class="author-badge-slot" data-author-slot="{{ target_pubkey_hex }}"></span>
+            </h1>
+            <p class="text-xs font-mono text-slate-400 dark:text-slate-500 truncate max-w-[280px] sm:max-w-md" title="{{ target_npub }}">
+              {{ target_npub }}
+            </p>
+          </div>
+
+        </div>
+
+        <!-- Action Cluster -->
+        <div class="flex items-center gap-2 self-start sm:self-end flex-wrap">
+          {% if is_owner %}
+          <a href="{% url 'dashboard' %}" class="px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 rounded-lg text-xs font-mono font-medium transition">
+            ✏️ Edit Profile
+          </a>
+          {% elif request.user.is_authenticated %}
+          <button id="follow-action-btn" type="button" 
+                  class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-mono font-semibold transition"
+                  data-follow-target="{{ target_pubkey_hex }}"
+                  data-follow-petname="{{ profile.name|default:'' }}">
+            <span class="btn-spinner hidden animate-spin">⏳</span>
+            <span class="btn-label">+ Follow</span>
+          </button>
+          <a href="{% url 'chat' %}?peer={{ target_npub }}" class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs font-mono transition" title="Direct Message">
+            💬 Message
+          </a>
+          <button type="button" class="p-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-lg text-xs transition" onclick="setEnclavePetname('{{ target_pubkey_hex }}', '{{ profile.name|default:''|escapejs }}')" title="Set Enclave Petname">
+            🛡️
+          </button>
+          {% if profile.lud16 %}
+          <a href="lightning:{{ profile.lud16 }}" class="px-3 py-2 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-300 rounded-lg text-xs font-mono transition flex items-center gap-1">
+            ⚡ Tip
+          </a>
+          {% endif %}
+          {% else %}
+          {% if profile.lud16 %}
+          <a href="lightning:{{ profile.lud16 }}" class="px-3 py-2 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700/60 text-amber-700 dark:text-amber-300 rounded-lg text-xs font-mono transition flex items-center gap-1">
+            ⚡ Tip
+          </a>
+          {% endif %}
+          {% endif %}
+        </div>
+
+      </div>
+
+      <!-- Bio / About -->
+      {% if profile.about %}
+      <div class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed max-w-3xl whitespace-pre-wrap mb-4">
+        {{ profile.about|linebreaksbr }}
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="flex items-center gap-1 sm:gap-2 px-4 sm:px-6 border-t border-slate-200 dark:border-slate-800 overflow-x-auto bg-slate-50/50 dark:bg-slate-900/50 text-xs font-mono">
+      <button type="button" class="profile-tab px-3 py-2.5 border-b-2 border-violet-600 text-violet-600 dark:text-violet-400 font-semibold" data-target="tab-posts">
+        📝 Posts ({{ posts|length }})
+      </button>
+      <button type="button" class="profile-tab px-3 py-2.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition" data-target="tab-replies">
+        💬 Replies ({{ replies|length }})
+      </button>
+      <button type="button" class="profile-tab px-3 py-2.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition" data-target="tab-media">
+        🖼️ Media ({{ media_assets|length }})
+      </button>
+      {% if link_deck %}
+      <button type="button" class="profile-tab px-3 py-2.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition" data-target="tab-links">
+        🔗 Link Deck ({{ deck_items|length }})
+      </button>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Tab Panels -->
+  <!-- 1. Posts Panel -->
+  <div id="tab-posts" class="tab-panel space-y-3">
+    {% for note in posts %}
+    <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+      {% include "includes/_thread_post.html" with note=note %}
+    </div>
+    {% empty %}
+    <div class="text-center py-12 text-slate-400 font-mono text-xs">No posts authored by this creator.</div>
+    {% endfor %}
+  </div>
+
+  <!-- 2. Replies Panel -->
+  <div id="tab-replies" class="tab-panel hidden space-y-3">
+    {% for reply in replies %}
+    <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+      {% include "includes/_thread_post.html" with note=reply is_reply=True %}
+    </div>
+    {% empty %}
+    <div class="text-center py-12 text-slate-400 font-mono text-xs">No replies authored by this creator.</div>
+    {% endfor %}
+  </div>
+
+  <!-- 3. Media Panel -->
+  <div id="tab-media" class="tab-panel hidden">
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 sm:gap-4">
+      {% for asset in media_assets %}
+      <div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950 relative group aspect-square">
+        {% if asset.media_type == 'video' %}
+        <video src="{{ asset.media_url }}" class="w-full h-full object-cover" controls preload="metadata"></video>
+        <div class="absolute inset-0 flex items-center justify-center bg-black/30 group-hover:bg-black/10 transition pointer-events-none">
+          <span class="text-white text-xl">▶</span>
+        </div>
+        {% elif asset.media_type == 'audio' %}
+        <div class="w-full h-full flex flex-col items-center justify-center p-3 bg-slate-900 text-center">
+          <span class="text-3xl mb-2">🎵</span>
+          <audio src="{{ asset.media_url }}" controls class="w-full"></audio>
         </div>
         {% else %}
-
-        <!-- Profile Hero -->
-        <div class="bg-white rounded-lg shadow-md mb-6 overflow-hidden">
-            <!-- Banner -->
-            {% if profile.banner %}
-            <div class="h-40 sm:h-52 bg-cover bg-center" style="background-image: url('{{ profile.banner|escape }}');"></div>
-            {% else %}
-            <div class="h-40 sm:h-52 bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-600"></div>
-            {% endif %}
-
-            <div class="px-8 pb-8">
-                <div class="flex items-end gap-5 -mt-12 relative z-10">
-                    <div class="flex-shrink-0">
-                        {% if profile.picture %}
-                        <img src="{{ profile.picture }}" alt="" class="w-28 h-28 rounded-full object-cover border-4 border-white shadow-lg">
-                        {% else %}
-                        <div class="w-28 h-28 bg-indigo-100 rounded-full flex items-center justify-center border-4 border-white shadow-lg">
-                            <span class="text-indigo-600 text-3xl font-bold">{{ profile.name|default:"?"|first }}</span>
-                        </div>
-                        {% endif %}
-                    </div>
-                    <div class="flex-1 min-w-0 pb-1">
-                        <div class="flex items-center gap-3 flex-wrap">
-                            <h1 class="text-2xl font-bold text-gray-900 leading-tight">{{ profile.name|default:"Anonymous" }}</h1>
-                            {% if request.user.is_authenticated and request.user.username != profile_did %}
-                            <button 
-                              id="follow-action-btn"
-                              class="px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
-                              data-follow-target="{{ target_nostr_pubkey_hex }}"
-                              data-follow-petname="{{ profile_handle|default:'' }}"
-                            >
-                              <span class="btn-spinner hidden animate-spin">⏳</span>
-                              <span class="btn-label">+ Follow</span>
-                            </button>
-                            {% endif %}
-                        </div>
-                        {% if profile.nip05 %}
-
-                        <p class="text-sm text-indigo-600 font-medium flex items-center gap-1.5 mt-0.5">
-                            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
-                            {{ profile.nip05 }}
-                            {% if owner_deck.is_verified %}
-                              <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-500/30 ml-1.5" title="Verified Sovereign Ownership via {{ owner_deck.verified_source_url }}">
-                                ✓ VERIFIED
-                              </span>
-                            {% endif %}
-                        </p>
-                        {% elif owner_deck.is_verified %}
-                        <p class="text-sm mt-0.5">
-                            <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-500/30" title="Verified Sovereign Ownership via {{ owner_deck.verified_source_url }}">
-                                ✓ VERIFIED
-                            </span>
-                        </p>
-                        {% endif %}
-                    </div>
-                    <div class="flex-shrink-0 pb-1">
-                        <div class="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-center">
-                            <p class="text-2xl font-bold text-amber-700">{{ sovereign_score }}</p>
-                            <p class="text-xs text-amber-600 font-medium">Sovereign<br>Score</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="mt-4">
-                    <p class="text-xs font-mono text-gray-500 break-all">{{ npub }}</p>
-                </div>
-
-                {% if profile.about %}
-                <p class="text-sm text-gray-600 mt-3 whitespace-pre-wrap leading-relaxed">{{ profile.about }}</p>
-                {% endif %}
-
-                {% if profile.lud16 %}
-                <div class="mt-4 flex items-center gap-3">
-                    <a href="lightning:{{ profile.lud16 }}" class="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors">
-                        <span class="text-lg">&#9834;</span> Tip {{ profile.lud16 }}
-                    </a>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        {% if deck_items %}
-        <div class="bg-white rounded-lg shadow-md p-6 mb-6">
-            <h2 class="text-lg font-bold mb-3">Links</h2>
-            <div class="flex flex-wrap gap-2">
-                {% for item in deck_items %}
-                <a href="{{ item.url }}"
-                   target="_blank"
-                   rel="noopener noreferrer"
-                   class="inline-flex items-center gap-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 text-indigo-700 text-sm font-medium px-3 py-1.5 rounded-full transition-colors">
-                    <span>{{ item.icon_emoji }}</span>
-                    {{ item.title }}
-                    {% if item.is_ecosystem_link %}<span class="text-[10px] uppercase font-mono bg-violet-100 text-violet-700 px-1 rounded-full">mesh</span>{% endif %}
-                </a>
-                {% endfor %}
-            </div>
-        </div>
+        <img src="{{ asset.media_url }}" alt="{{ asset.display_title }}" class="w-full h-full object-cover group-hover:scale-105 transition duration-200 cursor-pointer" onclick="window.open('{{ asset.media_url }}', '_blank')" loading="lazy" />
         {% endif %}
+      </div>
+      {% empty %}
+      <div class="col-span-full text-center py-12 text-slate-400 font-mono text-xs">No media assets found.</div>
+      {% endfor %}
+    </div>
+  </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <!-- Recent Broadcasts -->
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-lg font-bold mb-4">Recent Broadcasts</h2>
-                {% if broadcasts %}
-                <div class="space-y-4">
-                    {% for note in broadcasts %}
-                    <div class="border border-gray-200 rounded-lg p-4 hover:shadow-sm transition-shadow">
-                        <p class="text-sm text-gray-700 whitespace-pre-wrap">{{ note.content|truncatechars:200 }}</p>
-                        <p class="text-xs text-gray-400 mt-2">{{ note.created_at|date:"Y-m-d H:i" }}</p>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="text-sm text-gray-500 text-center py-8">No broadcasts yet.</p>
-                {% endif %}
-            </div>
-
-            <!-- Media Assets -->
-            <div class="bg-white rounded-lg shadow-md p-6">
-                <h2 class="text-lg font-bold mb-4">Media Assets</h2>
-                {% if media %}
-                <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                    {% for item in media %}
-                    <div class="border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow">
-                        {% if item.mime_type and item.mime_type|slice:":5" == "image" %}
-                        <div class="aspect-square bg-gray-100">
-                            <img src="{{ item.thumbnail_url|default:item.file_url }}" alt="{{ item.alt_text }}" class="w-full h-full object-cover" loading="lazy">
-                        </div>
-                        {% elif item.mime_type and item.mime_type|slice:":5" == "video" %}
-                        <div class="aspect-square bg-gray-900 flex items-center justify-center relative">
-                            <video src="{{ item.file_url }}" class="w-full h-full object-cover" preload="metadata"></video>
-                            <span class="absolute text-white text-3xl opacity-80">&#9654;</span>
-                        </div>
-                        {% elif item.mime_type and item.mime_type|slice:":5" == "audio" %}
-                        <div class="aspect-square bg-gradient-to-br from-violet-100 to-indigo-100 flex items-center justify-center">
-                            <span class="text-3xl">&#127925;</span>
-                        </div>
-                        {% else %}
-                        <div class="aspect-square bg-gray-100 flex items-center justify-center">
-                            <span class="text-3xl text-gray-400">&#128196;</span>
-                        </div>
-                        {% endif %}
-                        <div class="p-2">
-                            <div class="flex items-center gap-1">
-                                {% if item.is_sovereign %}
-                                <span class="bg-amber-100 text-amber-800 text-xs font-medium px-1.5 py-0.5 rounded-full">Sovereign</span>
-                                {% else %}
-                                <span class="bg-green-100 text-green-800 text-xs font-medium px-1.5 py-0.5 rounded-full">Verified</span>
-                                {% endif %}
-                            </div>
-                            <p class="text-xs text-gray-400 mt-1">{{ item.created_at|date:"Y-m-d" }}</p>
-                        </div>
-                    </div>
-                    {% endfor %}
-                </div>
-                {% else %}
-                <p class="text-sm text-gray-500 text-center py-8">No media assets yet.</p>
-                {% endif %}
-            </div>
-        </div>
-
+  <!-- 4. Link Deck Panel -->
+  {% if link_deck %}
+  <div id="tab-links" class="tab-panel hidden max-w-xl mx-auto space-y-3 py-4">
+    {% for item in deck_items %}
+    <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" 
+       class="flex items-center justify-between p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-violet-500 dark:hover:border-violet-500 hover:shadow-md transition">
+      <span class="flex items-center gap-2.5 min-w-0">
+        <span>{{ item.icon_emoji }}</span>
+        <span class="font-medium text-sm text-slate-800 dark:text-slate-200 truncate">{{ item.title }}</span>
+        {% if item.is_ecosystem_link %}
+        <span class="text-[10px] uppercase font-mono bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded-full border border-violet-200 dark:border-violet-800/60">mesh</span>
         {% endif %}
-    </main>
-    <script src="{% static 'js/theme.js' %}"></script>
-    <script src="{% static 'js/contact_manager.js' %}" defer></script>
-</body>
+      </span>
+      <span class="text-xs font-mono text-slate-400">↗</span>
+    </a>
+    {% empty %}
+    <div class="text-center py-8 text-slate-400 font-mono text-xs">No public links in this deck.</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+{% endblock %}
 
-</html>
+{% block extra_js %}
+<script src="{% static 'js/feed_interactions.js' %}"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    const tabs = document.querySelectorAll(".profile-tab");
+    const panels = document.querySelectorAll(".tab-panel");
+
+    tabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        tabs.forEach(t => {
+          t.classList.remove("border-violet-600", "text-violet-600", "dark:text-violet-400", "font-semibold");
+          t.classList.add("border-transparent", "text-slate-500");
+        });
+        tab.classList.add("border-violet-600", "text-violet-600", "dark:text-violet-400", "font-semibold");
+        tab.classList.remove("border-transparent", "text-slate-500");
+
+        const targetId = tab.dataset.target;
+        panels.forEach(panel => {
+          panel.classList.toggle("hidden", panel.id !== targetId);
+        });
+      });
+    });
+
+    // Scan for Trust Lens aliases
+    if (window.TrustLens && typeof window.TrustLens.scanDOM === "function") {
+      window.TrustLens.scanDOM();
+    } else if (window.trustLens && typeof window.trustLens.scan === "function") {
+      window.trustLens.scan();
+    }
+  });
+</script>
+{% endblock %}

@@ -76,19 +76,29 @@
         return DEFAULT_RELAYS;
     }
 
-    function getBridgeUrl() {
+    function getBridgeWsUrl() {
+        if (typeof window !== "undefined" && window.talkContext && window.talkContext.bridgeWsUrl) {
+            return window.talkContext.bridgeWsUrl;
+        }
         if (global.bridgeClient && typeof global.bridgeClient.getBridgeUrl === "function") {
             const url = global.bridgeClient.getBridgeUrl();
             if (url) return url;
         }
         if (global.TAURI_SIGNING_BRIDGE) return global.TAURI_SIGNING_BRIDGE;
         if (global.BRIDGE_WS_URL) return global.BRIDGE_WS_URL;
-        const scriptTag = document.querySelector('script[data-bridge-url]');
+        const scriptTag = typeof document !== "undefined" ? document.querySelector('script[data-bridge-url]') : null;
         if (scriptTag && scriptTag.getAttribute('data-bridge-url')) {
             return scriptTag.getAttribute('data-bridge-url');
         }
-        return DEFAULT_BRIDGE_WS_URL;
+        return (typeof window !== "undefined" && window.location && window.location.protocol === 'https:')
+            ? 'wss://home.iyou.me:9001/'
+            : 'ws://127.0.0.1:9001/';
     }
+
+    function getBridgeUrl() {
+        return getBridgeWsUrl();
+    }
+
 
     async function getCurrentUserPubkey() {
         if (global.bridgeClient && typeof global.bridgeClient.getEffectivePubkey === "function") {

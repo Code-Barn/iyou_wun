@@ -14,10 +14,13 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
+from unittest.mock import patch
+
 from django.test import TestCase
 
 from ..views import process_into_feed
 from .helpers import make_event, VALID_PUBKEY_HEX
+
 
 
 class ProcessIntoFeedTest(TestCase):
@@ -173,7 +176,8 @@ class ProcessIntoFeedTest(TestCase):
         }
         roots = self._roots(events, profiles=profiles)
         self.assertEqual(roots[0]["author_name"], "Alice")
-        self.assertEqual(roots[0]["author_avatar"], "http://example.com/avatar.png")
+        self.assertEqual(roots[0]["author_avatar"], "https://example.com/avatar.png")
+
 
     def test_profile_enrichment_falls_back_to_name(self):
         events = {"e1": make_event("e1", 1)}
@@ -323,3 +327,253 @@ class ProcessIntoFeedTest(TestCase):
         result = process_into_feed(events)
         ids = {i["id"] for i in result["roots"]}
         self.assertEqual(ids, {"note", "poll"})
+
+    def test_external_relay_note_author_did_is_empty(self):
+        external_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        events = {"ext": make_event("ext", 1, pubkey=external_pk, content="external note")}
+        roots = self._roots(events)
+        self.assertEqual(roots[0]["author_did"], "")
+        self.assertNotIn("did:iyou:", roots[0]["author_did"])
+
+    def test_nip05_and_lud16_populated_from_profile(self):
+        events = {"e1": make_event("e1", 1)}
+        profiles = {
+            VALID_PUBKEY_HEX: {
+                "display_name": "JB",
+                "nip05": "jb55@jb55.com",
+                "lud16": "jb55@zbd.gg",
+            }
+        }
+        roots = self._roots(events, profiles=profiles)
+        self.assertEqual(roots[0]["nip05"], "jb55@jb55.com")
+        self.assertEqual(roots[0]["lud16"], "jb55@zbd.gg")
+
+    def test_sovereign_registered_user_resolves_author_did(self):
+        from django.contrib.auth.models import User
+        # User with a matching pubkey DID
+        User.objects.create_user(username="did:key:z6MkuG2validuser", first_name="Sovereign")
+        # In views.py, resolve_author_did will match when did_to_pubkey matches
+        with patch("apps.core.views.did_to_pubkey", return_value=VALID_PUBKEY_HEX):
+            events = {"e1": make_event("e1", 1, pubkey=VALID_PUBKEY_HEX)}
+            roots = self._roots(events)
+            self.assertEqual(roots[0]["author_did"], "did:key:z6MkuG2validuser")
+
+    def test_nip10_thread_tree_preserves_parent_and_reply_to_metadata(self):
+        from apps.core.nip10 import build_thread_tree
+
+        parent_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        raw_events = {
+            "root_post": make_event("root_post", 1, pubkey=parent_pk, content="Root post content"),
+            "reply_post": make_event("reply_post", 1111, pubkey=VALID_PUBKEY_HEX, content="Reply content", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "root_post", "", "reply"],
+                ["p", parent_pk, "", "reply"],
+            ]),
+        }
+        profiles = {
+            parent_pk: {"display_name": "SovereignParent", "name": "parent"},
+        }
+        tree = build_thread_tree(raw_events, profiles=profiles)
+        self.assertEqual(len(tree["roots"]), 1)
+        root = tree["roots"][0]
+        self.assertEqual(root["id"], "root_post")
+        self.assertEqual(root["reply_count"], 1)
+        self.assertEqual(len(root["replies"]), 1)
+
+        reply = root["replies"][0]
+        self.assertEqual(reply["id"], "reply_post")
+        self.assertEqual(reply["parent_id"], "root_post")
+        self.assertEqual(reply["root_id"], "root_post")
+        self.assertEqual(reply["reply_to_pubkey"], parent_pk)
+        self.assertEqual(reply["reply_to_name"], "SovereignParent")
+        self.assertTrue(reply["reply_to_npub"].startswith("npub1"))
+
+    def test_kind_1_with_reply_marker_recognized_as_reply(self):
+        from apps.core.nip10 import build_thread_tree
+
+        raw_events = {
+            "root_note": make_event("root_note", 1, content="Top note"),
+            "k1_reply": make_event("k1_reply", 1, content="Kind 1 reply", tags=[
+                ["e", "root_note", "", "reply"],
+            ]),
+        }
+        tree = build_thread_tree(raw_events)
+        self.assertEqual(len(tree["roots"]), 1)
+        root = tree["roots"][0]
+        self.assertEqual(root["id"], "root_note")
+        self.assertEqual(len(root["replies"]), 1)
+        self.assertEqual(root["replies"][0]["id"], "k1_reply")
+        self.assertEqual(root["replies"][0]["parent_id"], "root_note")
+
+    def test_sanitize_media_url_upgrades_http_to_https(self):
+        from apps.core.nip10 import sanitize_media_url
+
+        self.assertEqual(sanitize_media_url("http://cdn.iyou.me/image.png"), "https://cdn.iyou.me/image.png")
+        self.assertEqual(sanitize_media_url("https://cdn.iyou.me/image.png"), "https://cdn.iyou.me/image.png")
+        # Localhost / 127.0.0.1 stays http
+        self.assertEqual(sanitize_media_url("http://127.0.0.1:9003/blob"), "http://127.0.0.1:9003/blob")
+        self.assertEqual(sanitize_media_url(""), "")
+
+    def test_fetch_thread_hero_reconstruction_with_ancestors_and_direct_replies(self):
+        from apps.core.views import fetch_thread
+
+        parent_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        hero_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        child_pk = "0000000000000000000000000000000000000000000000000000000000000002"
+
+        raw_events = {
+            "grandparent": make_event("grandparent", 1, pubkey=parent_pk, content="Grandparent root"),
+            "parent_post": make_event("parent_post", 1111, pubkey=parent_pk, content="Parent note", tags=[
+                ["e", "grandparent", "", "root"],
+                ["e", "grandparent", "", "reply"],
+                ["p", parent_pk, "", "reply"],
+            ]),
+            "hero_note": make_event("hero_note", 1111, pubkey=hero_pk, content="Hero note being inspected", tags=[
+                ["e", "grandparent", "", "root"],
+                ["e", "parent_post", "", "reply"],
+                ["p", parent_pk, "", "reply"],
+            ]),
+            "direct_child": make_event("direct_child", 1111, pubkey=child_pk, content="Direct child of hero", tags=[
+                ["e", "grandparent", "", "root"],
+                ["e", "hero_note", "", "reply"],
+                ["p", hero_pk, "", "reply"],
+            ]),
+            "sub_child": make_event("sub_child", 1111, pubkey=child_pk, content="Sub-reply under direct child", tags=[
+                ["e", "grandparent", "", "root"],
+                ["e", "direct_child", "", "reply"],
+                ["p", child_pk, "", "reply"],
+            ]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=raw_events):
+            result = fetch_thread("hero_note")
+
+        hero = result["thread_root"]
+        self.assertEqual(hero["id"], "hero_note")
+        self.assertEqual(len(result["ancestors"]), 2)
+        self.assertEqual(result["ancestors"][0]["id"], "grandparent")
+        self.assertEqual(result["ancestors"][1]["id"], "parent_post")
+
+        # Direct replies to hero
+        self.assertEqual(len(hero["replies"]), 1)
+        self.assertEqual(hero["replies"][0]["id"], "direct_child")
+        # Sub-reply count under direct_child
+        self.assertEqual(hero["replies"][0]["reply_count"], 1)
+
+    def test_kind_1_extracts_embedded_image_and_video_urls(self):
+        from apps.core.nip10 import extract_media_from_note
+
+        note = {
+            "kind": 1,
+            "content": "Check out this visual\nhttps://cdn.iyou.me/pic.png\nAnd video https://cdn.iyou.me/clip.mp4",
+            "tags": [],
+        }
+        enriched = extract_media_from_note(note)
+        attachments = enriched.get("media_attachments", [])
+        self.assertEqual(len(attachments), 2)
+        self.assertEqual(attachments[0]["type"], "image")
+        self.assertEqual(attachments[0]["url"], "https://cdn.iyou.me/pic.png")
+        self.assertEqual(attachments[1]["type"], "video")
+        self.assertEqual(attachments[1]["url"], "https://cdn.iyou.me/clip.mp4")
+        self.assertEqual(enriched["display_content"], "Check out this visual\nAnd video")
+
+    def test_kind_1063_populates_media_attachments_from_nip94_tags(self):
+        from apps.core.nip10 import extract_media_from_note
+
+        note = {
+            "kind": 1063,
+            "content": "Blossom file upload",
+            "tags": [
+                ["url", "http://cdn.iyou.me/image.jpg"],
+                ["m", "image/jpeg"],
+                ["dim", "1920x1080"],
+                ["thumb", "http://cdn.iyou.me/thumb.jpg"],
+                ["alt", "Mountain landscape"],
+                ["x", "abc123hash"],
+            ],
+        }
+        enriched = extract_media_from_note(note)
+        attachments = enriched.get("media_attachments", [])
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0]["type"], "image")
+        self.assertEqual(attachments[0]["url"], "https://cdn.iyou.me/image.jpg")
+        self.assertEqual(attachments[0]["dim"], "1920x1080")
+        self.assertEqual(attachments[0]["thumb"], "https://cdn.iyou.me/thumb.jpg")
+        self.assertEqual(attachments[0]["alt"], "Mountain landscape")
+        self.assertEqual(attachments[0]["hash"], "abc123hash")
+        self.assertEqual(enriched["media_url"], "https://cdn.iyou.me/image.jpg")
+
+    def test_process_into_feed_deduplicates_duplicate_event_ids(self):
+        from apps.core.views import process_into_feed
+
+        e1 = make_event("dup_1", 1, content="Original note", created_at=1700000000)
+        e1_dup = make_event("dup_1", 1, content="Duplicate note copy", created_at=1700000000)
+        e2 = make_event("dup_2", 1, content="Second note", created_at=1700000100)
+
+        # Pass as list with duplicates
+        raw_list = [e1, e1_dup, e2]
+        feed = process_into_feed(raw_list)
+        roots = feed["roots"]
+        self.assertEqual(len(roots), 2)
+        root_ids = [r["id"] for r in roots]
+        self.assertEqual(len(root_ids), len(set(root_ids)))
+        self.assertIn("dup_1", root_ids)
+        self.assertIn("dup_2", root_ids)
+
+    def test_build_thread_tree_deduplicates_duplicate_events_and_replies(self):
+        from apps.core.nip10 import build_thread_tree
+
+        root_ev = make_event("root_1", 1, content="Root post")
+        reply_ev1 = make_event("reply_1", 1111, content="Reply", tags=[["e", "root_1", "", "reply"]])
+        reply_ev1_dup = make_event("reply_1", 1111, content="Duplicate reply", tags=[["e", "root_1", "", "reply"]])
+
+        raw_events = [root_ev, root_ev, reply_ev1, reply_ev1_dup]
+        tree = build_thread_tree(raw_events)
+        self.assertEqual(len(tree["roots"]), 1)
+        self.assertEqual(tree["roots"][0]["id"], "root_1")
+        self.assertEqual(len(tree["roots"][0]["replies"]), 1)
+        self.assertEqual(tree["roots"][0]["replies"][0]["id"], "reply_1")
+
+    def test_root_reply_counter_fallback_when_unset(self):
+        from apps.core.nip10 import build_thread_tree
+        from apps.core.views import process_into_feed
+
+        root_ev = make_event("root_rep_1", 1, content="Root post")
+        reply_1 = make_event("reply_rep_1", 1111, content="Reply 1", tags=[["e", "root_rep_1", "", "reply"]])
+        reply_2 = make_event("reply_rep_2", 1111, content="Reply 2", tags=[["e", "root_rep_1", "", "reply"]])
+
+        tree = build_thread_tree([root_ev, reply_1, reply_2])
+        self.assertEqual(tree["roots"][0]["reply_count"], 2)
+
+        feed = process_into_feed([root_ev, reply_1, reply_2])
+        self.assertEqual(feed["roots"][0]["reply_count"], 2)
+
+    def test_attach_reply_counts_tallies_e_tags_accurately(self):
+        from apps.core.views import attach_reply_counts
+
+        notes = [
+            {"id": "note_alpha", "content": "Root A", "replies": []},
+            {"id": "note_beta", "content": "Root B", "replies": []},
+            {"id": "note_gamma", "content": "Root C", "replies": []},
+        ]
+
+        reply_events = {
+            "rep_1": make_event("rep_1", 1, content="reply to alpha", tags=[["e", "note_alpha"]]),
+            "rep_2": make_event("rep_2", 1111, content="another reply to alpha", tags=[["e", "note_alpha"]]),
+            "rep_3": make_event("rep_3", 1, content="reply to beta", tags=[["e", "note_beta"]]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=reply_events):
+            result = attach_reply_counts(notes)
+
+        self.assertEqual(result[0]["reply_count"], 2)
+        self.assertEqual(result[1]["reply_count"], 1)
+        self.assertEqual(result[2]["reply_count"], 0)
+
+
+
+
+
+
+
+

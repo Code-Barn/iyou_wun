@@ -1,15 +1,16 @@
 /**
- * circle_feed_filter.js — Two-Tier Layer 2 Circle Feed Filtering Engine
+ * circle_feed_filter.js — Two-Tier Layer 2 Circle Filtering Engine
  *
- * Provides real-time client-side circle filtering and tag/text search for the
- * Omni-Social Feed in iyou_wun:
+ * Provides real-time client-side circle filtering and tag/text search for both
+ * the Omni-Social Feed and Media Gallery in iyou_wun:
  * - Circle scopes:
- *   - global:    Global Mesh (all relay notes)
+ *   - global:    Global Mesh (all relay notes / media)
  *   - following: Following (L1 contacts via Kind 3)
  *   - inner:     Inner Circle (L0 / L0_5 via Contact Enclave / Trust Lens)
  *   - mutual:    Mutual Friends (bidirectional Kind 3 follows)
  * - Real-time tag and text search input (#feed-search-input)
- * - Empty state feedback when 0 notes match active circle/search
+ * - Category count badge synchronization (#tab-count-all, #tab-count-images, etc.)
+ * - Empty state feedback when 0 items match active circle/search
  * - Fast navigation & compose action (#btn-compose-note)
  */
 (function (global) {
@@ -61,10 +62,14 @@
         return Array.from(document.querySelectorAll(".feed-note-card, .thread-root"));
     }
 
+    function getGalleryCards() {
+        return Array.from(document.querySelectorAll(".gallery-media-card, .gallery-card"));
+    }
+
     function getCardNoteData(card) {
         let root = card;
         if (!root.getAttribute("data-pubkey") && !root.getAttribute("data-author-pubkey")) {
-            const inner = card.querySelector(".feed-note-card, .thread-root, [data-pubkey], [data-author-pubkey]");
+            const inner = card.querySelector(".feed-note-card, .thread-root, .gallery-media-card, .gallery-card, [data-pubkey], [data-author-pubkey]");
             if (inner) root = inner;
         }
 
@@ -77,13 +82,17 @@
         const did = normalizeKey(
             root.getAttribute("data-author-did") ||
             root.getAttribute("data-did") ||
-            (pubkey ? "did:iyou:0x" + pubkey : "")
+            ""
         );
 
-        const tagsRaw = root.getAttribute("data-note-tags") || "";
-        const textContent = (card.textContent || "").toLowerCase();
+        const tagsRaw = root.getAttribute("data-tags") || root.getAttribute("data-note-tags") || "";
+        const mediaType = (root.getAttribute("data-media-type") || root.getAttribute("data-type") || "").toLowerCase();
+        const mimeType = (root.getAttribute("data-mime") || "").toLowerCase();
+        const altText = (root.getAttribute("data-alt") || "").toLowerCase();
+        const author = (root.getAttribute("data-author") || "").toLowerCase();
+        const textContent = (card.textContent || "").toLowerCase() + " " + altText + " " + mimeType + " " + author;
 
-        return { root, pubkey, did, tagsRaw, textContent };
+        return { root, pubkey, did, tagsRaw, mediaType, mimeType, altText, author, textContent };
     }
 
     function isAuthorMatchingUser(pubkey, did) {
@@ -159,6 +168,10 @@
         if (cardData.textContent.includes(q)) return true;
         if (cardData.pubkey.includes(q)) return true;
         if (cardData.did.includes(q)) return true;
+        if (cardData.mediaType && cardData.mediaType.includes(q)) return true;
+        if (cardData.mimeType && cardData.mimeType.includes(q)) return true;
+        if (cardData.altText && cardData.altText.includes(q)) return true;
+        if (cardData.author && cardData.author.includes(q)) return true;
 
         if (cardData.tagsRaw) {
             try {
@@ -190,7 +203,7 @@
         return el;
     }
 
-    function applyFilters() {
+    function applyFeedFilters() {
         const container = getFeedContainer();
         if (!container) return;
 
@@ -241,6 +254,99 @@
         }
     }
 
+    function applyGalleryFilters() {
+        const galleryCards = getGalleryCards();
+        if (galleryCards.length === 0) return;
+
+        let visibleAllCount = 0;
+        let visibleImagesCount = 0;
+        let visibleVideosCount = 0;
+        let visibleAudioCount = 0;
+
+        galleryCards.forEach((card) => {
+            const data = getCardNoteData(card);
+            const matchCircle = checkCircleMatch(activeCircle, data.pubkey, data.did, card);
+            const matchSearch = checkSearchMatch(activeSearchQuery, data);
+
+            const isVisible = matchCircle && matchSearch;
+            if (isVisible) {
+                card.style.display = "";
+                card.classList.remove("hidden");
+            } else {
+                card.style.display = "none";
+                card.classList.add("hidden");
+            }
+
+            // Count per container / category
+            const parentGrid = card.closest("#allGrid, #imageGrid, #videoGrid, #audioGrid");
+            const gridId = parentGrid ? parentGrid.id : "";
+
+            if (gridId === "allGrid" && isVisible) visibleAllCount++;
+            if (gridId === "imageGrid" && isVisible) visibleImagesCount++;
+            if (gridId === "videoGrid" && isVisible) visibleVideosCount++;
+            if (gridId === "audioGrid" && isVisible) visibleAudioCount++;
+        });
+
+        // Update Tab Count Badges in #tabRibbon
+        const countAllEl = document.getElementById("tab-count-all");
+        if (countAllEl) countAllEl.textContent = String(visibleAllCount);
+
+        const countImagesEl = document.getElementById("tab-count-images") || document.getElementById("tab-count-visuals");
+        if (countImagesEl) countImagesEl.textContent = String(visibleImagesCount);
+
+        const countVideosEl = document.getElementById("tab-count-videos");
+        if (countVideosEl) countVideosEl.textContent = String(visibleVideosCount);
+
+        const countAudioEl = document.getElementById("tab-count-audio");
+        if (countAudioEl) countAudioEl.textContent = String(visibleAudioCount);
+
+        // Toggle Category Empty States
+        const emptyAll = document.getElementById("empty-all");
+        const allGrid = document.getElementById("allGrid");
+        if (emptyAll && allGrid) {
+            if (visibleAllCount === 0 && allGrid.children.length > 0) {
+                emptyAll.classList.remove("hidden");
+            } else {
+                emptyAll.classList.add("hidden");
+            }
+        }
+
+        const emptyImages = document.getElementById("empty-images");
+        const imageGrid = document.getElementById("imageGrid");
+        if (emptyImages && imageGrid) {
+            if (visibleImagesCount === 0 && imageGrid.children.length > 0) {
+                emptyImages.classList.remove("hidden");
+            } else {
+                emptyImages.classList.add("hidden");
+            }
+        }
+
+        const emptyVideos = document.getElementById("empty-videos");
+        const videoGrid = document.getElementById("videoGrid");
+        if (emptyVideos && videoGrid) {
+            if (visibleVideosCount === 0 && videoGrid.children.length > 0) {
+                emptyVideos.classList.remove("hidden");
+            } else {
+                emptyVideos.classList.add("hidden");
+            }
+        }
+
+        const emptyAudio = document.getElementById("empty-audio");
+        const audioGrid = document.getElementById("audioGrid");
+        if (emptyAudio && audioGrid) {
+            if (visibleAudioCount === 0 && audioGrid.children.length > 0) {
+                emptyAudio.classList.remove("hidden");
+            } else {
+                emptyAudio.classList.add("hidden");
+            }
+        }
+    }
+
+    function applyFilters() {
+        applyFeedFilters();
+        applyGalleryFilters();
+    }
+
     function setCircle(circleMode) {
         activeCircle = circleMode || "global";
 
@@ -266,8 +372,8 @@
             scopeLabel.textContent = CIRCLE_LABELS[activeCircle] || activeCircle.toUpperCase();
         }
 
-        // Update URL search params gracefully on feed
-        if (window.location.pathname.startsWith("/feed")) {
+        // Update URL search params gracefully on feed and gallery
+        if (window.location.pathname.startsWith("/feed") || window.location.pathname.startsWith("/gallery")) {
             const url = new URL(window.location.href);
             if (activeCircle === "global") {
                 url.searchParams.delete("circle");
@@ -282,7 +388,23 @@
 
     function setSearchQuery(query) {
         activeSearchQuery = (query || "").trim();
+
+        if (window.location.pathname.startsWith("/feed") || window.location.pathname.startsWith("/gallery")) {
+            const url = new URL(window.location.href);
+            if (!activeSearchQuery) {
+                url.searchParams.delete("q");
+            } else {
+                url.searchParams.set("q", activeSearchQuery);
+            }
+            window.history.replaceState({}, "", url.toString());
+        }
+
         applyFilters();
+    }
+
+    function isFeedOrGalleryPage() {
+        const path = window.location.pathname;
+        return path.startsWith("/feed") || path.startsWith("/gallery") || path === "/";
     }
 
     function initCircleFeedFilter() {
@@ -308,7 +430,7 @@
                 tab.addEventListener("click", function (e) {
                     e.preventDefault();
                     const targetCircle = this.getAttribute("data-circle");
-                    if (!window.location.pathname.startsWith("/feed") && window.location.pathname !== "/") {
+                    if (!isFeedOrGalleryPage()) {
                         window.location.href = "/feed?circle=" + encodeURIComponent(targetCircle);
                         return;
                     }
@@ -323,7 +445,7 @@
             let debounceTimer = null;
             searchInput.addEventListener("input", function () {
                 const val = this.value;
-                if (!window.location.pathname.startsWith("/feed") && window.location.pathname !== "/") {
+                if (!isFeedOrGalleryPage()) {
                     if (debounceTimer) clearTimeout(debounceTimer);
                     debounceTimer = setTimeout(() => {
                         window.location.href = "/feed?q=" + encodeURIComponent(val);
@@ -385,3 +507,4 @@
     }
 
 })(typeof window !== "undefined" ? window : globalThis);
+

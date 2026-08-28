@@ -25,7 +25,9 @@ urlpatterns = [
     path('chat', views.ChatView.as_view(), name='chat'),
     path('api/relays', views.api_relays, name='api_relays'),
     path('api/feed', views.api_feed, name='api_feed'),
+    path('api/profile/save/', views.api_save_profile, name='api_save_profile'),
     path('api/vote', views.api_cast_vote, name='api_cast_vote'),
+
     path('api/media/upload/', views.MediaUploadProxyView.as_view(), name='media_upload_proxy'),
     path('api/credentials/issue/', views.IssueCredentialView.as_view(), name='api_issue_credential'),
     path('api/config/', views.node_config, name='node_config'),

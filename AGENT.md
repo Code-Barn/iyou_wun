@@ -14,7 +14,7 @@ Do NOT implement cleartext client secrets, do NOT use email addresses as databas
 
 **iyou_wun** (WUN) is a Django 5.2 OIDC Relying Party satellite that authenticates users via the **iyou_idp** identity provider using Decentralized Identifiers (DID). Passwords are deprecated — OIDC/DID is the sole entry point.
 
-**Core features:** Omni-Social Nostr Feed (Kind 1/7/1063/1111/30023/1112) with NIP-10 threading, Media Gallery (tabbed by MIME type), Sovereign Profile pages, XMPP Chat (Converse.js), Poly Governance Polls, Verifiable Credential issuance.
+**Core features:** Omni-Social Nostr Feed (Kind 1/7/1063/1111/30023/1112) with NIP-10 hero threading and inline media unfurling, batch reply counting, Media Gallery (tabbed by MIME type), Sovereign Link Deck with Proof-of-Authority verification, Unified 2-column reactive Dashboard, Sovereign Profile pages with hybrid resolution, XMPP Chat (Converse.js ES module), Poly Governance Polls, Verifiable Credential issuance.
 
 ---
 
@@ -35,7 +35,7 @@ Requires: running `iyou_idp` instance + `iyou_home` (Tauri bridge :9001, Blossom
 
 | Document | Location | Purpose |
 |----------|----------|---------|
-| Developer Guide | `docs/DEVELOPER_GUIDE.md` | Full setup, env vars, architecture, troubleshooting |
+| Developer Guide | `docs/WUN_DEVELOPER_GUIDE.md` | Full setup, env vars, architecture, troubleshooting |
 | Design Doc | `docs/DESIGN_DOC.md` | Sovereign Media Stack architecture (Django + React + Rust) |
 | Project TODO | `TODO.md` | Current task tracking (synced from omni_social hub) |
 | Auth Standard | `docs/ecosystem_shared/OMNI_SOCIAL_AUTH_STANDARDIZATION.md` | Platform-wide OIDC/PKCE rules |
@@ -58,11 +58,11 @@ Requires: running `iyou_idp` instance + `iyou_home` (Tauri bridge :9001, Blossom
 ```
 User Browser → Traefik (HTTPS) → WUN (Django :8001)
                                     ↓ OIDC PKCE
-                               iyou_idp (IDP)
+                                iyou_idp (IDP)
                                     ↓ tokens
-                               WUN backend
+                                WUN backend
                                     ↓ Nostr
-                               Relay mesh (nos.lol, relay.iyou.me, :9003)
+                                Relay mesh (nos.lol, relay.iyou.me, :9003)
 ```
 
 ### Key Files
@@ -73,12 +73,13 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 | `config/urls.py` | Root URL routing (OIDC views wired here) |
 | `apps/core/auth.py` | `MyOIDCAuthenticationBackend` — DID user creation, admin elevation |
 | `apps/core/auth_pkce.py` | PKCE views + backend with code_verifier relay |
-| `apps/core/views.py` | Feed, Dashboard, Gallery, Profile, Chat, API endpoints |
-| `apps/core/nip10.py` | NIP-10 threading parser — tree builder for reply threading |
-| `apps/core/models.py` | `IssuedCredential` — VC issuance tracking |
+| `apps/core/views.py` | Feed, Dashboard, Gallery, Profile, Chat, Link Deck, API endpoints |
+| `apps/core/nip10.py` | NIP-10 threading parser — tree builder for reply threading & deduplication |
+| `apps/core/models.py` | `UserLinkDeck`, `UserLinkItem`, `IssuedCredential` — Link deck and VC models |
 | `apps/core/did_kit.py` | Ed25519 VC signing/verification |
-| `static/js/bridge_client.js` | Tauri WebSocket bridge — mutex, signing, fallback modal |
-| `static/js/feed_interactions.js` | Feed controller — posting, replies, threading, poll governance |
+| `static/js/bridge_client.js` | Tauri WebSocket bridge — mutex, signing, stateful tab router, fallback modal |
+| `static/js/link_deck_manager.js` | Link Deck CRUD, handle claiming, proof-of-authority bio challenges |
+| `static/js/feed_interactions.js` | Feed controller — posting, replies, hero threading, polls, inline media |
 | `static/js/gallery_player.js` | Gallery controller — tab switching, lightbox, media playback |
 
 ---
@@ -100,10 +101,11 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 ## Running Tests
 
 ```bash
-uv run python manage.py test apps.core.tests
+uv run python manage.py test apps.core
 ```
 
-115 tests across 5 modules: `test_auth` (17), `test_views` (21), `test_feed` (31), `test_issuance` (19), `test_gallery` (26).
+279 unit tests across 6 modules: `test_auth` (17), `test_views` (62), `test_feed` (48), `test_deck` (107), `test_gallery` (26), `test_issuance` (19).
+
 
 ---
 

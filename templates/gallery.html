@@ -46,19 +46,37 @@
         </div>
 
         <div class="flex items-center gap-3 mb-8 overflow-x-auto pb-2" id="tabRibbon">
-            <button onclick="switchTab('all')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'all' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="all">&#11088; All Media <span class="ml-1 opacity-70">{{ counts.all }}</span></button>
-            <button onclick="switchTab('images')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'images' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="images">&#128444;&#65039; Visuals <span class="ml-1 opacity-70">{{ counts.images }}</span></button>
-            <button onclick="switchTab('videos')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'videos' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="videos">&#127916; Video Stream <span class="ml-1 opacity-70">{{ counts.videos }}</span></button>
-            <button onclick="switchTab('audio')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'audio' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="audio">&#127911; Audio &amp; Pods <span class="ml-1 opacity-70">{{ counts.audio }}</span></button>
+            <button onclick="switchTab('all')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'all' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="all">&#11088; All Media <span id="tab-count-all" class="ml-1 opacity-70">{{ counts.all }}</span></button>
+            <button onclick="switchTab('images')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'images' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="images">&#128444;&#65039; Visuals <span id="tab-count-images" class="ml-1 opacity-70">{{ counts.images }}</span></button>
+            <button onclick="switchTab('videos')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'videos' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="videos">&#127916; Video Stream <span id="tab-count-videos" class="ml-1 opacity-70">{{ counts.videos }}</span></button>
+            <button onclick="switchTab('audio')" class="tab-btn flex-shrink-0 px-5 py-2.5 text-sm font-semibold rounded-full transition-all duration-200 {% if active_type == 'audio' %}tab-active{% else %}tab-inactive bg-gray-800 hover:bg-gray-700{% endif %}" data-tab="audio">&#127911; Audio &amp; Pods <span id="tab-count-audio" class="ml-1 opacity-70">{{ counts.audio }}</span></button>
         </div>
 
         <div id="panel-all" class="gallery-panel {% if active_type != 'all' %}hidden{% endif %}">
             {% if notes %}
             <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" id="allGrid">
                 {% for note in notes %}
-                <div class="gallery-card group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="{{ note.media_type }}" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dims="{{ note.dimensions }}" data-hash="{{ note.blossom_hash }}" data-dur="{{ note.duration }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
+                <div class="gallery-media-card gallery-card group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200"
+                     data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-author-did="{{ note.author_did|default:'' }}"
+                     data-tags="{{ note.tags_json|default:'' }}"
+                     data-media-type="{{ note.media_type }}"
+                     data-type="{{ note.media_type }}"
+                     data-id="{{ note.id }}"
+                     data-url="{{ note.file_url }}"
+                     data-alt="{{ note.display_title|default:note.alt_text|default:note.content|addslashes }}"
+                     data-mime="{{ note.mime_type }}"
+                     data-author="{{ note.author_name|default:note.npub }}"
+                     data-avatar="{{ note.author_avatar }}"
+                     data-date="{{ note.created_at|date:'Y-m-d H:i' }}"
+                     data-dims="{{ note.dimensions }}"
+                     data-hash="{{ note.blossom_hash }}"
+                     data-dur="{{ note.duration }}"
+                     data-npub="{{ note.npub }}"
+                     data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-sovereign="{{ note.is_sovereign }}">
                     {% if note.media_type == "image" %}
-                    <div class="aspect-square bg-gray-800 overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
+                    <div class="aspect-square bg-gray-800 overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.display_title|default:note.alt_text }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
                     {% elif note.media_type == "video" %}
                     <div class="aspect-video bg-gray-900 overflow-hidden relative cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata" muted></video><div class="video-card-overlay absolute inset-0 flex items-center justify-center bg-black/30"><span class="text-white text-5xl">&#9654;</span></div></div>
                     {% elif note.media_type == "audio" %}
@@ -66,13 +84,43 @@
                     {% else %}
                     <div class="aspect-square bg-gray-800 flex items-center justify-center cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><span class="text-4xl text-gray-500">&#128196;</span></div>
                     {% endif %}
-                    <div class="p-3">
-                        <div class="flex items-center justify-between mb-1"><a href="{% url 'profile' npub=note.npub %}" class="text-xs font-mono text-gray-400 hover:text-violet-400 truncate">{{ note.author_name|default:note.npub|truncatechars:20 }}</a>{% if note.is_sovereign %}<span class="bg-amber-900/50 text-amber-300 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Sovereign</span>{% else %}<span class="bg-green-900/50 text-green-300 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Verified</span>{% endif %}</div>
-                        {% if note.content %}<p class="text-xs text-gray-500 truncate">{{ note.content }}</p>{% endif %}
-                        <div class="flex items-center gap-2 mt-1"><p class="text-xs text-gray-600">{{ note.created_at|date:"Y-m-d H:i" }}</p>{% if note.dimensions %}<span class="text-xs text-gray-600">{{ note.dimensions }}</span>{% endif %}{% if note.duration %}<span class="text-xs text-gray-600">{{ note.duration }}s</span>{% endif %}</div>
+
+                    <!-- Card Metadata Footer -->
+                    <div class="p-3 bg-slate-900/90 border-t border-slate-800 text-xs font-mono">
+                      <!-- Line 1: Author, NIP-05 & Trust Lens Badge -->
+                      <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-slate-200 hover:text-violet-400 truncate max-w-[130px]" title="{{ note.author_name|default:note.npub }}">
+                            {{ note.author_name|default:note.npub|truncatechars:14 }}
+                          </a>
+                          
+                          {% if note.nip05 %}
+                          <span class="inline-flex items-center gap-0.5 text-[10px] text-violet-400 bg-violet-950/60 px-1 py-0.2 rounded border border-violet-800/60" title="{{ note.nip05 }}">
+                            <svg class="w-2.5 h-2.5 text-violet-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                          </span>
+                          {% endif %}
+
+                          <!-- Project Zero Dynamic Trust Lens Slot -->
+                          <span class="author-badge-slot" data-author-slot="{{ note.pubkey_hex|default:note.pubkey }}"></span>
+                        </div>
+
+                        <!-- Timestamp -->
+                        <span class="text-[10px] text-slate-500 whitespace-nowrap">{{ note.created_at|date:"M j, H:i" }}</span>
+                      </div>
+
+                      <!-- Line 2: Human-Readable Caption / Title -->
+                      {% if note.display_title or note.content %}
+                      <p class="text-xs text-slate-300 font-sans line-clamp-2 leading-snug break-words">
+                        {{ note.display_title|default:note.content }}
+                      </p>
+                      {% endif %}
                     </div>
                 </div>
                 {% endfor %}
+            </div>
+            <div id="empty-all" class="circle-empty-state hidden text-center py-16 text-slate-500 dark:text-slate-400 font-mono text-xs border border-dashed border-slate-300 dark:border-slate-800 rounded-lg my-6">
+                <p class="text-sm font-semibold text-slate-300 mb-1">No media matching active filter in All Media.</p>
+                <p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>
             </div>
             {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No media events found.</p><p class="text-sm mt-2">Media uploaded via the feed will appear here.</p></div>{% endif %}
         </div>
@@ -81,11 +129,62 @@
             {% if images %}
             <div class="columns-2 md:columns-3 lg:columns-4 gap-4 space-y-4" id="imageGrid">
                 {% for note in images %}
-                <div class="masonry-item gallery-card group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="image" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dims="{{ note.dimensions }}" data-hash="{{ note.blossom_hash }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
-                    <div class="overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.alt_text }}" class="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
-                    <div class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200"><div class="flex items-center gap-2">{% if note.author_avatar %}<img src="{{ note.author_avatar }}" class="w-6 h-6 rounded-full object-cover" alt="">{% endif %}<span class="text-xs text-white font-medium truncate">{{ note.author_name|default:note.npub|truncatechars:24 }}</span><span class="text-xs text-gray-400 ml-auto">{{ note.created_at|date:"M d" }}</span></div></div>
+                <div class="gallery-media-card masonry-item gallery-card group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200"
+                     data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-author-did="{{ note.author_did|default:'' }}"
+                     data-tags="{{ note.tags_json|default:'' }}"
+                     data-media-type="image"
+                     data-type="image"
+                     data-id="{{ note.id }}"
+                     data-url="{{ note.file_url }}"
+                     data-alt="{{ note.display_title|default:note.alt_text|default:note.content|addslashes }}"
+                     data-mime="{{ note.mime_type }}"
+                     data-author="{{ note.author_name|default:note.npub }}"
+                     data-avatar="{{ note.author_avatar }}"
+                     data-date="{{ note.created_at|date:'Y-m-d H:i' }}"
+                     data-dims="{{ note.dimensions }}"
+                     data-hash="{{ note.blossom_hash }}"
+                     data-npub="{{ note.npub }}"
+                     data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-sovereign="{{ note.is_sovereign }}">
+                    <div class="overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.display_title|default:note.alt_text }}" class="w-full h-auto object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
+                    
+                    <!-- Card Metadata Footer -->
+                    <div class="p-3 bg-slate-900/90 border-t border-slate-800 text-xs font-mono">
+                      <!-- Line 1: Author, NIP-05 & Trust Lens Badge -->
+                      <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-slate-200 hover:text-violet-400 truncate max-w-[130px]" title="{{ note.author_name|default:note.npub }}">
+                            {{ note.author_name|default:note.npub|truncatechars:14 }}
+                          </a>
+                          
+                          {% if note.nip05 %}
+                          <span class="inline-flex items-center gap-0.5 text-[10px] text-violet-400 bg-violet-950/60 px-1 py-0.2 rounded border border-violet-800/60" title="{{ note.nip05 }}">
+                            <svg class="w-2.5 h-2.5 text-violet-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                          </span>
+                          {% endif %}
+
+                          <!-- Project Zero Dynamic Trust Lens Slot -->
+                          <span class="author-badge-slot" data-author-slot="{{ note.pubkey_hex|default:note.pubkey }}"></span>
+                        </div>
+
+                        <!-- Timestamp -->
+                        <span class="text-[10px] text-slate-500 whitespace-nowrap">{{ note.created_at|date:"M j, H:i" }}</span>
+                      </div>
+
+                      <!-- Line 2: Human-Readable Caption / Title -->
+                      {% if note.display_title or note.content %}
+                      <p class="text-xs text-slate-300 font-sans line-clamp-2 leading-snug break-words">
+                        {{ note.display_title|default:note.content }}
+                      </p>
+                      {% endif %}
+                    </div>
                 </div>
                 {% endfor %}
+            </div>
+            <div id="empty-images" class="circle-empty-state hidden text-center py-16 text-slate-500 dark:text-slate-400 font-mono text-xs border border-dashed border-slate-300 dark:border-slate-800 rounded-lg my-6">
+                <p class="text-sm font-semibold text-slate-300 mb-1">No visuals matching active filter.</p>
+                <p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>
             </div>
             {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No images found.</p></div>{% endif %}
         </div>
@@ -94,11 +193,66 @@
             {% if videos %}
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="videoGrid">
                 {% for note in videos %}
-                <div class="gallery-card group bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="video" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dims="{{ note.dimensions }}" data-hash="{{ note.blossom_hash }}" data-dur="{{ note.duration }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
+                <div class="gallery-media-card gallery-card group bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200"
+                     data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-author-did="{{ note.author_did|default:'' }}"
+                     data-tags="{{ note.tags_json|default:'' }}"
+                     data-media-type="video"
+                     data-type="video"
+                     data-id="{{ note.id }}"
+                     data-url="{{ note.file_url }}"
+                     data-alt="{{ note.display_title|default:note.alt_text|default:note.content|addslashes }}"
+                     data-mime="{{ note.mime_type }}"
+                     data-author="{{ note.author_name|default:note.npub }}"
+                     data-avatar="{{ note.author_avatar }}"
+                     data-date="{{ note.created_at|date:'Y-m-d H:i' }}"
+                     data-dims="{{ note.dimensions }}"
+                     data-hash="{{ note.blossom_hash }}"
+                     data-dur="{{ note.duration }}"
+                     data-npub="{{ note.npub }}"
+                     data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-sovereign="{{ note.is_sovereign }}">
                     <div class="aspect-video bg-gray-950 relative cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata" muted data-poster="{{ note.thumbnail_url }}"></video><div class="video-card-overlay absolute inset-0 flex items-center justify-center bg-black/30"><div class="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"><span class="text-white text-2xl ml-1">&#9654;</span></div></div>{% if note.duration %}<span class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">{{ note.duration }}s</span>{% endif %}</div>
-                    <div class="p-4"><div class="flex items-start gap-3">{% if note.author_avatar %}<img src="{{ note.author_avatar }}" class="w-9 h-9 rounded-full object-cover flex-shrink-0" alt="">{% else %}<div class="w-9 h-9 rounded-full bg-violet-900 flex items-center justify-center flex-shrink-0"><span class="text-violet-300 text-xs font-bold">{{ note.author_name|default:"V"|truncatechars:1 }}</span></div>{% endif %}<div class="min-w-0 flex-1"><p class="text-sm text-white font-medium truncate">{{ note.content|default:note.alt_text|truncatechars:80 }}</p><div class="flex items-center gap-2 mt-1"><a href="{% url 'profile' npub=note.npub %}" class="text-xs text-gray-400 hover:text-violet-400">{{ note.author_name|default:note.npub|truncatechars:24 }}</a><span class="text-xs text-gray-600">&middot;</span><span class="text-xs text-gray-600">{{ note.created_at|date:"M d, Y" }}</span></div></div>{% if note.is_sovereign %}<span class="bg-amber-900/50 text-amber-300 text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0">Sovereign</span>{% endif %}</div>{% if note.file_url %}<a href="{{ note.file_url }}" target="_blank" rel="noopener noreferrer" class="mt-2 text-xs text-violet-400 hover:text-violet-300 inline-flex items-center gap-1">&#128279; Open in Blossom</a>{% endif %}</div>
+
+                    <!-- Card Metadata Footer -->
+                    <div class="p-3 bg-slate-900/90 border-t border-slate-800 text-xs font-mono">
+                      <!-- Line 1: Author, NIP-05 & Trust Lens Badge -->
+                      <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                        <div class="flex items-center gap-1.5 min-w-0">
+                          {% if note.author_avatar %}
+                          <img src="{{ note.author_avatar }}" class="w-4 h-4 rounded-full object-cover flex-shrink-0" alt="">
+                          {% endif %}
+                          <a href="{% url 'profile' npub=note.npub %}" class="font-semibold text-slate-200 hover:text-violet-400 truncate max-w-[130px]" title="{{ note.author_name|default:note.npub }}">
+                            {{ note.author_name|default:note.npub|truncatechars:14 }}
+                          </a>
+                          
+                          {% if note.nip05 %}
+                          <span class="inline-flex items-center gap-0.5 text-[10px] text-violet-400 bg-violet-950/60 px-1 py-0.2 rounded border border-violet-800/60" title="{{ note.nip05 }}">
+                            <svg class="w-2.5 h-2.5 text-violet-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                          </span>
+                          {% endif %}
+
+                          <!-- Project Zero Dynamic Trust Lens Slot -->
+                          <span class="author-badge-slot" data-author-slot="{{ note.pubkey_hex|default:note.pubkey }}"></span>
+                        </div>
+
+                        <!-- Timestamp -->
+                        <span class="text-[10px] text-slate-500 whitespace-nowrap">{{ note.created_at|date:"M j, H:i" }}</span>
+                      </div>
+
+                      <!-- Line 2: Human-Readable Caption / Title -->
+                      {% if note.display_title or note.content %}
+                      <p class="text-xs text-slate-300 font-sans line-clamp-2 leading-snug break-words">
+                        {{ note.display_title|default:note.content }}
+                      </p>
+                      {% endif %}
+                    </div>
                 </div>
                 {% endfor %}
+            </div>
+            <div id="empty-videos" class="circle-empty-state hidden text-center py-16 text-slate-500 dark:text-slate-400 font-mono text-xs border border-dashed border-slate-300 dark:border-slate-800 rounded-lg my-6">
+                <p class="text-sm font-semibold text-slate-300 mb-1">No videos matching active filter.</p>
+                <p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>
             </div>
             {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No videos found.</p></div>{% endif %}
         </div>
@@ -107,11 +261,67 @@
             {% if audio_items %}
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="audioGrid">
                 {% for note in audio_items %}
-                <div class="gallery-card group bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200" data-type="audio" data-id="{{ note.id }}" data-url="{{ note.file_url }}" data-alt="{{ note.alt_text|default:note.content|addslashes }}" data-mime="{{ note.mime_type }}" data-author="{{ note.author_name|default:note.npub }}" data-avatar="{{ note.author_avatar }}" data-date="{{ note.created_at|date:'Y-m-d H:i' }}" data-dur="{{ note.duration }}" data-hash="{{ note.blossom_hash }}" data-npub="{{ note.npub }}" data-sovereign="{{ note.is_sovereign }}">
-                    <div class="flex items-center gap-4 p-4">{% if note.author_avatar %}<img src="{{ note.author_avatar }}" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" alt="">{% else %}<div class="w-16 h-16 rounded-lg bg-gradient-to-br from-violet-800 to-indigo-900 flex items-center justify-center flex-shrink-0"><span class="text-2xl">&#127925;</span></div>{% endif %}<div class="min-w-0 flex-1"><p class="text-sm text-white font-medium truncate">{{ note.content|default:note.alt_text|truncatechars:40 }}</p><a href="{% url 'profile' npub=note.npub %}" class="text-xs text-gray-400 hover:text-violet-400 truncate block">{{ note.author_name|default:note.npub|truncatechars:24 }}</a><div class="flex items-center gap-2 mt-1"><span class="text-xs text-gray-600">{{ note.created_at|date:"M d" }}</span>{% if note.duration %}<span class="text-xs text-gray-600">{{ note.duration }}s</span>{% endif %}{% if note.is_sovereign %}<span class="text-xs text-amber-400">Sovereign</span>{% endif %}</div></div></div>
-                    <div class="px-4 pb-4"><div class="bg-gray-950 rounded-lg p-3 flex items-center gap-3"><button onclick="toggleAudioPlayer('{{ note.file_url }}', this)" class="audio-play-btn w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0 transition-colors" data-src="{{ note.file_url }}"><span class="text-white text-lg">&#9654;</span></button><div class="flex-1 min-w-0"><input type="range" min="0" max="100" value="0" class="scrubber w-full h-1 appearance-none rounded-full bg-gray-700 cursor-pointer" data-src="{{ note.file_url }}"><div class="flex justify-between mt-1"><span class="text-xs text-gray-500 audio-current" data-src="{{ note.file_url }}">0:00</span>{% if note.duration %}<span class="text-xs text-gray-500">{{ note.duration }}s</span>{% endif %}</div></div></div></div>
+                <div class="gallery-media-card gallery-card group bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-violet-500/50 transition-all duration-200"
+                     data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-author-did="{{ note.author_did|default:'' }}"
+                     data-tags="{{ note.tags_json|default:'' }}"
+                     data-media-type="audio"
+                     data-type="audio"
+                     data-id="{{ note.id }}"
+                     data-url="{{ note.file_url }}"
+                     data-alt="{{ note.display_title|default:note.alt_text|default:note.content|addslashes }}"
+                     data-mime="{{ note.mime_type }}"
+                     data-author="{{ note.author_name|default:note.npub }}"
+                     data-avatar="{{ note.author_avatar }}"
+                     data-date="{{ note.created_at|date:'Y-m-d H:i' }}"
+                     data-dur="{{ note.duration }}"
+                     data-hash="{{ note.blossom_hash }}"
+                     data-npub="{{ note.npub }}"
+                     data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+                     data-sovereign="{{ note.is_sovereign }}">
+                    <div class="flex items-center gap-4 p-4">
+                      {% if note.author_avatar %}
+                      <img src="{{ note.author_avatar }}" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" alt="">
+                      {% else %}
+                      <div class="w-16 h-16 rounded-lg bg-gradient-to-br from-violet-800 to-indigo-900 flex items-center justify-center flex-shrink-0"><span class="text-2xl">&#127925;</span></div>
+                      {% endif %}
+                      <div class="min-w-0 flex-1">
+                        <p class="text-sm text-white font-medium truncate">{{ note.display_title|default:note.content|default:note.alt_text|truncatechars:40 }}</p>
+                        <div class="flex items-center gap-1.5 mt-1">
+                          <a href="{% url 'profile' npub=note.npub %}" class="text-xs font-mono text-gray-400 hover:text-violet-400 truncate max-w-[120px]" title="{{ note.author_name|default:note.npub }}">
+                            {{ note.author_name|default:note.npub|truncatechars:14 }}
+                          </a>
+                          {% if note.nip05 %}
+                          <span class="inline-flex items-center gap-0.5 text-[10px] text-violet-400 bg-violet-950/60 px-1 py-0.2 rounded border border-violet-800/60" title="{{ note.nip05 }}">
+                            <svg class="w-2.5 h-2.5 text-violet-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                          </span>
+                          {% endif %}
+                          <span class="author-badge-slot" data-author-slot="{{ note.pubkey_hex|default:note.pubkey }}"></span>
+                        </div>
+                        <div class="flex items-center gap-2 mt-1">
+                          <span class="text-xs text-gray-600">{{ note.created_at|date:"M d" }}</span>
+                          {% if note.duration %}<span class="text-xs text-gray-600">{{ note.duration }}s</span>{% endif %}
+                        </div>
+                      </div>
+                    </div>
+                    <div class="px-4 pb-4">
+                      <div class="bg-gray-950 rounded-lg p-3 flex items-center gap-3">
+                        <button onclick="toggleAudioPlayer('{{ note.file_url }}', this)" class="audio-play-btn w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0 transition-colors" data-src="{{ note.file_url }}"><span class="text-white text-lg">&#9654;</span></button>
+                        <div class="flex-1 min-w-0">
+                          <input type="range" min="0" max="100" value="0" class="scrubber w-full h-1 appearance-none rounded-full bg-gray-700 cursor-pointer" data-src="{{ note.file_url }}">
+                          <div class="flex justify-between mt-1">
+                            <span class="text-xs text-gray-500 audio-current" data-src="{{ note.file_url }}">0:00</span>
+                            {% if note.duration %}<span class="text-xs text-gray-500">{{ note.duration }}s</span>{% endif %}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
                 </div>
                 {% endfor %}
+            </div>
+            <div id="empty-audio" class="circle-empty-state hidden text-center py-16 text-slate-500 dark:text-slate-400 font-mono text-xs border border-dashed border-slate-300 dark:border-slate-800 rounded-lg my-6">
+                <p class="text-sm font-semibold text-slate-300 mb-1">No audio tracks matching active filter.</p>
+                <p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>
             </div>
             {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No audio tracks found.</p></div>{% endif %}
         </div>
@@ -134,9 +344,19 @@
     <script>
         window.galleryActiveType = "{{ active_type|default:'all' }}";
         window.BLOSSOM_SERVER_URL = "{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}";
+        document.addEventListener("DOMContentLoaded", function () {
+            if (window.TrustLens && typeof window.TrustLens.scanDOM === "function") {
+                window.TrustLens.scanDOM();
+            }
+        });
     </script>
+    <script src="{% static 'js/contact_manager.js' %}"></script>
+    <script src="{% static 'js/trust_lens.js' %}"></script>
+    <script src="{% static 'js/circle_feed_filter.js' %}"></script>
     <script src="{% static 'js/gallery_player.js' %}"
             data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
+
+
 </body>
 </html>

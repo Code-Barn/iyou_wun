@@ -27,6 +27,10 @@ from django.urls import reverse
 from django.conf import settings
 
 from .helpers import make_event
+from apps.core.views import hex_to_npub
+from apps.core.models import UserLinkDeck
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +156,40 @@ class ChatViewTest(TestCase):
         self.assertIn("jid:", content)
         self.assertNotIn("did:key:", content.split("jid:")[1].split("@")[0])
 
+    def test_chat_renders_embedded_layout_and_loading_spinner(self):
+        user = User.objects.create_user(username="did:key:z6Mkspin123")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="chat-loading-overlay"')
+        self.assertContains(response, 'id="conversejs-wrap"')
+        self.assertContains(response, "view_mode: 'embedded'")
+        self.assertContains(response, "show_controlbox_by_default: true")
+        self.assertContains(response, "converse.listen('connected', dismissLoadingSpinner)")
+        self.assertContains(response, "converse.listen('initialized'")
+
+    def test_chat_retains_l1_and_l2_headers(self):
+        user = User.objects.create_user(username="did:key:z6Mklayers123")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "sovereign-ecosystem-topbar")
+        self.assertContains(response, "iyou")
+        self.assertContains(response, "_wun")
+        self.assertContains(response, "[ 💬 Chat ]")
+
+    def test_chat_renders_script_type_module(self):
+        user = User.objects.create_user(username="did:key:z6Mkesmtest")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<script type="module">')
+        self.assertContains(response, "import * as conversePkg from")
+        self.assertContains(response, "conversePkg.converse || conversePkg.default")
+
+
+
+
 
 class GalleryViewTest(TestCase):
     def test_anonymous_can_view_gallery(self):
@@ -185,12 +223,90 @@ class ProfileViewTest(TestCase):
         response = self.client.get(reverse("profile", kwargs={"npub": "invalid"}))
         self.assertContains(response, "Invalid npub")
 
-    def test_valid_npub_renders_profile_page(self):
-        response = self.client.get(
-            reverse("profile", kwargs={"npub": "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6ctk5d"})
-        )
+    def test_valid_npub_renders_profile_page_with_streams_and_actions(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        npub = hex_to_npub(pk)
+
+        k0_event = make_event("k0_prof_1", 0, pubkey=pk, created_at=1700000000, content=json.dumps({
+            "name": "Alice Creator",
+            "about": "Decentralized builder",
+            "picture": "http://example.com/avatar.jpg",
+            "banner": "http://example.com/banner.jpg",
+            "nip05": "alice@iyou.me",
+            "lud16": "alice@getalby.com"
+        }))
+        k1_post = make_event("k1_post_1", 1, pubkey=pk, created_at=1700000100, content="Hello from my profile!")
+        k1_reply = make_event("k1_reply_1", 1, pubkey=pk, created_at=1700000200, content="Replying here", tags=[["e", "some_parent_id", "", "reply"]])
+        k1063_media = make_event("k1063_media_1", 1063, pubkey=pk, created_at=1700000300, content="Media asset note", tags=[
+            ["url", "https://cdn.iyou.me/profile_art.png"],
+            ["m", "image/png"],
+        ])
+
+        relay_data = {
+            "k0_1": k0_event,
+            "k1_1": k1_post,
+            "k1_2": k1_reply,
+            "k1063_1": k1063_media,
+        }
+
+        peer_user = User.objects.create_user(username="did:key:z6Mkpeeruser1")
+        self.client.force_login(peer_user)
+
+        with patch("apps.core.views.relay_req", return_value=relay_data):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "profile.html")
+        self.assertTemplateUsed(response, "base.html")
+        self.assertContains(response, "Alice Creator")
+        self.assertContains(response, "alice@iyou.me")
+        self.assertContains(response, "follow-action-btn")
+        self.assertContains(response, "author-badge-slot")
+        self.assertContains(response, "Posts (2)")
+        self.assertContains(response, "Replies (1)")
+        self.assertContains(response, "Media (1)")
+        self.assertContains(response, "https://example.com/avatar.jpg")
+        self.assertContains(response, "https://example.com/banner.jpg")
+
+    def test_profile_owner_shows_edit_button_and_hides_follow_btn(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        npub = hex_to_npub(pk)
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        self.client.force_login(user)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_owner"])
+        self.assertContains(response, "Edit Profile")
+        self.assertNotContains(response, "id=\"follow-action-btn\"")
+
+    def test_profile_view_falls_back_to_local_deck_when_relays_have_no_kind0(self):
+        pk = "1111111111111111111111111111111111111111111111111111111111111111"
+        npub = hex_to_npub(pk)
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(
+            user=user,
+            handle="localdeckmaster",
+            display_name="Local Deck Master",
+            headline="Decentralized mesh engineer from DB",
+            avatar_url="https://example.com/db_avatar.png",
+            banner_url="https://example.com/db_banner.png",
+            nip05="master@iyou.me",
+            lud16="master@getalby.com",
+        )
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Local Deck Master")
+        self.assertContains(response, "Decentralized mesh engineer from DB")
+        self.assertContains(response, "https://example.com/db_avatar.png")
+        self.assertContains(response, "https://example.com/db_banner.png")
+        self.assertContains(response, "master@iyou.me")
 
 
 class DashboardProfileTest(TestCase):
@@ -205,6 +321,84 @@ class DashboardProfileTest(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard"))
         self.assertContains(response, "Publish Profile")
+
+    def test_api_save_profile_persists_metadata(self):
+        user = User.objects.create_user(username="did:key:z6Mksaveprof1")
+        self.client.force_login(user)
+        payload = {
+            "name": "Sovereign Alice",
+            "about": "Decentralized mesh architect",
+            "picture": "https://example.com/alice.png",
+            "banner": "https://example.com/banner.png",
+            "nip05": "alice@iyou.me",
+            "lud16": "alice@getalby.com",
+        }
+        response = self.client.post(
+            reverse("api_save_profile"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["profile"]["name"], "Sovereign Alice")
+        self.assertEqual(data["profile"]["lud16"], "alice@getalby.com")
+
+    def test_api_save_profile_persists_display_name_independently_from_handle(self):
+        user = User.objects.create_user(username="did:key:z6Mkhandletest1")
+        deck = UserLinkDeck.objects.create(
+            user=user,
+            handle="constant_handle",
+            display_name="Initial Name",
+            headline="Initial bio",
+        )
+        self.client.force_login(user)
+
+        payload = {
+            "name": "Updated Mutable Name",
+            "about": "Updated mutable bio",
+            "picture": "https://example.com/new_pic.png",
+        }
+        response = self.client.post(
+            reverse("api_save_profile"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        deck.refresh_from_db()
+        self.assertEqual(deck.handle, "constant_handle")
+        self.assertEqual(deck.display_name, "Updated Mutable Name")
+        self.assertEqual(deck.headline, "Updated mutable bio")
+        self.assertEqual(deck.avatar_url, "https://example.com/new_pic.png")
+
+
+    def test_standard_header_renders_profile_link_for_authenticated_user(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        npub = hex_to_npub(pk)
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f"/profile/{npub}/")
+        self.assertContains(response, "[ ⚙️ Edit ]")
+
+    def test_global_feed_queries_relays_without_authors_filter(self):
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            response = self.client.get(reverse("feed") + "?circle=global")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(mock_relay_req.called)
+            filter_obj = mock_relay_req.call_args[0][0]
+            self.assertNotIn("authors", filter_obj)
+
+    def test_api_feed_global_queries_relays_without_authors_filter(self):
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            response = self.client.get(reverse("api_feed") + "?circle=global")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(mock_relay_req.called)
+            filter_obj = mock_relay_req.call_args[0][0]
+            self.assertNotIn("authors", filter_obj)
+
 
 
 class MediaUploadProxyViewTest(TestCase):
@@ -392,11 +586,347 @@ class FeedViewTwoTierToolbarTest(TestCase):
         self.assertContains(response, "data-author-pubkey=")
         self.assertContains(response, "data-author-did=")
         self.assertContains(response, "data-note-tags=")
-        self.assertContains(response, "trust-lens-target")
+        self.assertContains(response, "author-badge-slot")
 
     def test_feed_loads_circle_feed_filter_script(self):
         response = self._get_feed()
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "circle_feed_filter.js")
+
+    def test_circle_filters_hidden_on_dashboard_and_chat(self):
+        user = User.objects.create_user(username="did:key:z6Mkdashuser")
+        self.client.force_login(user)
+
+        # Dashboard: circle filter group should NOT be present
+        resp_dash = self.client.get(reverse("dashboard"))
+        self.assertEqual(resp_dash.status_code, 200)
+        self.assertNotContains(resp_dash, 'id="circle-filter-group"')
+
+        # Chat: circle filter group should NOT be present
+        resp_chat = self.client.get(reverse("chat"))
+        self.assertEqual(resp_chat.status_code, 200)
+        self.assertNotContains(resp_chat, 'id="circle-filter-group"')
+
+
+class FeedModernizationAndExternalAttributionTest(TestCase):
+
+    """Verifies feed modernization, external identity attribution, and 5-button action bar."""
+
+    def test_external_relay_note_does_not_contain_synthetic_did_or_static_verified_badge(self):
+        # External relay note (e.g. jb55 from nos.lol)
+        external_pubkey = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        relay_events = {
+            "ext_note_1": make_event("ext_note_1", 1, pubkey=external_pubkey, content="Hello decentralized world!"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        # Verify no synthetic did:iyou:0x appears in the HTML
+        self.assertNotContains(response, f"did:iyou:0x{external_pubkey}")
+        # Verify no static green "Verified" badge is stamped on the unverified external note
+        self.assertNotContains(response, '<span class="bg-green-100 text-green-800 text-xs font-medium px-2 py-0.5 rounded-full">Verified</span>')
+        self.assertNotContains(response, "Verified</span>")
+
+    def test_feed_renders_5_button_action_bar(self):
+        relay_events = {
+            "action_note_1": make_event("action_note_1", 1, content="Testing 5-button action bar!"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "action-btn-reply")
+        self.assertContains(response, "action-btn-repost")
+        self.assertContains(response, "action-btn-like")
+        self.assertContains(response, "action-btn-share")
+        self.assertContains(response, "💬")
+        self.assertContains(response, "🔁")
+        self.assertContains(response, "❤️")
+        self.assertContains(response, "↗️")
+
+    def test_feed_renders_kebab_menu_with_ecosystem_actions(self):
+        relay_events = {
+            "kebab_note_1": make_event("kebab_note_1", 1, content="Testing kebab dropdown!"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "kebab-menu-wrap")
+        self.assertContains(response, "kebab-toggle-btn")
+        self.assertContains(response, "kebab-dropdown")
+        self.assertContains(response, "Suggest to Dev")
+        self.assertContains(response, "Post of the Day")
+        self.assertContains(response, "Set Enclave Petname")
+        self.assertContains(response, "View Raw JSON")
+        self.assertContains(response, "Copy Event ID / Link")
+
+    def test_inline_reply_composer_rendered_and_no_legacy_reply_triggers(self):
+        relay_events = {
+            "inline_reply_note": make_event("inline_reply_note", 1, content="Testing inline reply!"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        # Assert no legacy reply trigger / wrapping markup exists in DOM
+        self.assertNotContains(response, "&#8617; Reply")
+        self.assertNotContains(response, "reply-trigger-")
+        self.assertNotContains(response, "reply-editor-wrap-")
+        # Assert canonical action bar reply button exists
+        self.assertContains(response, "action-btn-reply")
+        # Assert clean inline reply drawer exists
+        self.assertContains(response, 'id="reply-box-inline_reply_note"')
+        self.assertContains(response, 'id="reply-input-inline_reply_note"')
+        self.assertContains(response, "Write a sovereign reply...")
+
+    def test_feed_renders_clickable_timestamp_permalink(self):
+        relay_events = {
+            "perm_note_1": make_event("perm_note_1", 1, content="Testing timestamp permalink!"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'href="/feed?thread=perm_note_1"')
+        self.assertContains(response, 'title="View full conversation thread"')
+
+    def test_feed_renders_replying_to_subheader_when_parent_id_present(self):
+        parent_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        relay_events = {
+            "parent_post": make_event("parent_post", 1, pubkey=parent_pk, content="Parent note"),
+            "reply_post": make_event("reply_post", 1111, pubkey="32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245", content="Child reply", tags=[
+                ["e", "parent_post", "", "root"],
+                ["e", "parent_post", "", "reply"],
+                ["p", parent_pk, "", "reply"],
+            ]),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "↳ Replying to")
+        self.assertContains(response, "parent_post")
+
+    def test_feed_view_handles_thread_and_note_query_params(self):
+        root_event = make_event("target_thread_1", 1, content="Target thread root")
+        with patch("apps.core.views.relay_req", return_value={"target_thread_1": root_event}):
+            # Test ?thread=
+            resp_thread = self.client.get(reverse("feed") + "?thread=target_thread_1")
+            self.assertEqual(resp_thread.status_code, 200)
+            self.assertTrue(resp_thread.context.get("thread_mode"))
+            self.assertEqual(resp_thread.context.get("thread_id"), "target_thread_1")
+
+            # Test ?note=
+            resp_note = self.client.get(reverse("feed") + "?note=target_thread_1")
+            self.assertEqual(resp_note.status_code, 200)
+            self.assertTrue(resp_note.context.get("thread_mode"))
+            self.assertEqual(resp_note.context.get("thread_id"), "target_thread_1")
+
+    def test_feed_mode_thread_renders_hero_container_back_button_and_replies(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        reply_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        relay_events = {
+            "hero_root_1": make_event("hero_root_1", 1, pubkey=root_pk, content="Hero thread discussion"),
+            "hero_reply_1": make_event("hero_reply_1", 1111, pubkey=reply_pk, content="First thoughtful reply", tags=[
+                ["e", "hero_root_1", "", "root"],
+                ["e", "hero_root_1", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed") + "?thread=hero_root_1")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context.get("notes"), [])
+        self.assertEqual(response.context.get("thread_root", {}).get("id"), "hero_root_1")
+        self.assertContains(response, "Back to Feed")
+        self.assertContains(response, "ring-violet-500/20")
+        self.assertContains(response, 'id="reply-input-hero_root_1"')
+        self.assertContains(response, "Replies (1)")
+        self.assertContains(response, "First thoughtful reply")
+        # Global compose button is not rendered in thread mode
+        self.assertNotContains(response, 'id="btn-compose-note"')
+
+    def test_feed_mode_thread_direct_replies_and_drilldown_link(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        child_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        grandchild_pk = "0000000000000000000000000000000000000000000000000000000000000001"
+
+        relay_events = {
+            "root_hero": make_event("root_hero", 1, pubkey=root_pk, content="Top conversation note"),
+            "direct_child": make_event("direct_child", 1111, pubkey=child_pk, content="Direct reply note", tags=[
+                ["e", "root_hero", "", "root"],
+                ["e", "root_hero", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+            "sub_child": make_event("sub_child", 1111, pubkey=grandchild_pk, content="Sub reply under direct child", tags=[
+                ["e", "root_hero", "", "root"],
+                ["e", "direct_child", "", "reply"],
+                ["p", child_pk, "", "reply"],
+            ]),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed") + "?thread=root_hero")
+
+        self.assertEqual(response.status_code, 200)
+        thread_root = response.context.get("thread_root", {})
+        # Only 1 direct reply under root_hero
+        self.assertEqual(len(thread_root.get("replies", [])), 1)
+        direct_reply = thread_root["replies"][0]
+        self.assertEqual(direct_reply["id"], "direct_child")
+        # Sub-reply count on direct_child is 1
+        self.assertEqual(direct_reply["reply_count"], 1)
+
+        # Drilldown link is rendered in HTML
+        self.assertContains(response, 'href="/feed?thread=direct_child"')
+        self.assertContains(response, "View 1 more reply →")
+
+    def test_contact_manager_script_contains_wss_home_iyou_me_target(self):
+        import os
+        from django.conf import settings
+
+        cm_path = os.path.join(settings.BASE_DIR, "static", "js", "contact_manager.js")
+        with open(cm_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        self.assertIn("getBridgeWsUrl", content)
+        self.assertIn("wss://home.iyou.me:9001/", content)
+        self.assertIn("ws://127.0.0.1:9001/", content)
+
+    def test_feed_view_context_includes_oldest_timestamp(self):
+        event1 = make_event("event_ts_1", 1, created_at=1700001000, content="Note 1")
+        event2 = make_event("event_ts_2", 1, created_at=1700000500, content="Note 2")
+        with patch("apps.core.views.relay_req", return_value={"event_ts_1": event1, "event_ts_2": event2}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("oldest_timestamp", response.context)
+        self.assertEqual(response.context["oldest_timestamp"], 1700000500)
+        self.assertEqual(response.context["notes"][0]["created_at_epoch"], 1700001000)
+
+    def test_feed_renders_pagination_sentinel_in_main_mode_and_hides_in_thread_mode(self):
+        event1 = make_event("sentinel_event_1", 1, created_at=1700000000, content="Sentinel Note")
+        with patch("apps.core.views.relay_req", return_value={"sentinel_event_1": event1}):
+            # 1. Main Feed Mode
+            resp_main = self.client.get(reverse("feed"))
+            self.assertEqual(resp_main.status_code, 200)
+            self.assertContains(resp_main, 'id="feed-pagination-sentinel"')
+            self.assertContains(resp_main, 'id="load-more-btn"')
+            self.assertContains(resp_main, 'data-oldest-timestamp="1700000000"')
+            self.assertContains(resp_main, "Load More Notes")
+
+            # 2. Thread Mode
+            resp_thread = self.client.get(reverse("feed") + "?thread=sentinel_event_1")
+            self.assertEqual(resp_thread.status_code, 200)
+            self.assertNotContains(resp_thread, 'id="feed-pagination-sentinel"')
+            self.assertNotContains(resp_thread, 'id="load-more-btn"')
+
+    def test_api_feed_cursor_pagination_and_structure(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        event1 = make_event("api_ev_1", 1, pubkey=pk, created_at=1699999000, content="Older note from API")
+        event2 = make_event("api_ev_2", 1063, pubkey=pk, created_at=1699998000, content="Media Note", tags=[
+            ["url", "https://cdn.iyou.me/image.jpg"],
+            ["m", "image/jpeg"],
+        ])
+
+        with patch("apps.core.views.relay_req", return_value={"api_ev_1": event1, "api_ev_2": event2}):
+            response = self.client.get(reverse("api_feed") + "?until=1700000000&limit=10")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("oldest_timestamp"), 1699998000)
+        self.assertTrue(data.get("has_more"))
+        self.assertEqual(len(data.get("notes", [])), 2)
+
+        note = data["notes"][0]
+        self.assertEqual(note["id"], "api_ev_1")
+        self.assertEqual(note["pubkey_hex"], pk)
+        self.assertEqual(note["created_at_epoch"], 1699999000)
+        self.assertIn("author_name", note)
+        self.assertIn("author_avatar", note)
+        self.assertIn("media_attachments", note)
+
+        # Second note (Kind 1063) has image attachment
+        note2 = data["notes"][1]
+        self.assertEqual(note2["id"], "api_ev_2")
+        self.assertEqual(len(note2["media_attachments"]), 1)
+        self.assertEqual(note2["media_attachments"][0]["type"], "image")
+        self.assertEqual(note2["media_attachments"][0]["url"], "https://cdn.iyou.me/image.jpg")
+
+    def test_feed_renders_inline_media_attachments_and_unfurls_urls(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        k1_media_event = make_event("k1_media_1", 1, pubkey=pk, created_at=1700000000, content="Check this out:\nhttps://cdn.iyou.me/photo.png")
+        k1063_event = make_event("k1063_1", 1063, pubkey=pk, created_at=1700000100, tags=[
+            ["url", "https://cdn.iyou.me/video.mp4"],
+            ["m", "video/mp4"],
+        ])
+
+        with patch("apps.core.views.relay_req", return_value={"k1_media_1": k1_media_event, "k1063_1": k1063_event}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<img src="https://cdn.iyou.me/photo.png"')
+        self.assertContains(response, '<video src="https://cdn.iyou.me/video.mp4"')
+        self.assertContains(response, "Check this out:")
+
+
+    def test_api_feed_deduplicates_and_returns_valid_notes(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        event1 = make_event("api_dup_1", 1, pubkey=pk, created_at=1699999000, content="Original note text")
+        event1_dup = make_event("api_dup_1", 1, pubkey=pk, created_at=1699999000, content="Duplicate copy")
+        event2 = make_event("api_note_2", 1063, pubkey=pk, created_at=1699998000, tags=[
+            ["url", "https://cdn.iyou.me/pic.png"],
+            ["m", "image/png"],
+        ])
+
+        with patch("apps.core.views.relay_req", return_value={"e1": event1, "e1_dup": event1_dup, "e2": event2}):
+            response = self.client.get(reverse("api_feed") + "?until=1700000000&limit=10")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        notes = data["notes"]
+        self.assertEqual(len(notes), 2)
+        note_ids = [n["id"] for n in notes]
+        self.assertEqual(len(note_ids), len(set(note_ids)))
+        self.assertIn("api_dup_1", note_ids)
+        self.assertIn("api_note_2", note_ids)
+
+        first = notes[0]
+        self.assertIn("created_at_epoch", first)
+        self.assertIn("created_at_formatted", first)
+        self.assertIn("pubkey_hex", first)
+        self.assertIn("media_attachments", first)
+        self.assertIn("reply_to_name", first)
+        self.assertIn("reply_count", first)
+
+    def test_feed_view_renders_numeric_reply_count_when_replies_exist(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        root_event = make_event("root_rep_card", 1, pubkey=pk, content="Testing reply counts display")
+        reply_event = make_event("reply_rep_card", 1, pubkey=pk, content="First reply", tags=[["e", "root_rep_card"]])
+
+        with patch("apps.core.views.relay_req") as mock_relay:
+            mock_relay.side_effect = [
+                {"root": root_event},
+                {},
+                {"rep": reply_event},
+            ]
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "action-btn-reply")
+        self.assertContains(response, "1")
+
+
+
+
+
+
+
+
+
 
 

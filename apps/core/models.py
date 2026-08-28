@@ -38,7 +38,13 @@ class UserLinkDeck(models.Model):
     )
     handle = models.CharField(max_length=32, db_index=True)
     discriminator = models.PositiveIntegerField(default=0)
+    display_name = models.CharField(max_length=100, blank=True, default="")
     headline = models.CharField(max_length=160, blank=True, default="")
+    avatar_url = models.CharField(max_length=2048, blank=True, default="")
+    banner_url = models.CharField(max_length=2048, blank=True, default="")
+    nip05 = models.CharField(max_length=300, blank=True, default="")
+    lud16 = models.CharField(max_length=300, blank=True, default="")
+
     default_view = models.CharField(
         max_length=8,
         choices=[("deck", "deck"), ("feed", "feed")],
