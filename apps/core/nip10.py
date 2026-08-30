@@ -147,11 +147,55 @@ def detect_content_warning(event):
     return False, ""
 
 
+# --- Language Detection Heuristics ---
+CJK_REGEX = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff]")
+JA_KANA_REGEX = re.compile(r"[\u3040-\u30ff]")
+CYRILLIC_REGEX = re.compile(r"[\u0400-\u04ff]")
+ARABIC_REGEX = re.compile(r"[\u0600-\u06ff]")
+SPANISH_MARKERS = ("¿", "¡", "ñ", "Ñ")
+SPANISH_WORDS = ("está", "para", "como", "pero", "este", "esta", "todos", "bien", "gracias", "hola", "buenos", "buenas", "por qué", "porque")
+
+
 def detect_language(event):
-    """Read the ["lang", "<code>"] tag, defaulting to 'en'."""
+    """Detect language ISO 639-1 code from NIP-01 ["lang", "<code>"] tags or script heuristics.
+
+    Returns ISO 639-1 code (e.g. 'en', 'es', 'ja', 'zh', 'ru', 'ar', 'de', 'fr', etc.).
+    """
+    if not isinstance(event, dict):
+        return "en"
+
+    # 1. NIP-01 / NIP-36 tag check
     for tag in event.get("tags") or []:
         if tag and tag[0] == "lang" and len(tag) > 1 and str(tag[1]).strip():
-            return str(tag[1]).strip().lower()
+            code = str(tag[1]).strip().lower()
+            return code.split("-")[0] if "-" in code else code
+
+    # 2. Content script heuristics
+    content = str(event.get("content") or "")
+    if not content:
+        return "en"
+
+    # Japanese kana check
+    if JA_KANA_REGEX.search(content):
+        return "ja"
+
+    # CJK Han characters (Chinese)
+    if CJK_REGEX.search(content):
+        return "zh"
+
+    # Cyrillic (Russian / Slavic)
+    if CYRILLIC_REGEX.search(content):
+        return "ru"
+
+    # Arabic
+    if ARABIC_REGEX.search(content):
+        return "ar"
+
+    # Spanish markers in Latin prose
+    lowered = content.lower()
+    if any(marker in lowered for marker in SPANISH_MARKERS) or any(re.search(rf"\b{re.escape(w)}\b", lowered) for w in SPANISH_WORDS):
+        return "es"
+
     return "en"
 
 
@@ -411,7 +455,7 @@ def build_thread_tree(raw_events, profiles=None):
             "replies": [],
             "has_content_warning": bool(e.get("has_content_warning")),
             "warning_reason": e.get("warning_reason") or "",
-            "lang": e.get("lang") or "en",
+            "lang": e.get("lang") or detect_language(e) or "en",
         }
         return extract_media_from_note(note)
 
@@ -545,7 +589,7 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "replies": [],
         "has_content_warning": bool(e.get("has_content_warning")),
         "warning_reason": e.get("warning_reason") or "",
-        "lang": e.get("lang") or "en",
+        "lang": e.get("lang") or detect_language(e) or "en",
     }
 
     if kind == 1063:

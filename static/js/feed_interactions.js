@@ -516,7 +516,7 @@
             '<button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-mono transition" onclick="cancelReply(\'' + escapeAttr(noteId) + '\')">Cancel</button>' +
             '</div></div></div>';
 
-        return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '">' +
+        return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '" data-lang="' + escapeAttr(note.lang || 'en') + '">' +
             '<div class="flex-shrink-0"><a href="/profile/' + npub + '/">' + avatarHtml + '</a></div>' +
             '<div class="flex-1 min-w-0">' +
             '<div class="flex items-center justify-between gap-2 mb-1.5">' +

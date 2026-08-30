@@ -70,6 +70,17 @@ class DashboardViewTest(TestCase):
         response = self.client.get("/dashboard")
         self.assertContains(response, "Sign Out")
 
+    def test_dashboard_renders_stream_language_selector(self):
+        user = User.objects.create_user(username="did:iyou:0xlanguagetesthub")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="setting-stream-lang"')
+        self.assertContains(response, "Stream Language Filter")
+        self.assertContains(response, 'value="all"')
+        self.assertContains(response, 'value="en"')
+        self.assertContains(response, 'value="es"')
+
 
 class JwksConnectivityTest(TestCase):
     """Pings the IdP's JWKS endpoint to verify connectivity.
@@ -1067,6 +1078,14 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(response_api.status_code, 200)
         self.assertIn("authors", captured_filter)
         self.assertTrue(len(captured_filter["authors"]) > 0)
+
+    def test_thread_post_renders_data_lang_attribute(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        event_es = make_event("es_note", 1, pubkey=pk, content="¡Hola mundo nostr! ¿Cómo estás?", tags=[["lang", "es"]])
+        with patch("apps.core.views.relay_req", return_value={"es_note": event_es}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-lang="es"')
 
     def test_api_feed_deduplicates_and_returns_valid_notes(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"

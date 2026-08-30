@@ -202,17 +202,18 @@
           </div>
 
           <!-- 2. Language Filter -->
-          <div class="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
-            <label for="setting-lang-pref" class="block font-semibold text-slate-800 dark:text-slate-200">
-              Language Filtering
+          <div class="space-y-1 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <label for="setting-stream-lang" class="block text-xs font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider font-mono">
+              Stream Language Filter
             </label>
-            <select id="setting-lang-pref" 
+            <select id="setting-stream-lang" 
                     onchange="saveFeedHygienePreferences()"
-                    class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500">
-              <option value="all">All Languages [Default]</option>
-              <option value="en">English Only (en)</option>
+                    class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-100 font-mono focus:border-violet-500">
+              <option value="all">Global (All Languages)</option>
+              <option value="en">English Only</option>
+              <option value="es">Español Only</option>
             </select>
-            <p class="text-[10px] text-slate-400">Filter notes based on language tags detected in events.</p>
+            <p class="text-[11px] text-slate-400">Hides notes in the global firehose that do not match your preferred reading languages.</p>
           </div>
 
           <!-- 3. Machine Noise Gate -->
@@ -689,30 +690,39 @@
   }
 
   function loadFeedHygienePreferences() {
-    var nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
-    var langPref = localStorage.getItem("wun_lang_pref") || "all";
-    var noisePref = localStorage.getItem("wun_noise_pref") !== "disabled";
+    var nsfwPref = "blur";
+    var streamLang = "all";
+    var noisePref = true;
+
+    try {
+      nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
+      streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
+      noisePref = (localStorage.getItem("wun_noise_pref") !== "disabled");
+    } catch (e) {}
 
     var nsfwEl = document.getElementById("setting-nsfw-pref");
-    var langEl = document.getElementById("setting-lang-pref");
+    var langEl = document.getElementById("setting-stream-lang") || document.getElementById("setting-lang-pref");
     var noiseEl = document.getElementById("setting-noise-pref");
 
     if (nsfwEl) nsfwEl.value = nsfwPref;
-    if (langEl) langEl.value = langPref;
+    if (langEl) langEl.value = streamLang;
     if (noiseEl) noiseEl.checked = noisePref;
   }
 
   function saveFeedHygienePreferences() {
     var nsfwEl = document.getElementById("setting-nsfw-pref");
-    var langEl = document.getElementById("setting-lang-pref");
+    var langEl = document.getElementById("setting-stream-lang") || document.getElementById("setting-lang-pref");
     var noiseEl = document.getElementById("setting-noise-pref");
 
     if (nsfwEl) localStorage.setItem("wun_nsfw_pref", nsfwEl.value);
-    if (langEl) localStorage.setItem("wun_lang_pref", langEl.value);
+    if (langEl) {
+      localStorage.setItem("wun_stream_lang", langEl.value);
+      localStorage.setItem("wun_lang_pref", langEl.value);
+    }
     if (noiseEl) localStorage.setItem("wun_noise_pref", noiseEl.checked ? "enabled" : "disabled");
 
     if (typeof showToast === "function") {
-      showToast("Feed preferences saved.");
+      showToast("Settings updated", "info");
     }
   }
 

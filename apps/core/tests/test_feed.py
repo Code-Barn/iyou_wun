@@ -857,6 +857,42 @@ class FeedSanitizerTests(TestCase):
         self.assertEqual(result["lang"], "en")
         self.assertFalse(result["has_content_warning"])
 
+    def test_detect_language_parses_tags_and_heuristics(self):
+        from apps.core.nip10 import detect_language
+
+        # 1. NIP-01 explicit tag
+        tagged_de = {"tags": [["lang", "de"]], "content": "Guten Morgen"}
+        self.assertEqual(detect_language(tagged_de), "de")
+
+        tagged_es_regional = {"tags": [["lang", "es-MX"]], "content": "Hola amigos"}
+        self.assertEqual(detect_language(tagged_es_regional), "es")
+
+        # 2. Japanese kana heuristic
+        ja_note = {"tags": [], "content": "こんにちは、ノストラ！"}
+        self.assertEqual(detect_language(ja_note), "ja")
+
+        # 3. Chinese Han characters heuristic
+        zh_note = {"tags": [], "content": "去中心化网络开发"}
+        self.assertEqual(detect_language(zh_note), "zh")
+
+        # 4. Cyrillic heuristic
+        ru_note = {"tags": [], "content": "Привет, суверенная сеть!"}
+        self.assertEqual(detect_language(ru_note), "ru")
+
+        # 5. Arabic heuristic
+        ar_note = {"tags": [], "content": "مرحبا بكم في شبكة نوستر"}
+        self.assertEqual(detect_language(ar_note), "ar")
+
+        # 6. Spanish markers in Latin prose
+        es_note1 = {"tags": [], "content": "¡Hola! ¿Cómo estás hoy en la red?"}
+        self.assertEqual(detect_language(es_note1), "es")
+        es_note2 = {"tags": [], "content": "Muchas gracias por el apoyo sovereign"}
+        self.assertEqual(detect_language(es_note2), "es")
+
+        # 7. Default English Latin prose
+        en_note = {"tags": [], "content": "Decentralized mesh networks empower digital sovereignty."}
+        self.assertEqual(detect_language(en_note), "en")
+
 
 class AttachSocialCountsTests(TestCase):
     """Unified batch social-counts (replies, reposts, reactions) contract."""

@@ -96,8 +96,8 @@ Archive (historical, gitignored): `docs/archive/` — `MESHING_PROTOCOL.md`, `ST
 ## Testing
 
 ```bash
-uv run python manage.py test apps.core   # 330 tests / 7 modules
+uv run python manage.py test apps.core   # 333 tests / 7 modules
 uv run ruff check .
 ```
 
-330 unit tests across 7 modules — see [docs/WUN_DEVELOPER_GUIDE.md](docs/WUN_DEVELOPER_GUIDE.md#running-tests) for the breakdown.
+333 unit tests across 7 modules — see [docs/WUN_DEVELOPER_GUIDE.md](docs/WUN_DEVELOPER_GUIDE.md#running-tests) for the breakdown.

@@ -216,18 +216,18 @@
 
     function getSafetyPreferences() {
         var nsfwPref = "blur";
-        var langPref = "all";
+        var streamLang = "all";
         try {
             nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
-            langPref = localStorage.getItem("wun_lang_pref") || "all";
+            streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
         } catch (e) {}
-        return { nsfwPref: nsfwPref, langPref: langPref };
+        return { nsfwPref: nsfwPref, streamLang: streamLang, langPref: streamLang };
     }
 
     function checkSafetyAndHygieneMatch(card, data) {
         var prefs = getSafetyPreferences();
         var nsfwPref = prefs.nsfwPref;
-        var langPref = prefs.langPref;
+        var streamLang = prefs.streamLang;
 
         // 1. NSFW / Content Warning Hide check
         var hasCw = card.getAttribute("data-has-content-warning") === "true" ||
@@ -237,9 +237,16 @@
             return false;
         }
 
-        // 2. Language Filter
-        var cardLang = (card.getAttribute("data-lang") || (data && data.root ? data.root.getAttribute("data-lang") : "") || "").toLowerCase();
-        if (langPref === "en" && cardLang && cardLang !== "en") {
+        // 2. Stream Language Filter
+        var cardLang = (
+            card.getAttribute("data-lang") ||
+            (card.dataset && card.dataset.lang) ||
+            (data && data.root && (data.root.getAttribute("data-lang") || (data.root.dataset && data.root.dataset.lang))) ||
+            (card.querySelector("[data-lang]") && card.querySelector("[data-lang]").getAttribute("data-lang")) ||
+            "en"
+        ).toLowerCase();
+
+        if (streamLang !== "all" && cardLang && cardLang !== streamLang) {
             return false;
         }
 
@@ -766,6 +773,12 @@
 
         window.addEventListener("contactsUpdated", function () {
             applyFilters();
+        });
+
+        window.addEventListener("storage", function (e) {
+            if (e.key === "wun_stream_lang" || e.key === "wun_lang_pref" || e.key === "wun_nsfw_pref") {
+                applyFilters();
+            }
         });
     }
 

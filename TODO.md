@@ -60,11 +60,11 @@
   - [ ] **17.2 Dashboard Language & Content Preferences:**
     - Add a **Language & Locale** preference card in `/dashboard#settings`.
     - Store interface language choice in `django_language` cookie and `localStorage`.
-    - Add **Feed Stream Language Preferences** multi-select (`English Only`, `Spanish Only`, `Global / All`).
-  - [ ] **17.3 Stream Language Gate & Ingestion Filter:**
+    - [x] Add **Feed Stream Language Preferences** selector (`English Only`, `Spanish Only`, `Global / All`) — **Done 2026-08-30**
+  - [x] **17.3 Stream Language Gate & Ingestion Filter:**
     - Enhance `detect_language()` in `apps/core/nip10.py` to parse NIP-01 `["lang", "<code>"]` tags and evaluate lightweight script heuristics.
     - Expose `data-lang="<code>"` on all server-rendered and client-rendered note cards.
-    - Update `static/js/circle_feed_filter.js` to hide notes outside the user's preferred stream languages when filtering is active.
+    - Update `static/js/circle_feed_filter.js` to hide notes outside the user's preferred stream languages when filtering is active — **Done 2026-08-30**
   - [ ] **17.4 On-Demand Note Translation API (`POST /api/translate/`):**
     - Implement a backend translation endpoint accepting `{ "text": "...", "source_lang": "...", "target_lang": "..." }`.
     - Wire to a self-hosted translation backend (LibreTranslate / translation service) with response caching.
