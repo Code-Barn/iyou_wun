@@ -27,23 +27,34 @@
         {% endif %}
       </div>
 
-      <!-- Right: Tag Search Filter -->
-      <div class="relative w-full sm:w-auto">
-        <input type="text" 
-               id="feed-search-input" 
-               placeholder="[ FILTER_FEED_TAGS:_* ]" 
-               autocomplete="off"
-               class="bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-violet-400 placeholder-slate-400 dark:placeholder-slate-600 px-2.5 py-1 rounded focus:outline-none focus:border-violet-500 text-xs w-full sm:w-60">
+      <!-- Right: Tag Search Filter & NSFW Shield Toggle -->
+      <div class="flex items-center gap-2 w-full sm:w-auto">
+        <button id="nsfw-filter-toggle" 
+                type="button" 
+                class="px-2 py-1 bg-slate-100 dark:bg-slate-800 hover:bg-violet-100 dark:hover:bg-violet-950/60 border border-slate-200 dark:border-slate-800 rounded text-[11px] font-mono text-slate-600 dark:text-slate-300 transition flex items-center gap-1 shrink-0 select-none" 
+                onclick="toggleNsfwFilter()" 
+                title="Toggle Sensitive Media Blur">
+          <span>🛡️ Shield:</span>
+          <span id="nsfw-filter-status" class="text-violet-600 dark:text-violet-400 font-bold">BLUR</span>
+        </button>
 
-        <!-- Autocomplete / Progressive Search Flyout -->
-        <div id="search-results-dropdown" 
-             class="hidden absolute right-0 top-full mt-1.5 w-80 sm:w-96 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden font-mono text-xs">
-          <div id="search-dropdown-content" class="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
-            <!-- Dynamic Sections: Profiles, Tags, Notes -->
-          </div>
-          <div id="search-dropdown-footer" class="px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 flex justify-between">
-            <span>[Enter] Search Feed</span>
-            <span>[Esc] Close</span>
+        <div class="relative flex-1 sm:w-auto">
+          <input type="text" 
+                 id="feed-search-input" 
+                 placeholder="[ FILTER_FEED_TAGS:_* ]" 
+                 autocomplete="off"
+                 class="bg-white dark:bg-slate-950 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-violet-400 placeholder-slate-400 dark:placeholder-slate-600 px-2.5 py-1 rounded focus:outline-none focus:border-violet-500 text-xs w-full sm:w-60">
+
+          <!-- Autocomplete / Progressive Search Flyout -->
+          <div id="search-results-dropdown" 
+               class="hidden absolute right-0 top-full mt-1.5 w-80 sm:w-96 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl z-50 overflow-hidden font-mono text-xs">
+            <div id="search-dropdown-content" class="max-h-80 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              <!-- Dynamic Sections: Profiles, Tags, Notes -->
+            </div>
+            <div id="search-dropdown-footer" class="px-3 py-1.5 bg-slate-50 dark:bg-slate-950 border-t border-slate-100 dark:border-slate-800 text-[10px] text-slate-400 flex justify-between">
+              <span>[Enter] Search Feed</span>
+              <span>[Esc] Close</span>
+            </div>
           </div>
         </div>
       </div>

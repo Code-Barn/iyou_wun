@@ -859,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**320 total across 7 test modules**; ruff clean):
+Tests cover (**327 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -868,7 +868,7 @@ Tests cover (**320 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (93 tests)
+### `test_views.py` (97 tests)
 - `HomeViewTest` — root redirect to /feed (1)
 - `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link (5)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
@@ -879,18 +879,18 @@ Tests cover (**320 total across 7 test modules**; ruff clean):
 - `MediaUploadProxyViewTest` — Blossom proxy behavior incl. dynamic endpoint resolution (6)
 - `FeedViewTrustLensContractTest` — Level0/0.5/1 trust pill contract (6)
 - `FeedViewTwoTierToolbarTest` — two-tier nav toolbar, circle scope badge, live tag search (5)
-- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, Open Graph metadata, NIP-56 report actions (10)
+- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, Open Graph metadata, NIP-56 report actions, separate subheader links & jump to root conversation, scoped trending switcher & NSFW shield toggle (14)
 - `SearchAPITests` — `/api/search/` JSON schema, handle/name/hashtag filtering, nav dropdown DOM, toast container (4)
 - `CyberGritErrorViewTests` — branded cyber-grit 404 & 500 error views, route disconnected / internal transmission fault copy, socket retry (18)
 - `NotificationViewTests` — authenticated bell toggle, slide-out drawer markup, `/notifications` ledger tabs (Mentions/Reactions/Zaps) (4)
 - `NIP05EndpointTests` — `/.well-known/nostr.json` verification endpoint, name querying & JSON schema (3)
 - `ProfileComposerTests` — profile view quick note composer rendering and submission (2)
 
-### `test_feed.py` (60 tests)
-- `ProcessIntoFeedTest` — kind routing, reaction grouping/dedup, sovereignty flag, profile enrichment, sort/truncation, malformed events, poll extraction + scope tags + vote grouping, multi-relay dedup, NIP-10 tree builder, batch reply counts, **batch Kind-7 reaction counts** (48)
-- `RelayPoolAndFailoverTests` — `relay_req` failover on primary down, all-relays-down → `{}`, NIP-65 (Kind 10002) relay parsing, empty-pubkey guard, unified-feed relay-outage grace (5)
+### `test_feed.py` (63 tests)
+- `ProcessIntoFeedTest` — kind routing, reaction grouping/dedup, sovereignty flag, profile enrichment, sort/truncation, malformed events, poll extraction + scope tags + vote grouping, multi-relay dedup, NIP-10 tree builder, positional/unmarked tag parsing, batch reply counts, **batch Kind-7 reaction counts** (50)
+- `RelayPoolAndFailoverTests` — `relay_req` failover on primary down, all-relays-down → `{}`, NIP-65 (Kind 10002) relay parsing, empty-pubkey guard, unified-feed relay-outage grace, federated ancestor fallback relays (6)
 - `FeedSanitizerTests` — XSS sanitization, HTML stripping, URI scheme filtering, auto-linkification (3)
-- `AttachSocialCountsTests` — social reaction and reply count aggregation across relay responses (2)
+- `AttachSocialCountsTests` — social reaction and reply count aggregation across relay responses, scoped trending tags stream calculation (3)
 - `FeedRelayHealthWidgetLayoutTest` — relay health indicator widget layout and dynamic state rendering (2)
 
 ### `test_gallery.py` (32 tests)

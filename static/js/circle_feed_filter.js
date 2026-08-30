@@ -203,6 +203,92 @@
         return el;
     }
 
+    function getSafetyPreferences() {
+        var nsfwPref = "blur";
+        var langPref = "all";
+        try {
+            nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
+            langPref = localStorage.getItem("wun_lang_pref") || "all";
+        } catch (e) {}
+        return { nsfwPref: nsfwPref, langPref: langPref };
+    }
+
+    function checkSafetyAndHygieneMatch(card, data) {
+        var prefs = getSafetyPreferences();
+        var nsfwPref = prefs.nsfwPref;
+        var langPref = prefs.langPref;
+
+        // 1. NSFW / Content Warning Hide check
+        var hasCw = card.getAttribute("data-has-content-warning") === "true" ||
+                    (data && data.root && data.root.getAttribute("data-has-content-warning") === "true") ||
+                    !!card.querySelector(".content-warning-shield");
+        if (nsfwPref === "hide" && hasCw) {
+            return false;
+        }
+
+        // 2. Language Filter
+        var cardLang = (card.getAttribute("data-lang") || (data && data.root ? data.root.getAttribute("data-lang") : "") || "").toLowerCase();
+        if (langPref === "en" && cardLang && cardLang !== "en") {
+            return false;
+        }
+
+        return true;
+    }
+
+    function applyNsfwBlurState(pref) {
+        var nsfwPref = pref || (getSafetyPreferences().nsfwPref);
+        var shields = document.querySelectorAll(".content-warning-shield");
+        shields.forEach(function (shield) {
+            var blurEl = shield.querySelector(".blur-me");
+            var btn = shield.querySelector(".content-warning-reveal");
+            if (nsfwPref === "show") {
+                if (blurEl) {
+                    blurEl.classList.remove("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
+                }
+                if (btn) {
+                    btn.classList.add("hidden");
+                }
+            } else if (nsfwPref === "blur") {
+                if (blurEl && !shield.classList.contains("user-revealed")) {
+                    blurEl.classList.add("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
+                }
+                if (btn && !shield.classList.contains("user-revealed")) {
+                    btn.classList.remove("hidden");
+                }
+            }
+        });
+    }
+
+    function updateNsfwShieldStatusUI(pref) {
+        var statusEl = document.getElementById("nsfw-filter-status");
+        if (!statusEl) return;
+        var nsfwPref = pref || (getSafetyPreferences().nsfwPref);
+        statusEl.textContent = nsfwPref.toUpperCase();
+        if (nsfwPref === "show") {
+            statusEl.className = "text-emerald-600 dark:text-emerald-400 font-bold";
+        } else if (nsfwPref === "hide") {
+            statusEl.className = "text-rose-600 dark:text-rose-400 font-bold";
+        } else {
+            statusEl.className = "text-violet-600 dark:text-violet-400 font-bold";
+        }
+    }
+
+    function toggleNsfwFilter() {
+        var currentPref = getSafetyPreferences().nsfwPref;
+        var nextPref = (currentPref === "blur") ? "show" : (currentPref === "show" ? "hide" : "blur");
+        try {
+            localStorage.setItem("wun_nsfw_pref", nextPref);
+        } catch (e) {}
+
+        updateNsfwShieldStatusUI(nextPref);
+        applyNsfwBlurState(nextPref);
+        applyFeedFilters();
+
+        if (typeof showToast === "function") {
+            showToast("Shield set to " + nextPref.toUpperCase(), "info");
+        }
+    }
+
     function applyFeedFilters() {
         const container = getFeedContainer();
         if (!container) return;
@@ -216,8 +302,9 @@
 
             const matchCircle = checkCircleMatch(activeCircle, data.pubkey, data.did, card);
             const matchSearch = checkSearchMatch(activeSearchQuery, data);
+            const matchSafety = checkSafetyAndHygieneMatch(card, data);
 
-            if (matchCircle && matchSearch) {
+            if (matchCircle && matchSearch && matchSafety) {
                 card.style.display = "";
                 card.classList.remove("hidden");
                 visibleCount++;
@@ -226,6 +313,8 @@
                 card.classList.add("hidden");
             }
         });
+
+        applyNsfwBlurState();
 
         // Handle empty state banner
         const emptyState = ensureEmptyStateElement(container);
@@ -647,8 +736,10 @@
             });
         }
 
-        // 5. Initial filter application
+        // 5. Initial filter application & shield state
         setCircle(activeCircle);
+        updateNsfwShieldStatusUI();
+        applyNsfwBlurState();
 
         // 6. Reactive listeners for trust lens & contacts updates
         window.addEventListener("trustLensUpdated", function () {
@@ -666,11 +757,15 @@
         setCircle: setCircle,
         setSearchQuery: setSearchQuery,
         applyFilters: applyFilters,
+        toggleNsfwFilter: toggleNsfwFilter,
+        updateNsfwShieldStatusUI: updateNsfwShieldStatusUI,
+        applyNsfwBlurState: applyNsfwBlurState,
         getActiveCircle: () => activeCircle
     };
 
     global.circleFeedFilter = circleFeedFilter;
     global.applyCircleFilter = setCircle;
+    global.toggleNsfwFilter = toggleNsfwFilter;
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initCircleFeedFilter);

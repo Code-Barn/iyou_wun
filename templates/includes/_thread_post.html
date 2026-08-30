@@ -92,13 +92,23 @@
     </div>
 
     <!-- Replying to Subheader (if reply) -->
-    {% if note.parent_id %}
-    <div class="text-xs font-mono text-slate-400 dark:text-slate-500 mb-1 flex items-center gap-1">
+    {% if note.parent_id or note.reply_to_pubkey %}
+    <div class="text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5 flex-wrap">
       <span>↳ Replying to</span>
-      <a href="{% if note.reply_to_npub %}{% url 'profile' npub=note.reply_to_npub %}{% else %}{% url 'feed' %}?thread={{ note.parent_id }}{% endif %}" 
-         class="text-violet-600 dark:text-violet-400 hover:underline">
-        @{{ note.reply_to_name|default:note.reply_to_npub|default:note.parent_id|truncatechars:14 }}
+      {% if note.reply_to_npub or note.reply_to_name %}
+      <a href="{% url 'profile' npub=note.reply_to_npub|default:note.npub %}" 
+         class="text-violet-600 dark:text-violet-400 hover:underline font-semibold">
+        @{{ note.reply_to_name|default:note.reply_to_npub|truncatechars:16 }}
       </a>
+      {% endif %}
+      {% if note.parent_id and note.id != note.parent_id %}
+      <span class="text-slate-400 dark:text-slate-600">·</span>
+      <a href="{% url 'feed' %}?thread={{ note.parent_id }}" 
+         class="text-slate-400 dark:text-slate-500 hover:text-violet-500 hover:underline inline-flex items-center gap-0.5"
+         title="Go to parent note">
+        <span>[ parent note ↗ ]</span>
+      </a>
+      {% endif %}
     </div>
     {% endif %}
 

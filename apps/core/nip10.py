@@ -246,8 +246,8 @@ def parse_nip10_tags(tags):
     """Parse NIP-10 reply tags from an event's tags array.
 
     Returns (root_id, parent_id, reply_marker, mention_ids, reply_to_pubkey) where:
-      - root_id:   the root event id (from the "root" marker), or None
-      - parent_id: the direct parent id (from the "reply" marker or first "e" tag), or None
+      - root_id:   the root event id (from the "root" marker or positional first "e" tag), or None
+      - parent_id: the direct parent id (from the "reply" marker or positional "e" tag), or None
       - reply_marker: "root" | "reply" | None
       - mention_ids: list of all mentioned event ids (from "e" tags)
       - reply_to_pubkey: the target author hex pubkey (from "p" tags), or None
@@ -257,6 +257,7 @@ def parse_nip10_tags(tags):
     reply_marker = None
     mention_ids = []
     reply_to_pubkey = None
+    e_tags = []
 
     for tag in tags:
         if not tag or len(tag) < 2:
@@ -264,7 +265,9 @@ def parse_nip10_tags(tags):
 
         tag_type = tag[0]
         if tag_type == "e":
-            eid = tag[1]
+            eid = str(tag[1]).strip()
+            if not eid:
+                continue
             marker = ""
             if len(tag) > 3 and tag[3] in ("root", "reply", "mention"):
                 marker = tag[3]
@@ -272,22 +275,38 @@ def parse_nip10_tags(tags):
                 marker = tag[2]
 
             mention_ids.append(eid)
+            e_tags.append((eid, marker))
 
             if marker == "root":
                 root_id = eid
             elif marker == "reply":
                 parent_id = eid
                 reply_marker = "reply"
-            elif not parent_id:
-                # Legacy positional or unmarked
-                parent_id = eid
-                if not root_id:
-                    root_id = eid
+
         elif tag_type == "p":
-            pk = tag[1]
+            pk = str(tag[1]).strip()
+            if not pk:
+                continue
             marker = tag[3] if len(tag) > 3 else (tag[2] if len(tag) > 2 else "")
             if marker == "reply" or not reply_to_pubkey:
                 reply_to_pubkey = pk
+
+    # Positional or unmarked e-tags fallback
+    if e_tags:
+        if not root_id and not parent_id:
+            if len(e_tags) == 1:
+                root_id = e_tags[0][0]
+                parent_id = e_tags[0][0]
+            elif len(e_tags) == 2:
+                root_id = e_tags[0][0]
+                parent_id = e_tags[1][0]
+            else:
+                root_id = e_tags[0][0]
+                parent_id = e_tags[-1][0]
+        elif root_id and not parent_id:
+            parent_id = root_id
+        elif parent_id and not root_id:
+            root_id = parent_id
 
     return root_id, parent_id, reply_marker, mention_ids, reply_to_pubkey
 

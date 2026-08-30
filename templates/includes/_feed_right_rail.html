@@ -1,8 +1,8 @@
 {% load static %}
-<aside class="hidden lg:block w-72 xl:w-80 shrink-0 space-y-4 sticky top-20 font-mono text-xs select-none">
+<aside class="hidden lg:block w-72 xl:w-80 shrink-0 space-y-3 sticky top-4 font-mono text-xs select-none mt-0 pt-0">
 
   <!-- Mesh Network Status & Relay Diagnostics Card -->
-  <div id="relay-health-widget" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 font-mono text-xs shadow-sm select-none">
+  <div id="relay-health-widget" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 font-mono text-xs shadow-sm select-none mt-0">
     <!-- Clickable Header Toggle -->
     <button type="button" 
             id="relay-health-toggle" 
@@ -43,11 +43,26 @@
       <span class="text-[11px] font-bold text-slate-800 dark:text-slate-200 tracking-wider flex items-center gap-1.5">
         <span>🔥</span> TRENDING TOPICS
       </span>
-      <span class="text-[10px] text-slate-400 dark:text-slate-500">24H VELOCITY</span>
+      <!-- Mini Scope Switcher -->
+      <div class="flex items-center gap-1 text-[10px]" id="trending-scope-switcher">
+        <button type="button" 
+                id="trending-tab-iyou"
+                class="px-1.5 py-0.5 rounded bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950 transition-colors select-none" 
+                onclick="switchTrendingScope('iyou')">
+          [ ⚡ iyou ]
+        </button>
+        <button type="button" 
+                id="trending-tab-global"
+                class="px-1.5 py-0.5 rounded text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 bg-slate-100 dark:bg-slate-800 transition-colors select-none" 
+                onclick="switchTrendingScope('global')">
+          [ 🌐 Global ]
+        </button>
+      </div>
     </div>
 
-    <div class="space-y-2.5">
-      {% for tag in trending_tags %}
+    <!-- iyou Scoped Trending List (Default) -->
+    <div id="trending-iyou-list" class="space-y-2.5">
+      {% for tag in trending_tags_iyou|default:trending_tags %}
       <button type="button" 
               class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
               onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#{{ tag.name }}'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #{{ tag.name }}', 'info');">
@@ -56,32 +71,61 @@
         <div class="text-[10px] text-slate-400 dark:text-slate-500">{{ tag.count }} mesh notes</div>
       </button>
       {% empty %}
-      <button type="button" 
-              class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
-              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#bitcoin'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #bitcoin', 'info');">
-        <div class="text-[10px] text-slate-400">Finance & Sovereign Capital</div>
-        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#bitcoin</div>
-        <div class="text-[10px] text-slate-400 dark:text-slate-500">1.4k mesh notes</div>
-      </button>
+      <div class="text-[11px] text-slate-400 py-2 text-center">No iyou trending tags yet</div>
+      {% endfor %}
+    </div>
 
+    <!-- Global Scoped Trending List (Hidden by default) -->
+    <div id="trending-global-list" class="hidden space-y-2.5">
+      {% for tag in trending_tags_global|default:trending_tags %}
       <button type="button" 
               class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
-              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#nostr'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #nostr', 'info');">
-        <div class="text-[10px] text-slate-400">Protocol & Relays</div>
-        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#nostr</div>
-        <div class="text-[10px] text-slate-400 dark:text-slate-500">920 mesh notes</div>
+              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#{{ tag.name }}'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #{{ tag.name }}', 'info');">
+        <div class="text-[10px] text-slate-400">{{ tag.category|default:'General' }}</div>
+        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#{{ tag.name }}</div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500">{{ tag.count }} mesh notes</div>
       </button>
-
-      <button type="button" 
-              class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
-              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#wine'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #wine', 'info');">
-        <div class="text-[10px] text-slate-400">Agriculture & Viticulture</div>
-        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#wine</div>
-        <div class="text-[10px] text-slate-400 dark:text-slate-500">312 mesh notes</div>
-      </button>
+      {% empty %}
+      <div class="text-[11px] text-slate-400 py-2 text-center">No global trending tags yet</div>
       {% endfor %}
     </div>
   </div>
+
+  <script>
+    function switchTrendingScope(scope) {
+      var iyouList = document.getElementById('trending-iyou-list');
+      var globalList = document.getElementById('trending-global-list');
+      var iyouTab = document.getElementById('trending-tab-iyou');
+      var globalTab = document.getElementById('trending-tab-global');
+      var activeCls = ['bg-violet-600', 'text-white', 'font-bold', 'dark:bg-violet-500', 'dark:text-slate-950'];
+      var inactiveCls = ['text-slate-500', 'hover:text-slate-800', 'dark:text-slate-400', 'dark:hover:text-slate-200', 'bg-slate-100', 'dark:bg-slate-800'];
+
+      if (scope === 'global') {
+        if (iyouList) iyouList.classList.add('hidden');
+        if (globalList) globalList.classList.remove('hidden');
+        if (iyouTab) {
+          activeCls.forEach(function(c){ iyouTab.classList.remove(c); });
+          inactiveCls.forEach(function(c){ iyouTab.classList.add(c); });
+        }
+        if (globalTab) {
+          inactiveCls.forEach(function(c){ globalTab.classList.remove(c); });
+          activeCls.forEach(function(c){ globalTab.classList.add(c); });
+        }
+      } else {
+        if (globalList) globalList.classList.add('hidden');
+        if (iyouList) iyouList.classList.remove('hidden');
+        if (globalTab) {
+          activeCls.forEach(function(c){ globalTab.classList.remove(c); });
+          inactiveCls.forEach(function(c){ globalTab.classList.add(c); });
+        }
+        if (iyouTab) {
+          inactiveCls.forEach(function(c){ iyouTab.classList.remove(c); });
+          activeCls.forEach(function(c){ iyouTab.classList.add(c); });
+        }
+      }
+    }
+    window.switchTrendingScope = switchTrendingScope;
+  </script>
 
   <!-- 2. Suggested Creators & Sovereign Peers -->
   <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">

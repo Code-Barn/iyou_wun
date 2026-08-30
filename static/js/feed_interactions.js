@@ -497,10 +497,13 @@
         var ICON_SHARE = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><path d="m16 6-4-4-4 4"></path><path d="M12 2v13"></path></svg>';
 
         if (note.has_content_warning) {
+            var nsfwPref = "blur";
+            try { nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur"; } catch(e){}
+            var isUnblurred = nsfwPref === "show";
             var cwReason = note.warning_reason || "Sensitive Content";
             contentAndMediaHtml = '<div class="content-warning-shield relative rounded-xl border border-amber-200 dark:border-amber-900/70 overflow-hidden mb-3">' +
-                '<div class="blur-me backdrop-blur-md blur-sm select-none pointer-events-none">' + contentAndMediaHtml + '</div>' +
-                '<button type="button" class="content-warning-reveal absolute inset-0 z-10 w-full h-full flex items-center justify-center" onclick="revealContentWarning(this)">' +
+                '<div class="blur-me ' + (isUnblurred ? '' : 'backdrop-blur-md blur-sm select-none pointer-events-none') + '">' + contentAndMediaHtml + '</div>' +
+                '<button type="button" class="content-warning-reveal ' + (isUnblurred ? 'hidden' : '') + ' absolute inset-0 z-10 w-full h-full flex items-center justify-center" onclick="revealContentWarning(this)">' +
                 '<span class="px-4 py-2 rounded-full bg-amber-100 dark:bg-amber-950/90 border border-amber-300 dark:border-amber-800/80 text-xs font-mono font-medium text-amber-800 dark:text-amber-300 shadow-lg">⚠️ ' + escapeHtml(cwReason) + ' — Click to View</span>' +
                 '</button></div>';
         }
@@ -555,14 +558,13 @@
     function revealContentWarning(btn) {
         var shield = btn && btn.closest ? btn.closest(".content-warning-shield") : null;
         if (!shield) return;
+        shield.classList.add("user-revealed");
         var blurEl = shield.querySelector(".blur-me");
         if (blurEl) {
             blurEl.classList.remove("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
         }
         btn.classList.add("hidden");
     }
-
-    // ---------- Optimistic Feed Insert ----------
 
     // ---------- Optimistic Feed Insert ----------
 
@@ -584,6 +586,12 @@
         wrapper.setAttribute("data-author-pubkey", event.pubkey_hex || event.pubkey || "");
         wrapper.setAttribute("data-author-did", event.author_did || "");
         wrapper.setAttribute("data-note-tags", JSON.stringify(event.tags || []));
+        if (event.has_content_warning || (event.tags && event.tags.some(function (t) { return t[0] === "content-warning"; }))) {
+            wrapper.setAttribute("data-has-content-warning", "true");
+        }
+        if (event.lang) {
+            wrapper.setAttribute("data-lang", event.lang);
+        }
         wrapper.setAttribute("data-created-at", Math.floor(event.created_at || (Date.now() / 1000)));
 
         var npub = window.userNpub || (window.userPubkey ? window.userPubkey.substring(0, 12) + "..." : "You");
@@ -670,6 +678,12 @@
             wrapper.setAttribute("data-author-pubkey", note.pubkey_hex || note.pubkey || "");
             wrapper.setAttribute("data-author-did", note.author_did || "");
             wrapper.setAttribute("data-note-tags", JSON.stringify(note.tags || []));
+            if (note.has_content_warning || (note.tags && note.tags.some(function (t) { return t[0] === "content-warning"; }))) {
+                wrapper.setAttribute("data-has-content-warning", "true");
+            }
+            if (note.lang) {
+                wrapper.setAttribute("data-lang", note.lang);
+            }
             wrapper.setAttribute("data-created-at", Math.floor(note.created_at_epoch || note.created_at || (Date.now() / 1000)));
 
             wrapper.innerHTML = buildCardHtml(note);

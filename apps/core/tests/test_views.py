@@ -784,33 +784,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "openReportModal('e1'")
 
 
-class CyberGritErrorViewTests(TestCase):
-    """Verifies branded cyber-grit 404/500 error views render with themed copy."""
 
-    def test_custom_404_template_renders(self):
-        from django.test.utils import override_settings
-
-        with override_settings(DEBUG=False):
-            response = self.client.get("/nonexistent-route-xyz/")
-
-        self.assertEqual(response.status_code, 404)
-        self.assertContains(response, "Mesh Node Not Found", status_code=404)
-        self.assertContains(response, "STATUS 404 // ROUTE_DISCONNECTED", status_code=404)
-        self.assertContains(response, "GOSSIP_ACTIVE", status_code=404)
-        self.assertContains(response, 'rel="stylesheet" href="/static/css/output.css"', status_code=404)
-
-    def test_custom_500_template_renders(self):
-        from django.test import RequestFactory
-        from django.views.defaults import server_error
-
-        request = RequestFactory().get("/boom")
-        response = server_error(request)
-
-        self.assertEqual(response.status_code, 500)
-        self.assertContains(response, "Relay Pipeline Exception", status_code=500)
-        self.assertContains(response, "STATUS 500 // INTERNAL_TRANSMISSION_FAULT", status_code=500)
-        self.assertContains(response, "SECURE_LOG_RECORDED", status_code=500)
-        self.assertContains(response, "Retry Socket", status_code=500)
 
     def test_feed_mode_thread_direct_replies_and_drilldown_link(self):
         root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
@@ -845,6 +819,77 @@ class CyberGritErrorViewTests(TestCase):
         # Drilldown link is rendered in HTML
         self.assertContains(response, 'href="/feed?thread=direct_child"')
         self.assertContains(response, "View 1 more reply →")
+
+    def test_thread_subheader_renders_separate_author_and_parent_links(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        reply_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        root_npub = hex_to_npub(root_pk)
+
+        k0_event = make_event("k0_root", 0, pubkey=root_pk, content=json.dumps({
+            "name": "Alice Root",
+            "display_name": "Alice In Chains",
+        }))
+        reply_event = make_event(
+            "child_reply_1",
+            1,
+            pubkey=reply_pk,
+            content="Replying to Alice",
+            tags=[
+                ["e", "parent_note_123", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ],
+        )
+
+        relay_events = {
+            "child_reply_1": reply_event,
+            "k0_root": k0_event,
+        }
+
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "↳ Replying to")
+        # Separate author profile link
+        self.assertContains(response, f'href="/profile/{root_npub}/"')
+        self.assertContains(response, "@Alice In Chains")
+        # Separate parent note link
+        self.assertContains(response, 'href="/feed?thread=parent_note_123"')
+        self.assertContains(response, "[ parent note ↗ ]")
+
+    def test_thread_header_renders_jump_to_root_link_when_reply(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        reply_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+
+        root_event = make_event("grandparent_root_1", 1, pubkey=root_pk, content="Original root note")
+        child_hero = make_event(
+            "hero_reply_99",
+            1,
+            pubkey=reply_pk,
+            content="Hero reply note deep in thread",
+            tags=[
+                ["e", "grandparent_root_1", "", "root"],
+                ["e", "parent_intermediate_2", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ],
+        )
+
+        relay_events = {
+            "grandparent_root_1": root_event,
+            "hero_reply_99": child_hero,
+        }
+
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed") + "?thread=hero_reply_99")
+
+        self.assertEqual(response.status_code, 200)
+        # Root jump link rendered
+        self.assertContains(response, 'href="/feed?thread=grandparent_root_1"')
+        self.assertContains(response, "🧵 Jump to Root Post →")
+        # When ancestor parent_intermediate_2 is missing from pool, unresolved placeholder is rendered
+        self.assertContains(response, "↳ In reply to parent event")
+        self.assertContains(response, "parent_inter")
+        self.assertContains(response, "Attempt Fetch ↻")
 
     def test_contact_manager_script_contains_wss_home_iyou_me_target(self):
         import os
@@ -958,6 +1003,27 @@ class CyberGritErrorViewTests(TestCase):
         self.assertContains(response, '<video src="https://cdn.iyou.me/video.mp4"')
         self.assertContains(response, "Check this out:")
 
+    def test_trending_topics_renders_scope_switcher(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "[ ⚡ iyou ]")
+        self.assertContains(response, "[ 🌐 Global ]")
+        self.assertContains(response, 'id="trending-tab-iyou"')
+        self.assertContains(response, 'id="trending-tab-global"')
+        self.assertContains(response, 'id="trending-iyou-list"')
+        self.assertContains(response, 'id="trending-global-list"')
+
+    def test_layer2_nav_renders_nsfw_shield_toggle(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="nsfw-filter-toggle"')
+        self.assertContains(response, 'id="nsfw-filter-status"')
+        self.assertContains(response, "toggleNsfwFilter()")
+        self.assertContains(response, "Shield:")
 
     def test_api_feed_deduplicates_and_returns_valid_notes(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
@@ -1100,6 +1166,36 @@ class CyberGritErrorViewTests(TestCase):
             response = self.client.get(reverse("feed") + "?thread=hero_root_2")
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'id="relay-health-widget"')
+
+
+
+class CyberGritErrorViewTests(TestCase):
+    """Verifies branded cyber-grit 404/500 error views render with themed copy."""
+
+    def test_custom_404_template_renders(self):
+        from django.test.utils import override_settings
+
+        with override_settings(DEBUG=False):
+            response = self.client.get("/nonexistent-route-xyz/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertContains(response, "Mesh Node Not Found", status_code=404)
+        self.assertContains(response, "STATUS 404 // ROUTE_DISCONNECTED", status_code=404)
+        self.assertContains(response, "GOSSIP_ACTIVE", status_code=404)
+        self.assertContains(response, 'rel="stylesheet" href="/static/css/output.css"', status_code=404)
+
+    def test_custom_500_template_renders(self):
+        from django.test import RequestFactory
+        from django.views.defaults import server_error
+
+        request = RequestFactory().get("/boom")
+        response = server_error(request)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertContains(response, "Relay Pipeline Exception", status_code=500)
+        self.assertContains(response, "STATUS 500 // INTERNAL_TRANSMISSION_FAULT", status_code=500)
+        self.assertContains(response, "SECURE_LOG_RECORDED", status_code=500)
+        self.assertContains(response, "Retry Socket", status_code=500)
 
 
 class SearchAPITests(TestCase):

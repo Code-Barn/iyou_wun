@@ -87,6 +87,98 @@ def dashboard(request):
     })
 
 
+def calculate_trending_tags(notes, scope="global"):
+    """
+    Calculate top trending hashtags across notes stream with support for iyou/global scopes.
+    Extracts explicit #t tags and inline #hashtag tokens from note content.
+    Returns top 4 tags formatted with count and scope metadata.
+    """
+    if not notes:
+        return []
+
+    from collections import Counter
+    import re
+
+    # 1. Author filtering for iyou scope
+    filtered_notes = []
+    if scope == "iyou":
+        try:
+            iyou_usernames = set(UserLinkDeck.objects.values_list("user__username", flat=True))
+        except Exception:
+            iyou_usernames = set()
+
+        iyou_keys = set()
+        for u in iyou_usernames:
+            if u:
+                iyou_keys.add(u.lower())
+                pk = did_to_pubkey(u)
+                if pk:
+                    iyou_keys.add(pk.lower())
+                try:
+                    np = hex_to_npub(pk or u)
+                    if np:
+                        iyou_keys.add(np.lower())
+                except Exception:
+                    pass
+
+        for n in notes:
+            if not isinstance(n, dict):
+                continue
+            pk = str(n.get("pubkey") or n.get("pubkey_hex") or "").lower()
+            did = str(n.get("author_did") or "").lower()
+            npub = str(n.get("npub") or "").lower()
+            if pk in iyou_keys or did in iyou_keys or npub in iyou_keys:
+                filtered_notes.append(n)
+    else:
+        filtered_notes = [n for n in notes if isinstance(n, dict)]
+
+    # 2. Extract tags & inline hashtags
+    tag_counts = Counter()
+    for n in filtered_notes:
+        seen_in_note = set()
+        # Tags array
+        tags = n.get("tags") or []
+        for t in tags:
+            if isinstance(t, (list, tuple)) and len(t) > 1 and t[0] == "t" and t[1]:
+                tag_val = str(t[1]).strip().lstrip("#").lower()
+                if tag_val and tag_val not in seen_in_note:
+                    seen_in_note.add(tag_val)
+                    tag_counts[tag_val] += 1
+
+        # Content regex for #hashtags
+        content = str(n.get("content") or n.get("display_content") or "")
+        for match in re.findall(r"#([a-zA-Z0-9_\-]+)", content):
+            tag_val = match.strip().lower()
+            if tag_val and tag_val not in seen_in_note:
+                seen_in_note.add(tag_val)
+                tag_counts[tag_val] += 1
+
+    CATEGORY_MAP = {
+        "bitcoin": "Finance & Sovereign Capital",
+        "btc": "Finance & Sovereign Capital",
+        "sats": "Finance & Sovereign Capital",
+        "crypto": "Cryptography & ZK",
+        "nostr": "Protocol & Relays",
+        "mesh": "Protocol & Relays",
+        "relay": "Protocol & Relays",
+        "nip10": "Protocol & Relays",
+        "iyou": "Ecosystem & Identity",
+        "wine": "Agriculture & Viticulture",
+    }
+
+    top_tags = []
+    for name, count in tag_counts.most_common(4):
+        category = CATEGORY_MAP.get(name, "General & Sovereign Mesh")
+        top_tags.append({
+            "name": name,
+            "count": count,
+            "scope": scope,
+            "category": category,
+        })
+
+    return top_tags
+
+
 class FeedView(TemplateView):
     template_name = "feed.html"
 
@@ -136,7 +228,6 @@ class FeedView(TemplateView):
             else:
                 feed_data = fetch_unified_feed(relay_urls=relays)
 
-
             notes = feed_data["roots"]
             notes = attach_social_counts(notes, relay_urls=relays)
             timestamps = []
@@ -166,12 +257,26 @@ class FeedView(TemplateView):
             creators_qs = creators_qs.exclude(user=self.request.user)
         context["suggested_creators"] = list(creators_qs[:4])
 
-        context["trending_tags"] = [
-            {"name": "bitcoin", "category": "Finance & Sovereign Capital", "count": "1.4k"},
-            {"name": "nostr", "category": "Protocol & Relays", "count": "920"},
-            {"name": "wine", "category": "Agriculture & Viticulture", "count": "312"},
-            {"name": "crypto", "category": "Cryptography & ZK", "count": "280"},
+        notes_for_trending = context.get("notes") or []
+        trending_iyou = calculate_trending_tags(notes_for_trending, scope="iyou")
+        trending_global = calculate_trending_tags(notes_for_trending, scope="global")
+
+        default_iyou = [
+            {"name": "nostr", "category": "Protocol & Relays", "count": "1.2k", "scope": "iyou"},
+            {"name": "sovereign", "category": "Identity & Keys", "count": "840", "scope": "iyou"},
+            {"name": "iyou", "category": "Ecosystem & Mesh", "count": "450", "scope": "iyou"},
+            {"name": "bitcoin", "category": "Finance & Sovereign Capital", "count": "320", "scope": "iyou"},
         ]
+        default_global = [
+            {"name": "bitcoin", "category": "Finance & Sovereign Capital", "count": "1.4k", "scope": "global"},
+            {"name": "nostr", "category": "Protocol & Relays", "count": "920", "scope": "global"},
+            {"name": "wine", "category": "Agriculture & Viticulture", "count": "312", "scope": "global"},
+            {"name": "crypto", "category": "Cryptography & ZK", "count": "280", "scope": "global"},
+        ]
+
+        context["trending_tags_iyou"] = trending_iyou if trending_iyou else default_iyou
+        context["trending_tags_global"] = trending_global if trending_global else default_global
+        context["trending_tags"] = context["trending_tags_iyou"]
 
         return context
 
@@ -436,6 +541,10 @@ def api_feed(request):
         result["reply_to_npub"] = note.get("reply_to_npub") or ""
         result["repost_count"] = note.get("repost_count", 0)
 
+        result["has_content_warning"] = bool(note.get("has_content_warning", False))
+        result["warning_reason"] = note.get("warning_reason") or ""
+        result["lang"] = note.get("lang") or "en"
+
         if note.get("votes"):
             result["votes"] = [dict(v) for v in note["votes"]]
         if note.get("reactions"):
@@ -460,6 +569,9 @@ def api_feed(request):
     oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
     has_more = bool(roots and len(roots) > 0)
 
+    trending_tags_iyou = calculate_trending_tags(feed_data["roots"], scope="iyou")
+    trending_tags_global = calculate_trending_tags(feed_data["roots"], scope="global")
+
     return JsonResponse({
         "success": True,
         "notes": roots,
@@ -467,6 +579,9 @@ def api_feed(request):
         "total_replies": feed_data["total_replies"],
         "oldest_timestamp": oldest_timestamp,
         "has_more": has_more,
+        "trending_tags_iyou": trending_tags_iyou,
+        "trending_tags_global": trending_tags_global,
+        "trending_tags": trending_tags_iyou or trending_tags_global,
     })
 
 
@@ -868,11 +983,23 @@ def og_fallback_image(request):
     return f"{scheme}://{host}{static('img/iyou_symbol.png')}"
 
 
+INDEXING_FALLBACK_RELAYS = [
+    "wss://relay.nostr.band",
+    "wss://purplepag.es",
+    "wss://nos.lol",
+    "wss://relay.damus.io",
+]
+
+
 def fetch_thread(thread_id, relay_urls=None):
     """Fetch a target event (Hero), its full root→…→parent ancestor chain, and direct 1-level replies."""
     from .nip10 import parse_nip10_tags, resolve_ancestor_ids
 
     target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=relay_urls)
+    if not target_raw:
+        fallback_pool = list(dict.fromkeys((relay_urls or DEFAULT_RELAYS) + INDEXING_FALLBACK_RELAYS))
+        target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=fallback_pool)
+
     if not target_raw:
         return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
 
@@ -888,6 +1015,8 @@ def fetch_thread(thread_id, relay_urls=None):
     queue = [aid for aid in resolve_ancestor_ids(target_event) if aid != thread_id]
     seen = set(queue)
     seen.add(thread_id)
+    ancestor_relay_pool = list(dict.fromkeys((relay_urls or DEFAULT_RELAYS) + INDEXING_FALLBACK_RELAYS))
+
     for _ in range(MAX_ANCESTOR_DEPTH):
         if not queue:
             break
@@ -896,7 +1025,7 @@ def fetch_thread(thread_id, relay_urls=None):
             batch = list(dict.fromkeys(missing))[:20]
             fetched = relay_req(
                 {"ids": batch, "kinds": [1, 1111], "limit": 20},
-                relay_urls=relay_urls,
+                relay_urls=ancestor_relay_pool,
             )
             pool.update(fetched)
             seen.update(fetched)

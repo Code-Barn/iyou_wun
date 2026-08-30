@@ -873,6 +873,104 @@ class AttachSocialCountsTests(TestCase):
         self.assertEqual(result, [])
         mock_req.assert_not_called()
 
+    def test_parse_nip10_tags_positional_and_unmarked_tags(self):
+        from apps.core.nip10 import parse_nip10_tags
+
+        # Single unmarked e-tag
+        r1, p1, m1, mentions1, _ = parse_nip10_tags([["e", "event_root_only"]])
+        self.assertEqual(r1, "event_root_only")
+        self.assertEqual(p1, "event_root_only")
+        self.assertIsNone(m1)
+
+        # Two unmarked e-tags (positional: first=root, second=parent)
+        r2, p2, m2, mentions2, _ = parse_nip10_tags([["e", "first_root"], ["e", "second_parent"]])
+        self.assertEqual(r2, "first_root")
+        self.assertEqual(p2, "second_parent")
+
+        # Three unmarked e-tags (first=root, last=parent, middle=mention)
+        r3, p3, m3, mentions3, _ = parse_nip10_tags([["e", "first_root"], ["e", "middle_mention"], ["e", "last_parent"]])
+        self.assertEqual(r3, "first_root")
+        self.assertEqual(p3, "last_parent")
+        self.assertEqual(mentions3, ["first_root", "middle_mention", "last_parent"])
+
+    def test_fetch_thread_includes_indexing_fallback_relays_for_ancestors(self):
+        from apps.core.views import fetch_thread
+
+        target = make_event("target_reply", 1, content="Hero reply", tags=[
+            ["e", "missing_parent_id", "", "reply"],
+        ])
+        parent = make_event("missing_parent_id", 1, content="Recovered ancestor note")
+
+        captured_relays = []
+
+        def mock_relay_req(filter_obj, relay_urls=None):
+            if "ids" in filter_obj and "target_reply" in filter_obj["ids"]:
+                return {"target_reply": target}
+            if "ids" in filter_obj and "missing_parent_id" in filter_obj["ids"]:
+                captured_relays.extend(relay_urls or [])
+                return {"missing_parent_id": parent}
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
+            result = fetch_thread("target_reply", relay_urls=["wss://relay.iyou.me"])
+
+        self.assertIn("wss://relay.nostr.band", captured_relays)
+        self.assertIn("wss://purplepag.es", captured_relays)
+        self.assertEqual(len(result["ancestors"]), 1)
+        self.assertEqual(result["ancestors"][0]["id"], "missing_parent_id")
+
+    def test_calculate_trending_tags_aggregates_from_note_stream(self):
+        from apps.core.views import calculate_trending_tags
+        from apps.core.models import UserLinkDeck
+        from django.contrib.auth import get_user_model
+
+        User = get_user_model()
+        user_alice, _ = User.objects.get_or_create(username="did:key:z6Mkalice_trend")
+        UserLinkDeck.objects.get_or_create(user=user_alice, handle="alice", display_name="Alice")
+
+        notes = [
+            {
+                "id": "note1",
+                "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+                "author_did": "did:key:z6Mkalice_trend",
+                "content": "Excited about #nostr and #bitcoin development!",
+                "tags": [["t", "nostr"], ["t", "mesh"]],
+            },
+            {
+                "id": "note2",
+                "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+                "author_did": "did:key:z6Mkalice_trend",
+                "content": "Another update regarding #nostr protocol.",
+                "tags": [["t", "nostr"]],
+            },
+            {
+                "id": "note3",
+                "pubkey": "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
+                "author_did": "did:key:z6Mkbob_external",
+                "content": "Global wine notes with #wine and #bitcoin",
+                "tags": [["t", "wine"]],
+            },
+        ]
+
+        # 1. Global scope aggregates across all authors
+        global_tags = calculate_trending_tags(notes, scope="global")
+        self.assertTrue(len(global_tags) >= 3)
+        tag_names = [t["name"] for t in global_tags]
+        self.assertIn("nostr", tag_names)
+        self.assertIn("bitcoin", tag_names)
+        self.assertIn("wine", tag_names)
+        nostr_item = next(t for t in global_tags if t["name"] == "nostr")
+        self.assertEqual(nostr_item["count"], 2)
+        self.assertEqual(nostr_item["scope"], "global")
+
+        # 2. iyou scope aggregates only for authors in UserLinkDeck
+        iyou_tags = calculate_trending_tags(notes, scope="iyou")
+        iyou_names = [t["name"] for t in iyou_tags]
+        self.assertIn("nostr", iyou_names)
+        self.assertIn("bitcoin", iyou_names)
+        self.assertNotIn("wine", iyou_names)
+
+
 
 
 

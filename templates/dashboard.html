@@ -171,8 +171,66 @@
     </div>
 
     <!-- TAB 3: Relays & Switchboard -->
-    <div id="tab-settings" class="tab-panel hidden p-5 sm:p-6 space-y-6">
+    <div id="tab-settings" class="tab-panel hidden p-5 sm:p-6 space-y-8">
       {% include "includes/_relay_manager.html" %}
+
+      <!-- Feed Hygiene & Content Preferences Section -->
+      <div class="pt-6 border-t border-slate-200 dark:border-slate-800 space-y-5">
+        <div>
+          <h2 class="text-sm font-mono font-bold uppercase tracking-wider text-slate-900 dark:text-slate-100 mb-1">
+            Feed Hygiene & Content Preferences
+          </h2>
+          <p class="text-xs text-slate-500 dark:text-slate-400">
+            Control sensitive content display, language filtering, and noise filtering across your sovereign feeds.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl text-xs font-mono">
+          <!-- 1. NSFW / Sensitive Media Handling -->
+          <div class="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <label for="setting-nsfw-pref" class="block font-semibold text-slate-800 dark:text-slate-200">
+              Sensitive Media / NSFW (NIP-36)
+            </label>
+            <select id="setting-nsfw-pref" 
+                    onchange="saveFeedHygienePreferences()"
+                    class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500">
+              <option value="blur">Blur with Warning [Default]</option>
+              <option value="show">Always Show (Uncensored)</option>
+              <option value="hide">Hide Entire Post</option>
+            </select>
+            <p class="text-[10px] text-slate-400">Determines how content marked with content warnings is rendered.</p>
+          </div>
+
+          <!-- 2. Language Filter -->
+          <div class="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <label for="setting-lang-pref" class="block font-semibold text-slate-800 dark:text-slate-200">
+              Language Filtering
+            </label>
+            <select id="setting-lang-pref" 
+                    onchange="saveFeedHygienePreferences()"
+                    class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500">
+              <option value="all">All Languages [Default]</option>
+              <option value="en">English Only (en)</option>
+            </select>
+            <p class="text-[10px] text-slate-400">Filter notes based on language tags detected in events.</p>
+          </div>
+
+          <!-- 3. Machine Noise Gate -->
+          <div class="md:col-span-2 flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
+            <div class="space-y-0.5 pr-4">
+              <label for="setting-noise-pref" class="font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
+                Machine Noise Gate (Bot Filter)
+              </label>
+              <p class="text-[10px] text-slate-400">Suppresses high-frequency automated bot transactions and repetitive pings.</p>
+            </div>
+            <input type="checkbox" 
+                   id="setting-noise-pref" 
+                   checked 
+                   onchange="saveFeedHygienePreferences()" 
+                   class="w-4 h-4 text-violet-600 rounded border-slate-300 dark:border-slate-700 focus:ring-violet-500 cursor-pointer" />
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- TAB 4: Account & Key Info -->
@@ -630,10 +688,39 @@
     });
   }
 
+  function loadFeedHygienePreferences() {
+    var nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
+    var langPref = localStorage.getItem("wun_lang_pref") || "all";
+    var noisePref = localStorage.getItem("wun_noise_pref") !== "disabled";
+
+    var nsfwEl = document.getElementById("setting-nsfw-pref");
+    var langEl = document.getElementById("setting-lang-pref");
+    var noiseEl = document.getElementById("setting-noise-pref");
+
+    if (nsfwEl) nsfwEl.value = nsfwPref;
+    if (langEl) langEl.value = langPref;
+    if (noiseEl) noiseEl.checked = noisePref;
+  }
+
+  function saveFeedHygienePreferences() {
+    var nsfwEl = document.getElementById("setting-nsfw-pref");
+    var langEl = document.getElementById("setting-lang-pref");
+    var noiseEl = document.getElementById("setting-noise-pref");
+
+    if (nsfwEl) localStorage.setItem("wun_nsfw_pref", nsfwEl.value);
+    if (langEl) localStorage.setItem("wun_lang_pref", langEl.value);
+    if (noiseEl) localStorage.setItem("wun_noise_pref", noiseEl.checked ? "enabled" : "disabled");
+
+    if (typeof showToast === "function") {
+      showToast("Feed preferences saved.");
+    }
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var initialTab = (window.location.hash ? window.location.hash.replace("#", "") : "") || localStorage.getItem("wun_dashboard_active_tab") || "profile";
     switchTab(initialTab);
     loadRelays();
+    loadFeedHygienePreferences();
     updatePreview();
     if (typeof initDeckManager === "function") { initDeckManager(); }
   });
