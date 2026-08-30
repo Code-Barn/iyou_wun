@@ -194,8 +194,8 @@
             <select id="setting-nsfw-pref" 
                     onchange="saveFeedHygienePreferences()"
                     class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500">
-              <option value="blur">Blur with Warning [Default]</option>
-              <option value="show">Always Show (Uncensored)</option>
+              <option value="blur">Blur &amp; Warn [Default]</option>
+              <option value="show">Always Show Directly</option>
               <option value="hide">Hide Entire Post</option>
             </select>
             <p class="text-[10px] text-slate-400">Determines how content marked with content warnings is rendered.</p>
@@ -209,7 +209,7 @@
             <select id="setting-stream-lang" 
                     onchange="saveFeedHygienePreferences()"
                     class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-800 dark:text-slate-100 font-mono focus:border-violet-500">
-              <option value="all">Global (All Languages)</option>
+              <option value="all">All Languages [Default]</option>
               <option value="en">English Only</option>
               <option value="es">Español Only</option>
             </select>
@@ -219,13 +219,13 @@
           <!-- 3. Machine Noise Gate -->
           <div class="md:col-span-2 flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div class="space-y-0.5 pr-4">
-              <label for="setting-noise-pref" class="font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
+              <label for="setting-noise-gate" class="font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
                 Machine Noise Gate (Bot Filter)
               </label>
               <p class="text-[10px] text-slate-400">Suppresses high-frequency automated bot transactions and repetitive pings.</p>
             </div>
             <input type="checkbox" 
-                   id="setting-noise-pref" 
+                   id="setting-noise-gate" 
                    checked 
                    onchange="saveFeedHygienePreferences()" 
                    class="w-4 h-4 text-violet-600 rounded border-slate-300 dark:border-slate-700 focus:ring-violet-500 cursor-pointer" />
@@ -697,12 +697,13 @@
     try {
       nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
       streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
-      noisePref = (localStorage.getItem("wun_noise_pref") !== "disabled");
+      var rawNoise = localStorage.getItem("wun_noise_pref");
+      noisePref = (rawNoise !== "false" && rawNoise !== "disabled");
     } catch (e) {}
 
     var nsfwEl = document.getElementById("setting-nsfw-pref");
     var langEl = document.getElementById("setting-stream-lang") || document.getElementById("setting-lang-pref");
-    var noiseEl = document.getElementById("setting-noise-pref");
+    var noiseEl = document.getElementById("setting-noise-gate") || document.getElementById("setting-noise-pref");
 
     if (nsfwEl) nsfwEl.value = nsfwPref;
     if (langEl) langEl.value = streamLang;
@@ -712,14 +713,14 @@
   function saveFeedHygienePreferences() {
     var nsfwEl = document.getElementById("setting-nsfw-pref");
     var langEl = document.getElementById("setting-stream-lang") || document.getElementById("setting-lang-pref");
-    var noiseEl = document.getElementById("setting-noise-pref");
+    var noiseEl = document.getElementById("setting-noise-gate") || document.getElementById("setting-noise-pref");
 
     if (nsfwEl) localStorage.setItem("wun_nsfw_pref", nsfwEl.value);
     if (langEl) {
       localStorage.setItem("wun_stream_lang", langEl.value);
       localStorage.setItem("wun_lang_pref", langEl.value);
     }
-    if (noiseEl) localStorage.setItem("wun_noise_pref", noiseEl.checked ? "enabled" : "disabled");
+    if (noiseEl) localStorage.setItem("wun_noise_pref", noiseEl.checked ? "true" : "false");
 
     if (typeof showToast === "function") {
       showToast("Settings updated", "info");

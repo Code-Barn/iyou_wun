@@ -217,31 +217,37 @@
     function getSafetyPreferences() {
         var nsfwPref = "blur";
         var streamLang = "all";
+        var noisePref = true;
         try {
             nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
             streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
+            var rawNoise = localStorage.getItem("wun_noise_pref");
+            noisePref = (rawNoise !== "false" && rawNoise !== "disabled");
         } catch (e) {}
-        return { nsfwPref: nsfwPref, streamLang: streamLang, langPref: streamLang };
+        return { nsfwPref: nsfwPref, streamLang: streamLang, langPref: streamLang, noisePref: noisePref };
     }
 
     function checkSafetyAndHygieneMatch(card, data) {
         var prefs = getSafetyPreferences();
         var nsfwPref = prefs.nsfwPref;
         var streamLang = prefs.streamLang;
+        var noisePref = prefs.noisePref;
 
-        // 1. NSFW / Content Warning Hide check
-        var hasCw = card.getAttribute("data-has-content-warning") === "true" ||
-                    (data && data.root && data.root.getAttribute("data-has-content-warning") === "true") ||
-                    !!card.querySelector(".content-warning-shield");
-        if (nsfwPref === "hide" && hasCw) {
+        // 1. Noise Gate Check
+        if (noisePref && (
+            (card.dataset && (card.dataset.noise === "true" || card.dataset.isNoise === "true" || card.dataset.isBot === "true")) ||
+            card.getAttribute("data-is-noise") === "true" ||
+            card.getAttribute("data-noise") === "true" ||
+            (data && data.root && data.root.dataset && (data.root.dataset.noise === "true" || data.root.dataset.isNoise === "true" || data.root.dataset.isBot === "true"))
+        )) {
             return false;
         }
 
-        // 2. Stream Language Filter
+        // 2. Stream Language Check
         var cardLang = (
-            card.getAttribute("data-lang") ||
             (card.dataset && card.dataset.lang) ||
-            (data && data.root && (data.root.getAttribute("data-lang") || (data.root.dataset && data.root.dataset.lang))) ||
+            card.getAttribute("data-lang") ||
+            (data && data.root && ((data.root.dataset && data.root.dataset.lang) || data.root.getAttribute("data-lang"))) ||
             (card.querySelector("[data-lang]") && card.querySelector("[data-lang]").getAttribute("data-lang")) ||
             "en"
         ).toLowerCase();
@@ -250,28 +256,40 @@
             return false;
         }
 
+        // 3. NSFW / Content Warning Check
+        var hasCw = (card.dataset && (card.dataset.hasCw === "true" || card.dataset.hasContentWarning === "true")) ||
+                    card.getAttribute("data-has-content-warning") === "true" ||
+                    (data && data.root && (data.root.getAttribute("data-has-content-warning") === "true" || (data.root.dataset && data.root.dataset.hasContentWarning === "true"))) ||
+                    !!card.querySelector(".content-warning-shield") ||
+                    !!card.querySelector(".sensitive-content-warning");
+        if (nsfwPref === "hide" && hasCw) {
+            return false;
+        }
+
         return true;
     }
 
     function applyNsfwBlurState(pref) {
         var nsfwPref = pref || (getSafetyPreferences().nsfwPref);
-        var shields = document.querySelectorAll(".content-warning-shield");
+        var shields = document.querySelectorAll(".content-warning-shield, .sensitive-content-warning");
         shields.forEach(function (shield) {
-            var blurEl = shield.querySelector(".blur-me");
-            var btn = shield.querySelector(".content-warning-reveal");
+            var blurEls = shield.querySelectorAll(".blur-me, .blur-lg, .blur-sm");
+            var btns = shield.querySelectorAll(".content-warning-reveal, .sensitive-content-overlay");
             if (nsfwPref === "show") {
-                if (blurEl) {
-                    blurEl.classList.remove("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
-                }
-                if (btn) {
+                blurEls.forEach(function (el) {
+                    el.classList.remove("blur-me", "blur-lg", "blur-sm", "filter", "backdrop-blur-md", "select-none", "pointer-events-none");
+                });
+                btns.forEach(function (btn) {
                     btn.classList.add("hidden");
-                }
+                });
             } else if (nsfwPref === "blur") {
-                if (blurEl && !shield.classList.contains("user-revealed")) {
-                    blurEl.classList.add("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
-                }
-                if (btn && !shield.classList.contains("user-revealed")) {
-                    btn.classList.remove("hidden");
+                if (!shield.classList.contains("user-revealed")) {
+                    blurEls.forEach(function (el) {
+                        el.classList.add("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
+                    });
+                    btns.forEach(function (btn) {
+                        btn.classList.remove("hidden");
+                    });
                 }
             }
         });

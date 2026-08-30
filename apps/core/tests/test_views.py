@@ -81,6 +81,18 @@ class DashboardViewTest(TestCase):
         self.assertContains(response, 'value="en"')
         self.assertContains(response, 'value="es"')
 
+    def test_dashboard_settings_renders_all_three_hygiene_controls(self):
+        user = User.objects.create_user(username="did:iyou:0xhygienecards")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="setting-nsfw-pref"')
+        self.assertContains(response, 'id="setting-stream-lang"')
+        self.assertContains(response, 'id="setting-noise-gate"')
+        self.assertContains(response, "Sensitive Media / NSFW (NIP-36)")
+        self.assertContains(response, "Stream Language Filter")
+        self.assertContains(response, "Machine Noise Gate (Bot Filter)")
+
 
 class JwksConnectivityTest(TestCase):
     """Pings the IdP's JWKS endpoint to verify connectivity.
