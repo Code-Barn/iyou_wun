@@ -407,6 +407,153 @@
         return path.startsWith("/feed") || path.startsWith("/gallery") || path === "/";
     }
 
+    function escapeHtml(str) {
+        if (!str) return "";
+        return String(str)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;");
+    }
+
+    let searchDebounceTimer = null;
+    let currentSearchAbortController = null;
+
+    function showDropdown() {
+        const dropdown = document.getElementById("search-results-dropdown");
+        if (dropdown) dropdown.classList.remove("hidden");
+    }
+
+    function hideDropdown() {
+        const dropdown = document.getElementById("search-results-dropdown");
+        if (dropdown) dropdown.classList.add("hidden");
+    }
+
+    function renderSearchResults(data) {
+        const content = document.getElementById("search-dropdown-content");
+        if (!content) return;
+
+        content.innerHTML = "";
+        const profiles = (data && data.results && data.results.profiles) || [];
+        const tags = (data && data.results && data.results.tags) || [];
+
+        if (profiles.length === 0 && tags.length === 0) {
+            hideDropdown();
+            return;
+        }
+
+        // 1. Profiles Section
+        if (profiles.length > 0) {
+            const profHeader = document.createElement("div");
+            profHeader.className = "px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500 bg-slate-50/80 dark:bg-slate-950/60 flex items-center justify-between";
+            profHeader.innerHTML = `<span>👤 Profiles (${profiles.length})</span>`;
+            content.appendChild(profHeader);
+
+            const profList = document.createElement("div");
+            profList.className = "py-1";
+            profiles.forEach((p) => {
+                const item = document.createElement("a");
+                item.href = p.url || `/@${p.handle}`;
+                item.className = "flex items-center gap-2.5 px-3 py-2 hover:bg-violet-50 dark:hover:bg-slate-800/80 transition-colors";
+                
+                const initialChar = escapeHtml((p.display_name || p.handle || '?')[0].toUpperCase());
+                const avatarHtml = p.avatar_url
+                    ? `<img src="${escapeHtml(p.avatar_url)}" alt="" class="w-7 h-7 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0">`
+                    : `<div class="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 font-bold flex items-center justify-center text-[10px] shrink-0">${initialChar}</div>`;
+
+                const verifiedBadge = p.is_verified
+                    ? `<span class="text-[9px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-950/80 px-1 rounded border border-emerald-300 dark:border-emerald-700 shrink-0">✓</span>`
+                    : "";
+
+                const handleText = p.handle ? `@${escapeHtml(p.handle)}` : "";
+                const displayNameText = escapeHtml(p.display_name || p.handle || "");
+
+                item.innerHTML = `
+                    ${avatarHtml}
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-1.5 truncate">
+                            <span class="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">${displayNameText}</span>
+                            ${verifiedBadge}
+                        </div>
+                        <div class="text-[11px] text-slate-400 dark:text-slate-500 truncate">${handleText}</div>
+                    </div>
+                    <span class="text-[11px] text-slate-400 shrink-0">↗</span>
+                `;
+                profList.appendChild(item);
+            });
+            content.appendChild(profList);
+        }
+
+        // 2. Tags Section
+        if (tags.length > 0) {
+            const tagHeader = document.createElement("div");
+            tagHeader.className = "px-3 py-1.5 text-[10px] uppercase font-bold tracking-wider text-slate-400 dark:text-slate-500 bg-slate-50/80 dark:bg-slate-950/60 flex items-center justify-between";
+            tagHeader.innerHTML = `<span>🏷️ Hashtags (${tags.length})</span>`;
+            content.appendChild(tagHeader);
+
+            const tagList = document.createElement("div");
+            tagList.className = "py-1";
+            tags.forEach((t) => {
+                const item = document.createElement("a");
+                item.href = t.url || `/feed?q=${encodeURIComponent(t.display_tag || '#' + t.tag)}`;
+                item.className = "flex items-center justify-between px-3 py-1.5 hover:bg-violet-50 dark:hover:bg-slate-800/80 transition-colors text-violet-600 dark:text-violet-400 font-semibold";
+                item.innerHTML = `
+                    <span class="truncate">${escapeHtml(t.display_tag || '#' + t.tag)}</span>
+                    <span class="text-[10px] text-slate-400 font-normal">Filter Feed →</span>
+                `;
+                item.addEventListener("click", function (e) {
+                    if (isFeedOrGalleryPage()) {
+                        e.preventDefault();
+                        const searchInput = document.getElementById("feed-search-input");
+                        const rawTag = t.display_tag || '#' + t.tag;
+                        if (searchInput) searchInput.value = rawTag;
+                        setSearchQuery(rawTag);
+                        hideDropdown();
+                    }
+                });
+                tagList.appendChild(item);
+            });
+            content.appendChild(tagList);
+        }
+
+        showDropdown();
+    }
+
+    function performSearchEscalation(query) {
+        const q = (query || "").trim();
+        if (q.length < 2) {
+            hideDropdown();
+            return;
+        }
+
+        if (currentSearchAbortController) {
+            try { currentSearchAbortController.abort(); } catch (e) {}
+        }
+        if (typeof AbortController !== "undefined") {
+            currentSearchAbortController = new AbortController();
+        }
+
+        const signal = currentSearchAbortController ? currentSearchAbortController.signal : undefined;
+        fetch(`/api/search/?q=${encodeURIComponent(q)}&circle=${encodeURIComponent(activeCircle)}&limit=6`, {
+            signal: signal
+        })
+        .then(res => {
+            if (!res.ok) throw new Error("Search request failed");
+            return res.json();
+        })
+        .then(data => {
+            if (data && data.success) {
+                renderSearchResults(data);
+            }
+        })
+        .catch(err => {
+            if (err && err.name !== "AbortError") {
+                console.debug("Search API error:", err);
+            }
+        });
+    }
+
     function initCircleFeedFilter() {
         // 1. Check URL parameters
         const urlParams = new URLSearchParams(window.location.search);
@@ -439,20 +586,49 @@
             });
         }
 
-        // 3. Bind search input
+        // 3. Bind search input & progressive dropdown
         const searchInput = document.getElementById("feed-search-input");
         if (searchInput) {
-            let debounceTimer = null;
             searchInput.addEventListener("input", function () {
                 const val = this.value;
-                if (!isFeedOrGalleryPage()) {
-                    if (debounceTimer) clearTimeout(debounceTimer);
-                    debounceTimer = setTimeout(() => {
-                        window.location.href = "/feed?q=" + encodeURIComponent(val);
-                    }, 400);
-                    return;
+                if (isFeedOrGalleryPage()) {
+                    setSearchQuery(val);
                 }
-                setSearchQuery(val);
+
+                if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
+                searchDebounceTimer = setTimeout(() => {
+                    if (val.trim().length >= 2) {
+                        performSearchEscalation(val);
+                    } else {
+                        hideDropdown();
+                    }
+                }, 250);
+            });
+
+            searchInput.addEventListener("keydown", function (e) {
+                if (e.key === "Escape") {
+                    hideDropdown();
+                } else if (e.key === "Enter") {
+                    const val = this.value.trim();
+                    hideDropdown();
+                    if (!isFeedOrGalleryPage() && val) {
+                        window.location.href = "/feed?q=" + encodeURIComponent(val);
+                    }
+                }
+            });
+
+            searchInput.addEventListener("focus", function () {
+                const val = this.value.trim();
+                if (val.length >= 2) {
+                    performSearchEscalation(val);
+                }
+            });
+
+            document.addEventListener("click", function (e) {
+                const dropdown = document.getElementById("search-results-dropdown");
+                if (dropdown && !dropdown.contains(e.target) && e.target !== searchInput) {
+                    hideDropdown();
+                }
             });
         }
 

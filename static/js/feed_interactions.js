@@ -97,9 +97,9 @@
         } else if (pendingReaction) {
             bridgeClient.broadcastToRelays(signedEvent, null, function (localOk, anyOk) {
                 if (anyOk || localOk) {
-                    showToast("Reaction published.");
+                    showToast("Reaction published to mesh", "heart");
                 } else {
-                    showToast("Failed to broadcast reaction.", true);
+                    showToast("Failed to broadcast reaction.", "error");
                 }
             });
             pendingReaction = null;
@@ -108,9 +108,9 @@
         } else if (pendingRepost) {
             bridgeClient.broadcastToRelays(signedEvent, null, function (localOk, anyOk) {
                 if (anyOk || localOk) {
-                    showToast("Reposted to mesh.");
+                    showToast("Note reposted to mesh relays", "repost");
                 } else {
-                    showToast("Failed to broadcast repost.", true);
+                    showToast("Failed to broadcast repost.", "error");
                 }
             });
             pendingRepost = null;
@@ -236,10 +236,10 @@
         function checkDone() {
             if (remaining > 0) return;
             if (anyOk || localOk) {
-                showToast("Reply posted.");
+                showToast("Reply broadcasted to mesh", "success");
                 appendReplyToThread(signedEvent, rootId);
             } else {
-                showToast("Failed to broadcast reply.", true);
+                showToast("Failed to broadcast reply.", "error");
             }
         }
 
@@ -401,23 +401,34 @@
     // ---------- Template Builder for Cards ----------
 
     function buildCardHtml(note) {
-        var npub = note.npub || (note.pubkey ? note.pubkey.substring(0, 12) + "..." : "You");
+        if (!note) return "";
+        var noteId = note.id || "";
+        var pubkey = note.pubkey || note.pubkey_hex || "";
+        var npub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "You");
         var authorName = note.author_name || npub;
+        var authorAvatar = note.author_avatar || "";
+        var authorDid = note.author_did || "";
+        var nip05 = note.nip05 || "";
+        var noteContent = note.content != null ? String(note.content) : "";
+        var parentId = note.parent_id || "";
+        var replyToName = note.reply_to_name || "";
+        var replyToNpub = note.reply_to_npub || "";
+
         var date = new Date((note.created_at || (Date.now() / 1000)) * 1000);
         var formattedDate = date.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-        var reactionsCount = (note.reactions && note.reactions.length) ? note.reactions.length : "Like";
+        var reactionLikeCount = (note.like_count && note.like_count > 0) ? String(note.like_count) : ((note.reactions && note.reactions.length) ? String(note.reactions.length) : "Like");
         var repliesCount = (note.reply_count && note.reply_count > 0) ? String(note.reply_count) : "Reply";
         var repostCount = note.repost_count ? String(note.repost_count) : "Repost";
 
-
         var mediaInfo = extractMediaFromNote(note);
-        var mediaAttachments = mediaInfo.attachments;
-        var displayContent = note.display_content !== undefined ? note.display_content : mediaInfo.displayContent;
+        var mediaAttachments = mediaInfo.attachments || [];
+        var displayContent = note.display_content !== undefined ? (note.display_content != null ? String(note.display_content) : "") : (mediaInfo.displayContent != null ? String(mediaInfo.displayContent) : "");
 
         var mediaHtml = "";
         if (mediaAttachments && mediaAttachments.length > 0) {
             mediaHtml = '<div class="mt-3 space-y-2">';
             mediaAttachments.forEach(function (media) {
+                if (!media || !media.url) return;
                 var mUrl = escapeAttr(media.url);
                 if (media.type === "image") {
                     mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/20 max-h-[500px]">' +
@@ -441,69 +452,69 @@
             mediaHtml += '</div>';
         }
 
-        var avatarHtml = note.author_avatar ?
-            '<img src="' + escapeAttr(note.author_avatar) + '" alt="' + escapeAttr(authorName) + '" class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition" />' :
+        var avatarHtml = authorAvatar ?
+            '<img src="' + escapeAttr(authorAvatar) + '" alt="' + escapeAttr(authorName) + '" class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition" />' :
             '<div class="w-10 h-10 bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center border border-violet-200 dark:border-violet-800"><span class="text-violet-600 dark:text-violet-400 font-mono text-sm font-bold">' + escapeHtml((authorName || "N").charAt(0).toUpperCase()) + '</span></div>';
 
-        var nip05Badge = note.nip05 ?
-            '<span class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 rounded border border-violet-200 dark:border-violet-800/60" title="' + escapeAttr(note.nip05) + '"><svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>' + escapeHtml(note.nip05) + '</span>' :
-            (note.author_did ? '<span class="font-mono text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[120px]" title="' + escapeAttr(note.author_did) + '">' + escapeHtml(note.author_did.substring(0, 14) + "...") + '</span>' :
+        var nip05Badge = nip05 ?
+            '<span class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 rounded border border-violet-200 dark:border-violet-800/60" title="' + escapeAttr(nip05) + '"><svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>' + escapeHtml(nip05) + '</span>' :
+            (authorDid ? '<span class="font-mono text-[10px] text-slate-400 dark:text-slate-500 truncate max-w-[120px]" title="' + escapeAttr(authorDid) + '">' + escapeHtml(authorDid.substring(0, 14) + "...") + '</span>' :
             '<span class="font-mono text-[10px] text-slate-400 dark:text-slate-500" title="' + escapeAttr(npub) + '">' + escapeHtml(npub.substring(0, 12) + "...") + '</span>');
 
         var sovereignBadge = (note.kind === 1063 && note.is_sovereign) ?
             '<span class="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] font-mono px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-700">Sovereign</span>' : "";
 
-        var snippetEscaped = escapeAttr((note.content || "").substring(0, 100));
+        var snippetEscaped = escapeAttr(noteContent.substring(0, 100));
 
         var replyingToHtml = "";
-        if (note.parent_id) {
-            var replyTarget = note.reply_to_name || note.reply_to_npub || note.parent_id;
-            var replyLink = note.reply_to_npub ? ('/profile/' + encodeURIComponent(note.reply_to_npub) + '/') : ('/feed?thread=' + encodeURIComponent(note.parent_id));
+        if (parentId) {
+            var replyTarget = replyToName || replyToNpub || parentId;
+            var replyLink = replyToNpub ? ('/profile/' + encodeURIComponent(replyToNpub) + '/') : ('/feed?thread=' + encodeURIComponent(parentId));
             var displayTarget = replyTarget.length > 14 ? (replyTarget.substring(0, 14) + "...") : replyTarget;
             replyingToHtml = '<div class="text-xs font-mono text-slate-400 dark:text-slate-500 mb-1 flex items-center gap-1"><span>↳ Replying to</span> <a href="' + replyLink + '" class="text-violet-600 dark:text-violet-400 hover:underline">@' + escapeHtml(displayTarget) + '</a></div>';
         }
 
-        var replyDrawerHtml = '<div id="reply-box-' + escapeAttr(note.id) + '" class="hidden mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">' +
+        var replyDrawerHtml = '<div id="reply-box-' + escapeAttr(noteId) + '" class="hidden mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">' +
             '<div class="flex items-start gap-2.5">' +
-            '<textarea id="reply-input-' + escapeAttr(note.id) + '" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" rows="2" placeholder="Write a sovereign reply..."></textarea>' +
+            '<textarea id="reply-input-' + escapeAttr(noteId) + '" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" rows="2" placeholder="Write a sovereign reply..."></textarea>' +
             '<div class="flex flex-col gap-1.5 flex-shrink-0">' +
-            '<button type="button" id="reply-btn-' + escapeAttr(note.id) + '" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-mono font-medium transition" onclick="submitReply(\'' + escapeAttr(note.id) + '\', \'' + escapeAttr(note.pubkey) + '\')">Reply</button>' +
-            '<button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-mono transition" onclick="cancelReply(\'' + escapeAttr(note.id) + '\')">Cancel</button>' +
+            '<button type="button" id="reply-btn-' + escapeAttr(noteId) + '" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-mono font-medium transition" onclick="submitReply(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')">Reply</button>' +
+            '<button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-mono transition" onclick="cancelReply(\'' + escapeAttr(noteId) + '\')">Cancel</button>' +
             '</div></div></div>';
 
-        return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(note.id) + '">' +
+        return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '">' +
             '<div class="flex-shrink-0"><a href="/profile/' + npub + '/">' + avatarHtml + '</a></div>' +
             '<div class="flex-1 min-w-0">' +
             '<div class="flex items-center justify-between gap-2 mb-1.5">' +
             '<div class="flex items-center gap-2 flex-wrap min-w-0">' +
             '<a href="/profile/' + npub + '/" class="font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 truncate">' + escapeHtml(authorName) + '</a>' +
             nip05Badge +
-            '<span class="author-badge-slot" data-author-slot="' + escapeAttr(note.pubkey) + '"></span>' +
+            '<span class="author-badge-slot" data-author-slot="' + escapeAttr(pubkey) + '"></span>' +
             sovereignBadge +
             '</div>' +
             '<div class="flex items-center gap-2">' +
-            '<a href="/feed?thread=' + encodeURIComponent(note.id) + '" class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition" title="View full conversation thread">' + formattedDate + '</a>' +
+            '<a href="/feed?thread=' + encodeURIComponent(noteId) + '" class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition" title="View full conversation thread">' + formattedDate + '</a>' +
             '<div class="relative kebab-menu-wrap">' +
             '<button type="button" class="kebab-toggle-btn text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Post actions" onclick="toggleKebabMenu(event)">' +
             '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path></svg>' +
             '</button>' +
             '<div class="kebab-dropdown hidden absolute right-0 top-full mt-1 w-52 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl py-1 text-xs font-mono z-40">' +
-            '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-950/50 hover:text-violet-600 dark:hover:text-violet-400 flex items-center gap-2" onclick="suggestToDev(\'' + escapeAttr(note.id) + '\', \'' + escapeAttr(note.pubkey) + '\', \'' + snippetEscaped + '\')">💡 Suggest to Dev</button>' +
-            '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/50 hover:text-amber-600 dark:hover:text-amber-400 flex items-center gap-2" onclick="nominatePostOfTheDay(\'' + escapeAttr(note.id) + '\', \'' + escapeAttr(note.pubkey) + '\')">🏆 Post of the Day</button>' +
-            '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-2" onclick="setEnclavePetname(\'' + escapeAttr(note.pubkey) + '\', \'' + escapeAttr(authorName) + '\')">🛡️ Set Enclave Petname</button>' +
+            '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-950/50 hover:text-violet-600 dark:hover:text-violet-400 flex items-center gap-2" onclick="suggestToDev(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\', \'' + snippetEscaped + '\')">💡 Suggest to Dev</button>' +
+            '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/50 hover:text-amber-600 dark:hover:text-amber-400 flex items-center gap-2" onclick="nominatePostOfTheDay(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')">🏆 Post of the Day</button>' +
+            '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-2" onclick="setEnclavePetname(\'' + escapeAttr(pubkey) + '\', \'' + escapeAttr(authorName) + '\')">🛡️ Set Enclave Petname</button>' +
             '<div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>' +
-            '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="viewRawEventJson(\'' + escapeAttr(note.id) + '\')">📄 View Raw JSON</button>' +
-            '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="copyNotePermalink(\'' + escapeAttr(note.id) + '\')">🔗 Copy Event ID / Link</button>' +
+            '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="viewRawEventJson(\'' + escapeAttr(noteId) + '\')">📄 View Raw JSON</button>' +
+            '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="copyNotePermalink(\'' + escapeAttr(noteId) + '\')">🔗 Copy Event ID / Link</button>' +
             '</div></div></div></div>' +
             replyingToHtml +
-            (displayContent ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(displayContent) + '</div>' : (note.content && (!mediaAttachments || !mediaAttachments.length) ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(note.content) + '</div>' : '')) +
+            (displayContent ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(displayContent) + '</div>' : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(noteContent) + '</div>' : '')) +
             mediaHtml +
             '<div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">' +
-            '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(note.id) + '\')"><span>💬</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
-            '<button type="button" class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(note.id) + '\', \'' + escapeAttr(note.pubkey) + '\')"><span>🔁</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
-            '<button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote(\'' + escapeAttr(note.id) + '\', \'' + escapeAttr(note.pubkey) + '\')"><span class="heart-icon">❤️</span><span class="action-count like-count-label">' + reactionsCount + '</span></button>' +
-            ((note.kind === 30023 || note.is_proposal || note.lud16) ? '<button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction(\'' + escapeAttr(note.id) + '\', \'' + escapeAttr(note.kind) + '\', \'' + escapeAttr(note.lud16 || '') + '\')"><span>' + ((note.kind === 30023 || note.is_proposal) ? '🗳️ Vote' : '⚡ Tip') + '</span></button>' : '') +
-            '<button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote(\'' + escapeAttr(note.id) + '\')"><span>↗️</span><span class="hidden sm:inline">Share</span></button>' +
+            '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span>💬</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
+            '<button type="button" class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span>🔁</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
+            '<button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="heart-icon">❤️</span><span class="action-count like-count-label">' + reactionLikeCount + '</span></button>' +
+            ((note.kind === 30023 || note.is_proposal || note.lud16) ? '<button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.kind) + '\', \'' + escapeAttr(note.lud16 || '') + '\')"><span>' + ((note.kind === 30023 || note.is_proposal) ? '🗳️ Vote' : '⚡ Tip') + '</span></button>' : '') +
+            '<button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote(\'' + escapeAttr(noteId) + '\')"><span>↗️</span><span class="hidden sm:inline">Share</span></button>' +
             '</div>' +
             replyDrawerHtml +
             '</div></div>';
@@ -590,60 +601,68 @@
     function appendNoteToFeed(note, container, repliesMap) {
         if (!container || !note) return;
 
-        if (note.id) {
-            var existing = document.querySelector('[data-note-card-id="' + note.id + '"]') || document.querySelector('.feed-note-card[data-note-id="' + note.id + '"]');
-            if (existing) return;
-        }
-
-        var wrapper = document.createElement("div");
-        wrapper.className = "feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800";
-        wrapper.setAttribute("data-note-card-id", note.id);
-        wrapper.setAttribute("data-kind", note.kind);
-        wrapper.setAttribute("data-note-id", note.id);
-        wrapper.setAttribute("data-pubkey", note.pubkey_hex || note.pubkey || "");
-        wrapper.setAttribute("data-author-pubkey", note.pubkey_hex || note.pubkey || "");
-        wrapper.setAttribute("data-author-did", note.author_did || "");
-        wrapper.setAttribute("data-note-tags", JSON.stringify(note.tags || []));
-        wrapper.setAttribute("data-created-at", Math.floor(note.created_at_epoch || note.created_at || (Date.now() / 1000)));
-
-        wrapper.innerHTML = buildCardHtml(note);
-
-        var noteReplies = (repliesMap && repliesMap[note.id]) || note.replies || [];
-        if (noteReplies.length > 0) {
-            var repliesDiv = document.createElement("div");
-            repliesDiv.className = "mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 space-y-3";
-            repliesDiv.id = "replies-" + note.id;
-            repliesDiv.setAttribute("data-parent-id", note.id);
-            noteReplies.forEach(function (reply) {
-                var replyWrapper = document.createElement("div");
-                replyWrapper.className = "bg-slate-50/80 dark:bg-slate-950/60 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-800/80";
-                replyWrapper.innerHTML = buildCardHtml(reply);
-                if (reply.reply_count && reply.reply_count > 0) {
-                    var drilldownDiv = document.createElement("div");
-                    drilldownDiv.className = "mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end";
-                    drilldownDiv.innerHTML = '<a href="/feed?thread=' + encodeURIComponent(reply.id) + '" class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline"><span>View ' + reply.reply_count + ' more repl' + (reply.reply_count === 1 ? 'y' : 'ies') + ' →</span></a>';
-                    replyWrapper.appendChild(drilldownDiv);
-                }
-                repliesDiv.appendChild(replyWrapper);
-            });
-            wrapper.appendChild(repliesDiv);
-        }
-
-        container.appendChild(wrapper);
-
-        if (note.kind === 30023) {
-            var newForm = wrapper.querySelector(".poll-vote-form");
-            if (newForm) {
-                newForm.addEventListener("submit", function (ev) {
-                    ev.preventDefault();
-                    var pid = this.getAttribute("data-poll-id");
-                    var sel = this.querySelector("input[name='selection']:checked");
-                    if (!sel) return;
-                    var allInputs = this.querySelectorAll("input[name='selection']");
-                    var idx = Array.prototype.indexOf.call(allInputs, sel);
-                    castPollVote(pid, idx);
-                });
+        try {
+            if (note.id) {
+                var existing = document.querySelector('[data-note-card-id="' + note.id + '"]') || document.querySelector('.feed-note-card[data-note-id="' + note.id + '"]');
+                if (existing) return;
             }
+
+            var wrapper = document.createElement("div");
+            wrapper.className = "feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800";
+            wrapper.setAttribute("data-note-card-id", note.id || "");
+            wrapper.setAttribute("data-kind", note.kind || 1);
+            wrapper.setAttribute("data-note-id", note.id || "");
+            wrapper.setAttribute("data-pubkey", note.pubkey_hex || note.pubkey || "");
+            wrapper.setAttribute("data-author-pubkey", note.pubkey_hex || note.pubkey || "");
+            wrapper.setAttribute("data-author-did", note.author_did || "");
+            wrapper.setAttribute("data-note-tags", JSON.stringify(note.tags || []));
+            wrapper.setAttribute("data-created-at", Math.floor(note.created_at_epoch || note.created_at || (Date.now() / 1000)));
+
+            wrapper.innerHTML = buildCardHtml(note);
+
+            var noteReplies = (repliesMap && repliesMap[note.id]) || note.replies || [];
+            if (noteReplies.length > 0) {
+                var repliesDiv = document.createElement("div");
+                repliesDiv.className = "mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 space-y-3";
+                repliesDiv.id = "replies-" + (note.id || "");
+                repliesDiv.setAttribute("data-parent-id", note.id || "");
+                noteReplies.forEach(function (reply) {
+                    try {
+                        var replyWrapper = document.createElement("div");
+                        replyWrapper.className = "bg-slate-50/80 dark:bg-slate-950/60 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-800/80";
+                        replyWrapper.innerHTML = buildCardHtml(reply);
+                        if (reply && reply.reply_count && reply.reply_count > 0) {
+                            var drilldownDiv = document.createElement("div");
+                            drilldownDiv.className = "mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end";
+                            drilldownDiv.innerHTML = '<a href="/feed?thread=' + encodeURIComponent(reply.id) + '" class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline"><span>View ' + reply.reply_count + ' more repl' + (reply.reply_count === 1 ? 'y' : 'ies') + ' →</span></a>';
+                            replyWrapper.appendChild(drilldownDiv);
+                        }
+                        repliesDiv.appendChild(replyWrapper);
+                    } catch (replyErr) {
+                        console.warn("Failed to render reply note:", reply, replyErr);
+                    }
+                });
+                wrapper.appendChild(repliesDiv);
+            }
+
+            container.appendChild(wrapper);
+
+            if (note.kind === 30023) {
+                var newForm = wrapper.querySelector(".poll-vote-form");
+                if (newForm) {
+                    newForm.addEventListener("submit", function (ev) {
+                        ev.preventDefault();
+                        var pid = this.getAttribute("data-poll-id");
+                        var sel = this.querySelector("input[name='selection']:checked");
+                        if (!sel) return;
+                        var allInputs = this.querySelectorAll("input[name='selection']");
+                        var idx = Array.prototype.indexOf.call(allInputs, sel);
+                        castPollVote(pid, idx);
+                    });
+                }
+            }
+        } catch (err) {
+            console.warn("Failed to append note to feed:", note, err);
         }
     }
 
@@ -1111,7 +1130,7 @@
         if (!noteId) return;
         var pk;
         try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast("Sign in with a sovereign key to like notes.", true); return; }
+        catch (e) { showToast(e.message || "Sign in with a sovereign key to like notes.", "error"); return; }
 
         var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-like, [data-note-id="' + noteId + '"] .action-btn-like');
         var countLabel = btn ? btn.querySelector(".like-count-label") : null;
@@ -1120,6 +1139,8 @@
             var curr = parseInt(countLabel.textContent, 10);
             countLabel.textContent = isNaN(curr) ? "1" : String(curr + 1);
         }
+
+        showToast("Reaction published to mesh", "heart");
 
         var event = {
             kind: 7,
@@ -1141,10 +1162,12 @@
         if (!noteId) return;
         var pk;
         try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast("Sign in with a sovereign key to repost notes.", true); return; }
+        catch (e) { showToast(e.message || "Sign in with a sovereign key to repost notes.", "error"); return; }
 
         var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-repost, [data-note-id="' + noteId + '"] .action-btn-repost');
         if (btn) btn.classList.add("text-emerald-600", "dark:text-emerald-400", "font-bold");
+
+        showToast("Note reposted to mesh relays", "repost");
 
         var event = {
             kind: 6,
@@ -1271,7 +1294,7 @@
         var permalink = window.location.origin + "/feed?thread=" + encodeURIComponent(noteId);
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(permalink).then(function () {
-                showToast("Link copied to clipboard.");
+                showToast("Permalink copied to clipboard", "copy");
             });
         } else {
             prompt("Copy permalink:", permalink);

@@ -14,7 +14,7 @@ Do NOT implement cleartext client secrets, do NOT use email addresses as databas
 
 **iyou_wun** (WUN) is a Django 5.2 OIDC Relying Party satellite that authenticates users via the **iyou_idp** identity provider using Decentralized Identifiers (DID). Passwords are deprecated — OIDC/DID is the sole entry point.
 
-**Core features:** Omni-Social Nostr Feed (Kind 1/7/1063/1111/30023/1112) with NIP-10 hero threading and inline media unfurling, batch reply counting, Media Gallery (tabbed by MIME type), Sovereign Link Deck with Proof-of-Authority verification, Unified 2-column reactive Dashboard, Sovereign Profile pages with hybrid resolution, XMPP Chat (Converse.js ES module), Poly Governance Polls, Verifiable Credential issuance.
+**Core features:** Omni-Social Nostr Feed (Kind 1/7/1063/1111/30023/1112) with NIP-10 hero threading and inline media unfurling, batch reply **and reaction** counting, progressive multi-tier search (`/api/search/` + `#search-results-dropdown`), responsive 3-column discovery feed shell with right rail, global toast notification engine, dynamic NIP-65 relay pooling with autonomous failover, Media Gallery (tabbed by MIME type), Sovereign Link Deck with Proof-of-Authority verification, Unified 2-column reactive Dashboard, Sovereign Profile pages with hybrid resolution, XMPP Chat (Converse.js ES module), Poly Governance Polls, Verifiable Credential issuance.
 
 ---
 
@@ -36,20 +36,23 @@ Requires: running `iyou_idp` instance + `iyou_home` (Tauri bridge :9001, Blossom
 | Document | Location | Purpose |
 |----------|----------|---------|
 | Developer Guide | `docs/WUN_DEVELOPER_GUIDE.md` | Full setup, env vars, architecture, troubleshooting |
-| Design Doc | `docs/DESIGN_DOC.md` | Sovereign Media Stack architecture (Django + React + Rust) |
+| Sprint Changelog | `docs/SPRINT_CHANGELOG.md` | Latest sprint review — new routes, partials, test suites |
+| Design Doc | `docs/DESIGN_DOC.md` | Sovereign Media Stack architecture (early spec) |
 | Project TODO | `TODO.md` | Current task tracking (synced from omni_social hub) |
 | Auth Standard | `docs/ecosystem_shared/OMNI_SOCIAL_AUTH_STANDARDIZATION.md` | Platform-wide OIDC/PKCE rules |
 | Auth Flow Spec | `docs/ecosystem_shared/AUTH_FLOW_SPECIFICATION.md` | Request/response flow diagrams |
 | PKCE Reference | `docs/ecosystem_shared/auth_pkce.py` | Canonical reference implementation |
 | Satellite Coordination | `docs/ecosystem_shared/satellite-coordination.md` | Multi-satellite sync patterns |
 
-### Archive (historical reference)
+### Archive (historical reference — gitignored)
 
 | Document | Location | Notes |
 |----------|----------|-------|
 | Meshing Protocol | `docs/archive/MESHING_PROTOCOL.md` | Early integration plan template |
 | Strategic Roadmap | `docs/archive/STRATEGIC_ROADMAP.md` | Phase 2 roadmap (largely completed) |
 | Global-Local Nostr | `docs/archive/GLOBAL_LOCAL_NOSTR.md` | Nostr relay architecture reference |
+| Search Audit Report | `docs/archive/SEARCH_AUDIT_REPORT.md` | Pre-implementation search diagnostic (superseded by `docs/SPRINT_CHANGELOG.md`) |
+| Architectural Audit | `docs/archive/WUN_ARCHITECTURAL_AUDIT_REPORT.md` | Completed-phase audit report (historical) |
 
 ---
 
@@ -79,8 +82,12 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 | `apps/core/did_kit.py` | Ed25519 VC signing/verification |
 | `static/js/bridge_client.js` | Tauri WebSocket bridge — mutex, signing, stateful tab router, fallback modal |
 | `static/js/link_deck_manager.js` | Link Deck CRUD, handle claiming, proof-of-authority bio challenges |
-| `static/js/feed_interactions.js` | Feed controller — posting, replies, hero threading, polls, inline media |
+| `static/js/feed_interactions.js` | Feed controller — posting, replies, hero threading, polls, inline media, toasts |
 | `static/js/gallery_player.js` | Gallery controller — tab switching, lightbox, media playback |
+| `static/js/circle_feed_filter.js` | Circle scopes + tag/text DOM filter + progressive search flyout (`/api/search/`) |
+| `static/js/contact_manager.js` | NIP-02 Kind 3 contacts, follow buttons, mutual-follow detection |
+| `static/js/toast_manager.js` | Global typed toast engine — `window.showToast(message, type, duration)` |
+| `static/js/relay_pool.js` | NIP-65 relay pooling, health probing, parallel double-broadcast |
 
 ---
 
@@ -102,9 +109,10 @@ User Browser → Traefik (HTTPS) → WUN (Django :8001)
 
 ```bash
 uv run python manage.py test apps.core
+uv run ruff check .
 ```
 
-279 unit tests across 6 modules: `test_auth` (17), `test_views` (62), `test_feed` (48), `test_deck` (107), `test_gallery` (26), `test_issuance` (19).
+296 unit tests across 7 modules: `test_auth` (20), `test_views` (77), `test_feed` (52), `test_deck` (85), `test_gallery` (32), `test_issuance` (20), `test_contacts` (10). Ruff: clean.
 
 
 ---

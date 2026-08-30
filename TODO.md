@@ -1,7 +1,7 @@
 # TODO — iyou_wun (Social Hub)
 
 **Orchestrated from:** `omni_social` (central hub)
-**Last synced:** 2026-08-27
+**Last synced:** 2026-08-30
 
 ---
 
@@ -29,8 +29,13 @@
 - [x] **Phase 8 — Unified Reactive Dashboard Command Center:** Single-card workspace with stateful URL-hash tabs (`#profile`, `#deck`, `#settings`, `#account`), 2-column reactive profile editor with real-time live preview data binding, integrated Link Deck manager, and Sovereign Switchboard — **Done 2026-08-27**
 - [x] **Phase 9 — Converse.js ES Module Chat Integration:** Modernized XMPP chat with ESM CDN imports, dynamic multi-tier layout preservation, and automatic JID credential binding — **Done 2026-08-27**
 - [x] **Phase 10 — Test Suite Expansion:** 279 passing unit tests across 6 modules with 100% check cleanliness — **Done 2026-08-27**
+- [x] **Phase 11 — Progressive Multi-Tier Search Engine:** `/api/search/` (profile + hashtag JSON), `#search-results-dropdown` flyout with 250ms debounced escalation, `circle_feed_filter.js` Tier-1 DOM filter with `?q=` history sync, Tier-3 relay/tag deep-links; replaces nav `overflow-x-hidden` clipping with `overflow-visible` + `relative` anchoring — **Done 2026-08-30**
+- [x] **Phase 12 — 3-Column Discovery Feed Shell & Right Rail:** `max-w-6xl` center stream + sticky `_feed_right_rail.html` (TRENDING TOPICS, SOVEREIGN CREATORS, sponsor unit; desktop-only, hidden in thread mode) with `suggested_creators`/`trending_tags`/`relay_count` feed context — **Done 2026-08-30**
+- [x] **Phase 13 — Toast & Notification Engine:** `toast_manager.js` (`window.showToast` typed stack) + `_toast_container.html`; feed/contact/bridge controllers migrated to typed toasts — **Done 2026-08-30**
+- [x] **Phase 14 — Dynamic Relay Pooling & NIP-65:** `relay_pool.js` (health probing, persisted pools, parallel double-broadcast, mesh health indicator) + server `fetch_user_nip65_relays()` and hardened `relay_req` failover — **Done 2026-08-30**
+- [x] **Phase 15 — Batch Reaction (Kind 7) Counting:** `attach_reaction_counts()` single-query like tallies surfaced on feed, profile, and `/api/feed` — **Done 2026-08-30**
 
-- [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`.
+- [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---
 

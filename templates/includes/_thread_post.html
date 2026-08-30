@@ -204,7 +204,13 @@
       <!-- 3. Like / Heart -->
       <button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote('{{ note.id }}', '{{ note.pubkey }}')">
         <span class="heart-icon">❤️</span>
-        <span class="action-count like-count-label">{% if note.reactions %}{{ note.reactions|length }}{% else %}Like{% endif %}</span>
+        <span class="action-count like-count-label">
+          {% if note.like_count and note.like_count > 0 %}
+            {{ note.like_count }}
+          {% else %}
+            Like
+          {% endif %}
+        </span>
       </button>
 
       <!-- 4. Contextual Vote / Fund -->

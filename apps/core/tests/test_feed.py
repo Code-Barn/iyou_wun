@@ -571,6 +571,133 @@ class ProcessIntoFeedTest(TestCase):
         self.assertEqual(result[2]["reply_count"], 0)
 
 
+    def test_attach_reaction_counts_tallies_kind_7_accurately(self):
+        from apps.core.views import attach_reaction_counts
+
+        notes = [
+            {"id": "note_alpha", "content": "Root A"},
+            {"id": "note_beta", "content": "Root B"},
+            {"id": "note_gamma", "content": "Root C"},
+        ]
+
+        reaction_events = {
+            "like_1": make_event("like_1", 7, content="+", tags=[["e", "note_alpha"]]),
+            "like_2": make_event("like_2", 7, content="❤️", tags=[["e", "note_alpha"]]),
+            "like_3": make_event("like_3", 7, content="", tags=[["e", "note_beta"]]),
+            "dislike_1": make_event("dislike_1", 7, content="-", tags=[["e", "note_alpha"]]),
+            "like_other": make_event("like_other", 7, content="+", tags=[["e", "note_unknown"]]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=reaction_events):
+            result = attach_reaction_counts(notes)
+
+        self.assertEqual(result[0]["like_count"], 2)
+        self.assertEqual(result[1]["like_count"], 1)
+        self.assertEqual(result[2]["like_count"], 0)
+
+
+    def test_attach_reaction_counts_respects_existing_like_count(self):
+        from apps.core.views import attach_reaction_counts
+
+        notes = [{"id": "note_a", "content": "Root A", "like_count": 5}]
+        reaction_events = {
+            "like_1": make_event("like_1", 7, content="+", tags=[["e", "note_a"]]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=reaction_events):
+            result = attach_reaction_counts(notes)
+
+        self.assertEqual(result[0]["like_count"], 5)
+
+    def test_attach_reaction_counts_empty_notes_returns_unchanged(self):
+        from apps.core.views import attach_reaction_counts
+
+        with patch("apps.core.views.relay_req", return_value={}) as mock_req:
+            result = attach_reaction_counts([])
+        self.assertEqual(result, [])
+        mock_req.assert_not_called()
+
+
+class RelayPoolAndFailoverTests(TestCase):
+    """Tests for dynamic relay pooling, autonomous failover, and NIP-65 ingestion."""
+
+    def test_relay_req_failover_when_primary_fails(self):
+        from apps.core.views import relay_req
+
+        events_fallback = {"e1": make_event("e1", 1, content="Recovered via fallback relay")}
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            if "relay.iyou.me" in relay_url:
+                raise ConnectionError("Primary upstream down")
+            return events_fallback
+
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            result = relay_req(
+                {"kinds": [1]},
+                relay_urls=["wss://relay.iyou.me", "wss://nos.lol"]
+            )
+
+        self.assertEqual(result, events_fallback)
+
+    def test_relay_req_returns_empty_dict_if_all_fail(self):
+        from apps.core.views import relay_req
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            raise TimeoutError("All relays unreachable")
+
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            result = relay_req(
+                {"kinds": [1]},
+                relay_urls=["wss://relay.iyou.me", "wss://relay.damus.io"]
+            )
+
+        self.assertEqual(result, {})
+
+    def test_fetch_user_nip65_relays_parsing(self):
+        from apps.core.views import fetch_user_nip65_relays
+
+        nip65_event = make_event(
+            "nip65_1",
+            10002,
+            pubkey="test_pk",
+            tags=[
+                ["r", "wss://relay.damus.io", "read"],
+                ["r", "wss://relay.primal.net", "write"],
+                ["r", "wss://nos.lol"],
+            ]
+        )
+
+        with patch("apps.core.views.relay_req", return_value={"nip65_1": nip65_event}):
+            res = fetch_user_nip65_relays("test_pk")
+
+        self.assertIn("wss://relay.damus.io", res["read"])
+        self.assertNotIn("wss://relay.damus.io", res["write"])
+
+        self.assertIn("wss://relay.primal.net", res["write"])
+        self.assertNotIn("wss://relay.primal.net", res["read"])
+
+        self.assertIn("wss://nos.lol", res["read"])
+        self.assertIn("wss://nos.lol", res["write"])
+
+        self.assertEqual(len(res["all"]), 3)
+
+    def test_fetch_user_nip65_relays_empty_pubkey(self):
+        from apps.core.views import fetch_user_nip65_relays
+
+        res = fetch_user_nip65_relays("")
+        self.assertEqual(res, {"read": [], "write": [], "all": []})
+
+    def test_fetch_unified_feed_handles_relay_outage_gracefully(self):
+        from apps.core.views import fetch_unified_feed
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            feed = fetch_unified_feed()
+
+        self.assertEqual(feed["roots"], [])
+        self.assertEqual(feed["total_replies"], 0)
+
+
+
 
 
 

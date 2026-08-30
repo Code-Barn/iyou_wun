@@ -15,20 +15,36 @@
     var ALIAS_DEBOUNCE_MS = 200;
     var ALIAS_CONNECT_POLL_MAX_ATTEMPTS = 60;
 
-    var DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me"];
+    var DEFAULT_RELAYS = [
+        "wss://relay.iyou.me",
+        "wss://nos.lol",
+        "wss://relay.damus.io",
+        "wss://relay.primal.net",
+        "ws://127.0.0.1:9003"
+    ];
 
     // ---------- Utilities ----------
 
     function escapeHtml(str) {
-        if (!str) return "";
-        var div = document.createElement("div");
-        div.appendChild(document.createTextNode(str));
-        return div.innerHTML;
+        if (str === null || str === undefined) return '';
+        var s = String(str);
+        return s
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
     }
 
     function escapeAttr(str) {
-        if (!str) return "";
-        return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        if (str === null || str === undefined) return '';
+        var s = String(str);
+        return s
+            .replace(/&/g, '&amp;')
+            .replace(/'/g, '&#39;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
     }
 
     function getCookie(name) {
@@ -37,6 +53,9 @@
     }
 
     function getRelays() {
+        if (typeof window !== "undefined" && window.relayPool && typeof window.relayPool.getRelays === "function") {
+            return window.relayPool.getRelays();
+        }
         var stored = localStorage.getItem("wun_relays");
         if (stored) {
             try { return JSON.parse(stored); } catch (e) { /* ignore */ }
@@ -56,11 +75,15 @@
 
     // ---------- Toast ----------
 
-    function showToast(message, isError) {
+    function showToast(message, type, duration) {
+        if (typeof window !== "undefined" && typeof window.showToast === "function" && window.showToast !== showToast) {
+            return window.showToast(message, type, duration);
+        }
         var toast = document.getElementById("toast");
         if (!toast) return;
         var span = toast.querySelector("span");
         if (span) span.textContent = message;
+        var isError = type === true || type === "error";
         toast.className = toast.className.replace(/bg-\S+/g, "") +
             " fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg toast " +
             (isError ? "bg-red-500 text-white" : "bg-green-500 text-white");
@@ -371,12 +394,22 @@
     };
 
     TauriBridgeClient.prototype.broadcastToRelays = function (signedEvent, relayList, onDone) {
+        if (typeof window !== "undefined" && window.relayPool && typeof window.relayPool.broadcast === "function") {
+            window.relayPool.broadcast(signedEvent, relayList).then(function (res) {
+                if (res.localSuccess) showSovereignToast("Sovereign Copy Saved.");
+                if (onDone) {
+                    onDone(res.localSuccess, res.globalSuccess);
+                }
+            }).catch(function () {
+                if (onDone) onDone(false, false);
+            });
+            return;
+        }
+
         var relays = relayList || getRelays();
         var remaining = relays.length;
         var localRelaySuccess = false;
         var anyGlobalSuccess = false;
-
-        var self = this;
 
         function checkDone() {
             if (remaining > 0) return;
@@ -387,7 +420,7 @@
         }
 
         relays.forEach(function (relayUrl) {
-            var isLocal = relayUrl.indexOf("127.0.0.1:9003") !== -1;
+            var isLocal = relayUrl.indexOf("127.0.0.1:9003") !== -1 || relayUrl.indexOf("localhost:9003") !== -1;
             var finished = false;
             var done = function () {
                 if (finished) return;
@@ -533,7 +566,7 @@
     window.getCookie = getCookie;
     window.getRelays = getRelays;
     window.setRelays = setRelays;
-    window.showToast = showToast;
+    window.showToast = window.showToast || showToast;
     window.showSovereignToast = showSovereignToast;
     window.switchTab = switchTab;
     window.uuidv4 = uuidv4;

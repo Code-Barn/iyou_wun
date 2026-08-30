@@ -23,27 +23,27 @@
     // Visual styles for button states
     const BUTTON_STYLES = {
         none: {
-            classes: "px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800 hover:border-slate-600 shadow-sm",
+            classes: "px-2.5 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-[10px] sm:text-xs font-semibold transition shrink-0 shadow-sm",
             label: "+ Follow",
             ariaLabel: "Follow this profile"
         },
         follower: {
-            classes: "px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-blue-500/50 bg-slate-900 text-blue-300 hover:bg-slate-800 hover:border-blue-400 shadow-sm",
+            classes: "px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] sm:text-xs font-semibold transition shrink-0 shadow-sm",
             label: "+ Follow Back",
             ariaLabel: "Follow back this profile"
         },
         following: {
-            classes: "px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-emerald-700/60 bg-slate-800 text-emerald-300 hover:bg-slate-700 hover:text-red-300 hover:border-red-500/40 shadow-sm",
+            classes: "px-2.5 py-1 rounded text-[10px] sm:text-xs font-semibold transition shrink-0 border border-slate-700 bg-slate-800 text-slate-300 hover:border-rose-500/60 hover:bg-rose-950/60 hover:text-rose-200 shadow-sm",
             label: "✓ Following",
             ariaLabel: "Following this profile (click to unfollow)"
         },
         mutual: {
-            classes: "px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-emerald-500 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 shadow-sm",
-            label: "🤝 Mutual Friend (L1 Peer)",
-            ariaLabel: "Mutual Friend - Level 1 Peer"
+            classes: "px-2.5 py-1 rounded text-[10px] sm:text-xs font-semibold transition shrink-0 border border-emerald-500/60 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/60 shadow-sm",
+            label: "🤝 Friends",
+            ariaLabel: "Mutual Friend"
         },
         loading: {
-            classes: "px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-slate-700 bg-slate-800 text-slate-400 cursor-wait opacity-80",
+            classes: "px-2.5 py-1 rounded text-[10px] sm:text-xs font-semibold transition shrink-0 border border-slate-700 bg-slate-800 text-slate-400 cursor-wait opacity-80",
             label: "Updating...",
             ariaLabel: "Updating contact status"
         }
@@ -118,9 +118,9 @@
         return null;
     }
 
-    function notifyToast(message, isError) {
+    function notifyToast(message, type = "info") {
         if (typeof global.showToast === "function") {
-            global.showToast(message, isError);
+            global.showToast(message, type);
         }
     }
 
@@ -495,13 +495,13 @@
             targetFollowsCache.delete(cleanTarget);
 
             if (isCurrentlyFollowing) {
-                notifyToast("Unfollowed contact.");
+                notifyToast("Unfollowed contact", "info");
             } else {
-                notifyToast("Followed contact.");
+                notifyToast("Follow list updated (Kind 3)", "success");
             }
         } catch (err) {
             console.error("Failed to toggle follow:", err);
-            notifyToast("Follow action failed: " + err.message, true);
+            notifyToast("Follow action failed: " + err.message, "error");
 
             // Fallback modal support if bridgeClient modal is in DOM
             if (global.bridgeClient && typeof global.bridgeClient.showFallbackModal === "function") {
@@ -568,6 +568,20 @@
         } else {
             btn.textContent = config.label;
         }
+
+        if (state === "following") {
+            btn.onmouseenter = function () {
+                if (label) label.textContent = "Unfollow";
+                else btn.textContent = "Unfollow";
+            };
+            btn.onmouseleave = function () {
+                if (label) label.textContent = config.label;
+                else btn.textContent = config.label;
+            };
+        } else {
+            btn.onmouseenter = null;
+            btn.onmouseleave = null;
+        }
     }
 
     /**
@@ -632,6 +646,7 @@
         isFollowing: isFollowing,
         isMutualFriend: isMutualFriend,
         bindButtons: bindFollowButtons,
+        scanFollowButtons: bindFollowButtons,
         getCurrentContactList: () => [...currentContactList],
         getRelays: getRelays,
         BUTTON_STYLES: BUTTON_STYLES
@@ -642,6 +657,7 @@
     global.ContactManager = contactManager;
     global.toggleFollow = toggleFollow;
     global.checkRelationship = checkRelationship;
+    global.scanFollowButtons = bindFollowButtons;
 
     // Auto-initialize when DOM is ready
     if (document.readyState === "loading") {

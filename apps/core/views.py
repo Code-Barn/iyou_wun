@@ -16,6 +16,7 @@
 import base64
 import hashlib
 import json
+import logging
 import re
 import ssl
 import threading
@@ -31,7 +32,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import IntegrityError, transaction
-from django.db.models import Max
+from django.db.models import Max, Q
 from django.http import HttpResponsePermanentRedirect, HttpResponseBadRequest, Http404, JsonResponse
 from django.shortcuts import redirect, render
 from django.utils import timezone
@@ -48,6 +49,7 @@ from .did_kit import get_node_signing_key, get_public_key_hex, issue_vc
 from .models import HandleVerificationChallenge, IssuedCredential, UserLinkDeck, UserLinkItem
 from .utils import validate_external_bio_url, verify_external_profile_token
 
+logger = logging.getLogger(__name__)
 UserModel = get_user_model()
 
 
@@ -99,6 +101,8 @@ class FeedView(TemplateView):
         context["user_npub"] = user_npub
         context["user_did"] = self.request.user.username if self.request.user.is_authenticated else None
         context["relays_json"] = json.dumps(relays)
+        context["relays"] = relays
+        context["relay_count"] = len(relays)
         context["user_credentials"] = {}
 
 
@@ -134,6 +138,7 @@ class FeedView(TemplateView):
 
             notes = feed_data["roots"]
             notes = attach_reply_counts(notes, relay_urls=relays)
+            notes = attach_reaction_counts(notes, relay_urls=relays)
             timestamps = []
             for n in notes:
                 ts = n.get("created_at")
@@ -152,7 +157,21 @@ class FeedView(TemplateView):
             context["thread_reply_count"] = feed_data["total_replies"]
             context["oldest_timestamp"] = min(timestamps) if timestamps else None
 
+        creators_qs = (
+            UserLinkDeck.objects.filter(is_public=True)
+            .exclude(handle="")
+            .order_by("-is_verified", "-created_at")
+        )
+        if self.request.user.is_authenticated:
+            creators_qs = creators_qs.exclude(user=self.request.user)
+        context["suggested_creators"] = list(creators_qs[:4])
 
+        context["trending_tags"] = [
+            {"name": "bitcoin", "category": "Finance & Sovereign Capital", "count": "1.4k"},
+            {"name": "nostr", "category": "Protocol & Relays", "count": "920"},
+            {"name": "wine", "category": "Agriculture & Viticulture", "count": "312"},
+            {"name": "crypto", "category": "Cryptography & ZK", "count": "280"},
+        ]
 
         return context
 
@@ -217,6 +236,89 @@ def api_relays(request):
     relays = data.get('relays', DEFAULT_RELAYS)
     request.session['relays'] = relays
     return JsonResponse({'relays': relays})
+
+
+def api_search(request):
+    """Progressive multi-tier search endpoint returning matching profiles and hashtags."""
+    q = request.GET.get("q", "").strip()
+    limit_raw = request.GET.get("limit", 6)
+
+    try:
+        limit = max(1, min(int(limit_raw), 20))
+    except (ValueError, TypeError):
+        limit = 6
+
+    if not q:
+        return JsonResponse({
+            "success": True,
+            "query": "",
+            "counts": {"profiles": 0, "tags": 0},
+            "results": {
+                "profiles": [],
+                "tags": [],
+            },
+        })
+
+    clean_tag = q.lstrip("#").strip()
+
+    # 1. Profiles Query (UserLinkDeck) - database-agnostic lookups
+    profile_filter = (
+        Q(handle__icontains=clean_tag)
+        | Q(display_name__icontains=clean_tag)
+        | Q(nip05__icontains=clean_tag)
+        | Q(headline__icontains=clean_tag)
+    )
+    matching_decks = (
+        UserLinkDeck.objects.filter(is_public=True)
+        .filter(profile_filter)
+        .order_by("-is_verified", "handle")[:limit]
+    )
+
+    profiles_data = []
+    for deck in matching_decks:
+        profiles_data.append({
+            "handle": deck.handle,
+            "display_name": deck.display_name or deck.handle,
+            "avatar_url": deck.avatar_url,
+            "headline": deck.headline,
+            "nip05": deck.nip05,
+            "is_verified": deck.is_verified,
+            "url": deck.canonical_path,
+        })
+
+    # 2. Hashtag Suggestions
+    tags_data = []
+    if clean_tag:
+        clean_tag_lower = clean_tag.lower()
+        tags_data.append({
+            "tag": clean_tag_lower,
+            "display_tag": f"#{clean_tag_lower}",
+            "url": f"/feed?q=%23{clean_tag_lower}",
+        })
+
+        POPULAR_TAGS = ["nostr", "bitcoin", "mesh", "sovereign", "ai", "crypto", "dev", "gallery", "poly"]
+        for ptag in POPULAR_TAGS:
+            if clean_tag_lower in ptag and ptag != clean_tag_lower:
+                tags_data.append({
+                    "tag": ptag,
+                    "display_tag": f"#{ptag}",
+                    "url": f"/feed?q=%23{ptag}",
+                })
+                if len(tags_data) >= limit:
+                    break
+
+    return JsonResponse({
+        "success": True,
+        "query": q,
+        "counts": {
+            "profiles": len(profiles_data),
+            "tags": len(tags_data),
+        },
+        "results": {
+            "profiles": profiles_data,
+            "tags": tags_data,
+        },
+    })
 
 
 def api_feed(request):
@@ -295,6 +397,7 @@ def api_feed(request):
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit)
     feed_data["roots"] = attach_reply_counts(feed_data["roots"], relay_urls=relays)
+    feed_data["roots"] = attach_reaction_counts(feed_data["roots"], relay_urls=relays)
 
 
     def _serialize(note):
@@ -901,11 +1004,11 @@ def get_tag_value(tags, tag_name, index=1, default=""):
 
 
 DEFAULT_RELAYS = [
+    "wss://relay.iyou.me",
     "wss://nos.lol",
     "wss://relay.damus.io",
     "wss://relay.primal.net",
     "wss://relay.nostr.band",
-    "wss://relay.iyou.me",
     "ws://127.0.0.1:9003",
 ]
 
@@ -918,12 +1021,15 @@ CURATED_AUTHORS = [
 
 
 def _connect_relay(relay_url, sub_id, filter_obj, timeout):
-    """Connect to a single relay and fetch events."""
+    """Connect to a single relay and fetch events with defensive error handling."""
     events = {}
     done = threading.Event()
 
     def on_open(ws):
-        ws.send(json.dumps(["REQ", sub_id, filter_obj]))
+        try:
+            ws.send(json.dumps(["REQ", sub_id, filter_obj]))
+        except Exception:
+            done.set()
 
     def on_message(ws, raw):
         try:
@@ -943,15 +1049,15 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
     def on_close(ws, status, msg):
         done.set()
 
-    ws = WebSocketApp(
-        relay_url,
-        on_open=on_open,
-        on_message=on_message,
-        on_error=on_error,
-        on_close=on_close,
-    )
-
     try:
+        ws = WebSocketApp(
+            relay_url,
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close,
+        )
+
         t = threading.Thread(
             target=ws.run_forever,
             kwargs={"sslopt": {"cert_reqs": ssl.CERT_NONE}},
@@ -959,15 +1065,18 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
         )
         t.start()
         done.wait(timeout=timeout)
-        ws.close()
+        try:
+            ws.close()
+        except Exception:
+            pass
     except Exception as e:
-        print(f"_connect_relay error on {relay_url}: {e}")
+        logger.debug("_connect_relay error on %s: %s", relay_url, e)
 
     return events
 
 
 def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None):
-    """Try multiple relays, return events from first responsive one."""
+    """Try multiple relays with autonomous failover, returning events from first responsive one."""
     if sub_id is None:
         sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
 
@@ -975,9 +1084,13 @@ def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None):
         relay_urls = DEFAULT_RELAYS
 
     for relay_url in relay_urls:
-        events = _connect_relay(relay_url, sub_id, filter_obj, timeout)
-        if events:
-            return events
+        try:
+            events = _connect_relay(relay_url, sub_id, filter_obj, timeout)
+            if events:
+                return events
+        except Exception as e:
+            logger.debug("relay_req failed on %s: %s", relay_url, e)
+            continue
 
     return {}
 
@@ -1184,6 +1297,66 @@ def attach_reply_counts(notes, relay_urls=None):
     return notes
 
 
+def attach_reaction_counts(notes, relay_urls=None):
+    """
+    Given a list of note dictionaries, performs a batch relay query
+    for Kind 7 (reaction) events referencing these notes in an 'e' tag,
+    and sets note['like_count'].
+    """
+    if not notes:
+        return notes
+
+    root_ids = [n["id"] for n in notes if n.get("id")]
+    if not root_ids:
+        return notes
+
+    relays = relay_urls or DEFAULT_RELAYS
+
+    # Query Kind 7 reaction events referencing any of our note IDs
+    filter_obj = {
+        "kinds": [7],
+        "#e": root_ids,
+        "limit": 1000,
+    }
+
+    raw_events = relay_req(filter_obj, relay_urls=relays)
+    reaction_events = (
+        list(raw_events.values())
+        if isinstance(raw_events, dict)
+        else (raw_events if isinstance(raw_events, list) else [])
+    )
+
+    # Tally valid likes (+, ❤️, or empty/emoji content) per target note ID
+    counts = {rid: 0 for rid in root_ids}
+    for event in reaction_events:
+        content = (event.get("content") or "").strip()
+        # Exclude explicit downvotes/dislikes (e.g., "-")
+        if content == "-":
+            continue
+
+        for tag in event.get("tags", []):
+            if len(tag) >= 2 and tag[0] == "e":
+                target_id = tag[1]
+                if target_id in counts:
+                    counts[target_id] += 1
+
+    # Set like_count on each note
+    for note in notes:
+        nid = note.get("id")
+        existing_likes = note.get("like_count") or note.get("reactions") or 0
+        if isinstance(existing_likes, dict):
+            existing_likes = sum(existing_likes.values())
+        elif isinstance(existing_likes, list):
+            existing_likes = len(existing_likes)
+        try:
+            existing_likes_int = int(existing_likes)
+        except (ValueError, TypeError):
+            existing_likes_int = 0
+        note["like_count"] = max(existing_likes_int, counts.get(nid, 0))
+
+    return notes
+
+
 def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
 
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
@@ -1230,6 +1403,38 @@ def fetch_contact_pubkeys(user_pubkey, relay_urls=None):
         tags = e.get("tags", [])
         return [tag[1] for tag in tags if tag and tag[0] == "p" and len(tag) > 1]
     return []
+
+
+def fetch_user_nip65_relays(pubkey, relay_urls=None):
+    """Fetch NIP-65 (Kind 10002) relay list metadata for a user pubkey."""
+    if not pubkey:
+        return {"read": [], "write": [], "all": []}
+    events = relay_req({"kinds": [10002], "authors": [pubkey], "limit": 1}, relay_urls=relay_urls)
+    read_relays = []
+    write_relays = []
+    all_relays = []
+    for e in events.values():
+        tags = e.get("tags", [])
+        for tag in tags:
+            if tag and tag[0] == "r" and len(tag) > 1:
+                url = tag[1].strip()
+                if not url:
+                    continue
+                all_relays.append(url)
+                marker = tag[2].lower() if len(tag) > 2 else None
+                if marker == "read":
+                    read_relays.append(url)
+                elif marker == "write":
+                    write_relays.append(url)
+                else:
+                    read_relays.append(url)
+                    write_relays.append(url)
+        break
+    return {
+        "read": list(dict.fromkeys(read_relays)),
+        "write": list(dict.fromkeys(write_relays)),
+        "all": list(dict.fromkeys(all_relays)),
+    }
 
 
 class GalleryView(TemplateView):
@@ -1389,6 +1594,8 @@ class ProfileView(TemplateView):
 
         relays = get_relays_for_request(self.request)
         posts = attach_reply_counts(posts, relay_urls=relays)
+        posts = attach_reaction_counts(posts, relay_urls=relays)
+        replies = attach_reaction_counts(replies, relay_urls=relays)
         posts.sort(key=lambda x: x["created_at"], reverse=True)
         replies.sort(key=lambda x: x["created_at"], reverse=True)
         media_assets.sort(key=lambda x: x["created_at"], reverse=True)

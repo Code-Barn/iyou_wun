@@ -40,6 +40,8 @@
 
     {% block extra_body %}{% endblock %}
     {% block extra_js %}{% endblock %}
+    <script src="{% static 'js/toast_manager.js' %}"></script>
+    <script src="{% static 'js/relay_pool.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="{% static 'js/contact_manager.js' %}" defer></script>
     <script src="{% static 'js/circle_feed_filter.js' %}" defer></script>
@@ -81,6 +83,7 @@
         });
       }
     </script>
+    {% include "includes/_toast_container.html" %}
 </body>
 
 

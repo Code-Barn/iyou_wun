@@ -1,8 +1,10 @@
 # Project Design Doc: The Sovereign Media Stack
 
-**Status:** Initial Specification
+**Status:** Historical / Early Design Spec (pre-implementation)
 
-**Core Technologies:** Django (Backend), React (PWA), Rust (IdP & Tauri), Blossom/Nostr/XMPP (Protocols).
+> **Note (2026-08-30):** This is the original pre-build design vision (React PWA + Rust IdP + Django). The implemented architecture has diverged — WUN is a server-rendered Django + Tailwind JS satellite. For current, authoritative architecture see **[WUN_DEVELOPER_GUIDE.md](WUN_DEVELOPER_GUIDE.md)**.
+
+**Core Technologies (as designed):** Django (Backend), React (PWA), Rust (IdP & Tauri), Blossom/Nostr/XMPP (Protocols).
 
 
 ## 1. Architectural Overview

@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-3xl w-full mx-auto px-2 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
+<div class="max-w-6xl w-full mx-auto px-2 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
     {% if messages %} {% for message in messages %}
     <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
         <div class="flex">
@@ -23,137 +23,161 @@
     </div>
     {% endfor %} {% endif %}
 
-    {% if feed_mode == 'thread' %}
-    <!-- Thread Mode: Dedicated Conversation View -->
-    <div class="max-w-2xl mx-auto space-y-4">
-      <!-- Back to Feed Nav -->
-      <div class="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
-        <a href="{% url 'feed' %}" class="inline-flex items-center gap-1.5 text-xs font-mono text-violet-600 dark:text-violet-400 hover:underline">
-          ← Back to Feed
-        </a>
-        <span class="text-xs font-mono text-slate-400">Thread Context</span>
-      </div>
-
-      <!-- Ancestor Chain -->
-      {% if ancestors %}
-      <div class="space-y-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 ml-3">
-        {% for ancestor in ancestors %}
-        <div class="bg-white/60 dark:bg-slate-900/60 rounded-xl p-3.5 border border-slate-200 dark:border-slate-800/80">
-          {% include "includes/_thread_post.html" with note=ancestor is_ancestor=True %}
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      <!-- FOCUSED HERO POST -->
-      <div class="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border-2 border-violet-500/50 shadow-xl ring-1 ring-violet-500/20">
-        {% include "includes/_thread_post.html" with note=thread_root is_hero=True %}
+    <div class="flex items-start justify-center gap-6">
+      
+      <!-- Center Stream Column -->
+      <main class="w-full max-w-2xl min-w-0 flex-1 space-y-4">
         
-        <!-- Inline Reply Box for Hero Post -->
-        <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
-          <div class="flex items-start gap-2.5">
-            <textarea id="reply-input-{{ thread_root.id }}" 
-                      class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" 
-                      rows="2" 
-                      placeholder="Reply to @{{ thread_root.author_name|default:thread_root.npub|truncatechars:12 }}..."></textarea>
-            <button type="button" 
-                    class="px-3.5 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-mono font-medium transition flex-shrink-0" 
-                    onclick="submitReply('{{ thread_root.id }}', '{{ thread_root.pubkey }}')">
-              Reply
-            </button>
+        {% if feed_mode == 'thread' %}
+        <!-- Thread Mode: Dedicated Conversation View -->
+        <div class="space-y-4">
+          <!-- Back to Feed Nav -->
+          <div class="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+            <a href="{% url 'feed' %}" class="inline-flex items-center gap-1.5 text-xs font-mono text-violet-600 dark:text-violet-400 hover:underline">
+              ← Back to Feed
+            </a>
+            <span class="text-xs font-mono text-slate-400">Thread Context</span>
           </div>
-        </div>
-      </div>
 
-      <!-- Direct Replies Deck -->
-      {% if thread_root.replies %}
-      <div class="mt-6 pt-2">
-        <div class="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-3 px-1">
-          Replies ({{ thread_root.replies|length }})
-        </div>
-        <div class="space-y-3">
-          {% for reply in thread_root.replies %}
-          <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
-            {% include "includes/_thread_post.html" with note=reply is_reply=True %}
-            
-            <!-- Sub-Thread Drilldown Pill (if reply has its own replies) -->
-            {% if reply.reply_count and reply.reply_count > 0 %}
-            <div class="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-              <a href="{% url 'feed' %}?thread={{ reply.id }}" class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline">
-                <span>View {{ reply.reply_count }} more {% if reply.reply_count == 1 %}reply{% else %}replies{% endif %} →</span>
-              </a>
-            </div>
-            {% endif %}
-          </div>
-          {% endfor %}
-        </div>
-      </div>
-      {% endif %}
-    </div>
-
-    {% else %}
-    <!-- Main Feed Mode: Top Composer + Root Posts Stream -->
-    <div class="max-w-2xl mx-auto space-y-4">
-      <!-- Top Post Composer -->
-      {% include "includes/_post_composer.html" %}
-
-      <!-- Root Posts Stream -->
-      <div id="feed-container" class="space-y-3">
-        {% for note in notes %}
-        <div class="feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
-             data-note-card-id="{{ note.id }}"
-             data-kind="{{ note.kind }}"
-             data-note-id="{{ note.id }}"
-             data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
-             data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
-             data-author-did="{{ note.author_did|default:'' }}"
-             data-note-tags="{{ note.tags_json|default:'' }}"
-             data-created-at="{% if note.created_at_epoch %}{{ note.created_at_epoch }}{% else %}{{ note.created_at|date:'U' }}{% endif %}">
-          {% include "includes/_thread_post.html" with note=note %}
-
-          {% if note.replies %}
-          <div class="mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 space-y-3">
-            {% for reply in note.replies %}
-            <div class="bg-slate-50/80 dark:bg-slate-950/60 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-800/80">
-              {% include "includes/_thread_post.html" with note=reply is_reply=True %}
-
-              {% if reply.reply_count and reply.reply_count > 0 %}
-              <div class="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
-                <a href="{% url 'feed' %}?thread={{ reply.id }}" class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline">
-                  <span>View {{ reply.reply_count }} more {% if reply.reply_count == 1 %}reply{% else %}replies{% endif %} →</span>
-                </a>
-              </div>
-              {% endif %}
+          <!-- Ancestor Chain -->
+          {% if ancestors %}
+          <div class="space-y-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 ml-3">
+            {% for ancestor in ancestors %}
+            <div class="bg-white/60 dark:bg-slate-900/60 rounded-xl p-3.5 border border-slate-200 dark:border-slate-800/80">
+              {% include "includes/_thread_post.html" with note=ancestor is_ancestor=True %}
             </div>
             {% endfor %}
           </div>
           {% endif %}
-        </div>
-        {% empty %}
-        <div id="feed-empty-state" class="text-center py-12 text-slate-400 font-mono text-xs">No notes found in this circle.</div>
-        {% endfor %}
-      </div>
 
-      <!-- Infinite Scroll Sentinel & Load More Fallback -->
-      <div id="feed-pagination-sentinel" class="py-8 text-center" data-oldest-timestamp="{{ oldest_timestamp|default:'' }}">
-        <!-- Animated Mesh Spinner -->
-        <div id="feed-loading-spinner" class="hidden flex items-center justify-center gap-2 text-xs font-mono text-slate-400">
-          <div class="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
-          <span>Fetching older notes from mesh...</span>
+          <!-- FOCUSED HERO POST -->
+          <div class="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border-2 border-violet-500/50 shadow-xl ring-1 ring-violet-500/20">
+            {% include "includes/_thread_post.html" with note=thread_root is_hero=True %}
+            
+            <!-- Inline Reply Box for Hero Post -->
+            <div class="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800">
+              <div class="flex items-start gap-2.5">
+                <textarea id="reply-input-{{ thread_root.id }}" 
+                          class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" 
+                          rows="2" 
+                          placeholder="Reply to @{{ thread_root.author_name|default:thread_root.npub|truncatechars:12 }}..."></textarea>
+                <button type="button" 
+                        class="px-3.5 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-mono font-medium transition flex-shrink-0" 
+                        onclick="submitReply('{{ thread_root.id }}', '{{ thread_root.pubkey }}')">
+                  Reply
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Direct Replies Deck -->
+          {% if thread_root.replies %}
+          <div class="mt-6 pt-2">
+            <div class="text-xs font-mono font-semibold text-slate-400 uppercase tracking-wider mb-3 px-1">
+              Replies ({{ thread_root.replies|length }})
+            </div>
+            <div class="space-y-3">
+              {% for reply in thread_root.replies %}
+              <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
+                {% include "includes/_thread_post.html" with note=reply is_reply=True %}
+                
+                <!-- Sub-Thread Drilldown Pill (if reply has its own replies) -->
+                {% if reply.reply_count and reply.reply_count > 0 %}
+                <div class="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                  <a href="{% url 'feed' %}?thread={{ reply.id }}" class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline">
+                    <span>View {{ reply.reply_count }} more {% if reply.reply_count == 1 %}reply{% else %}replies{% endif %} →</span>
+                  </a>
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
         </div>
 
-        <!-- Manual Fallback Button -->
-        <button id="load-more-btn" type="button" class="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 rounded-lg text-xs font-mono text-slate-600 dark:text-slate-300 transition-colors shadow-sm" onclick="loadMoreNotes()">
-          ↓ Load More Notes
-        </button>
-
-        <!-- End of Feed Notice -->
-        <div id="feed-end-notice" class="hidden text-xs font-mono text-slate-400 py-4">
-          ✦ You have reached the beginning of the mesh ✦
+        {% else %}
+        <!-- Main Feed Mode: Top Composer + Root Posts Stream -->
+        <!-- Relay Mesh Connection Health Indicator -->
+        <div id="relay-health-indicator" class="flex items-center justify-between px-3 py-1.5 bg-slate-50/80 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800/80 rounded-xl backdrop-blur-sm text-[11px] font-mono text-slate-500 dark:text-slate-400 shadow-sm">
+          <div class="flex items-center gap-2">
+            <span id="relay-health-dot" class="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            <span id="relay-health-text" class="font-medium text-slate-700 dark:text-slate-300">Mesh Pool Active</span>
+          </div>
+          <div class="flex items-center gap-1.5 text-[10px]">
+            <span id="relay-health-count" class="px-1.5 py-0.5 rounded bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 font-semibold">{% if relay_count %}{{ relay_count }}/{{ relay_count }}{% else %}5/5{% endif %}</span>
+            <span class="text-slate-400">relays connected</span>
+          </div>
         </div>
-      </div>
+
+        <!-- Top Post Composer -->
+        {% include "includes/_post_composer.html" %}
+
+        <!-- Root Posts Stream -->
+        <div id="feed-container" class="space-y-3">
+          {% for note in notes %}
+          <div class="feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
+               data-note-card-id="{{ note.id }}"
+               data-kind="{{ note.kind }}"
+               data-note-id="{{ note.id }}"
+               data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+               data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
+               data-author-did="{{ note.author_did|default:'' }}"
+               data-note-tags="{{ note.tags_json|default:'' }}"
+               data-created-at="{% if note.created_at_epoch %}{{ note.created_at_epoch }}{% else %}{{ note.created_at|date:'U' }}{% endif %}">
+            {% include "includes/_thread_post.html" with note=note %}
+
+            {% if note.replies %}
+            <div class="mt-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 space-y-3">
+              {% for reply in note.replies %}
+              <div class="bg-slate-50/80 dark:bg-slate-950/60 rounded-xl p-3.5 border border-slate-200/80 dark:border-slate-800/80">
+                {% include "includes/_thread_post.html" with note=reply is_reply=True %}
+
+                {% if reply.reply_count and reply.reply_count > 0 %}
+                <div class="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800 flex justify-end">
+                  <a href="{% url 'feed' %}?thread={{ reply.id }}" class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline">
+                    <span>View {{ reply.reply_count }} more {% if reply.reply_count == 1 %}reply{% else %}replies{% endif %} →</span>
+                  </a>
+                </div>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+          {% empty %}
+          <div id="feed-empty-state" class="text-center py-12 text-slate-400 font-mono text-xs">No notes found in this circle.</div>
+          {% endfor %}
+        </div>
+
+        <!-- Infinite Scroll Sentinel & Load More Fallback -->
+        <div id="feed-pagination-sentinel" class="py-8 text-center" data-oldest-timestamp="{{ oldest_timestamp|default:'' }}">
+          <!-- Animated Mesh Spinner -->
+          <div id="feed-loading-spinner" class="hidden flex items-center justify-center gap-2 text-xs font-mono text-slate-400">
+            <div class="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
+            <span>Fetching older notes from mesh...</span>
+          </div>
+
+          <!-- Manual Fallback Button -->
+          <button id="load-more-btn" type="button" class="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 rounded-lg text-xs font-mono text-slate-600 dark:text-slate-300 transition-colors shadow-sm" onclick="loadMoreNotes()">
+            ↓ Load More Notes
+          </button>
+
+          <!-- End of Feed Notice -->
+          <div id="feed-end-notice" class="hidden text-xs font-mono text-slate-400 py-4">
+            ✦ You have reached the beginning of the mesh ✦
+          </div>
+        </div>
+        {% endif %}
+
+      </main>
+
+      <!-- Right Discovery Column (Desktop Only) -->
+      {% if feed_mode != 'thread' %}
+      {% include "includes/_feed_right_rail.html" %}
+      {% endif %}
+
     </div>
-    {% endif %}
 </div>
 {% endblock %}
 

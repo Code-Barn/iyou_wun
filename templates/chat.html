@@ -34,19 +34,10 @@
 
 {% block extra_js %}
 <script type="module">
-  import * as conversePkg from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js';
+  import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js';
 
   document.addEventListener("DOMContentLoaded", function() {
-    const converse = window.converse || conversePkg.converse || conversePkg.default;
-    if (!converse) {
-      console.error("Converse.js module failed to load.");
-      const loader = document.getElementById('chat-loading-overlay');
-      if (loader) loader.innerHTML = '<p class="text-xs font-mono text-rose-400">Failed to load chat client module.</p>';
-      return;
-    }
-
     const wsUrl = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";
-    const boshUrl = "{{ xmpp_bosh_url|default:'' }}";
     const jid = "{{ user_jid|default:'' }}";
     const password = "{{ xmpp_token|default:'' }}";
 
@@ -57,9 +48,22 @@
       if (wrap) wrap.classList.remove('hidden');
     }
 
+    const urlParams = new URLSearchParams(window.location.search);
+    const peerParam = urlParams.get('peer');
+    const autoJoinChats = peerParam ? [peerParam.includes('@') ? peerParam : `${peerParam}@iyou.me`] : [];
+
+    // Register lifecycle plugin for clean event hooks
+    converse.plugins.add('iyou-lifecycle', {
+      initialize: function () {
+        const _converse = this._converse;
+        _converse.api.listen.on('connected', dismissLoadingSpinner);
+        _converse.api.listen.on('statusInitialized', dismissLoadingSpinner);
+      }
+    });
+
     try {
       converse.initialize({
-        bosh_service_url: boshUrl || undefined,
+        bosh_service_url: undefined,
         websocket_url: wsUrl || undefined,
         authentication: jid ? 'login' : 'anonymous',
         jid: jid || undefined,
@@ -67,6 +71,7 @@
         view_mode: 'embedded',
         root: document.getElementById('conversejs'),
         show_controlbox_by_default: true,
+        discover_connection_methods: false,
         allow_non_roster_messaging: true,
         allow_muc: true,
         allow_registration: false,
@@ -74,17 +79,19 @@
         auto_reconnect: true,
         keepalive: true,
         persistent_store: 'local',
-        singleton: true,
+        singleton: false,
+        auto_join_private_chats: autoJoinChats,
         theme: document.documentElement.classList.contains('dark') ? 'dracula' : 'concord',
-        whitelisted_plugins: []
-      });
-
-      converse.listen('connected', dismissLoadingSpinner);
-      converse.listen('initialized', function() {
-        setTimeout(dismissLoadingSpinner, 800);
+        whitelisted_plugins: ['iyou-lifecycle']
+      }).then(function() {
+        // Fallback safety unhide after promise resolves
+        setTimeout(dismissLoadingSpinner, 1000);
+      }).catch(function(err) {
+        console.error("Converse initialize error:", err);
+        dismissLoadingSpinner();
       });
     } catch (err) {
-      console.error("Converse init error:", err);
+      console.error("Converse bootstrap error:", err);
       dismissLoadingSpinner();
     }
   });

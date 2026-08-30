@@ -165,8 +165,10 @@ class ChatViewTest(TestCase):
         self.assertContains(response, 'id="conversejs-wrap"')
         self.assertContains(response, "view_mode: 'embedded'")
         self.assertContains(response, "show_controlbox_by_default: true")
-        self.assertContains(response, "converse.listen('connected', dismissLoadingSpinner)")
-        self.assertContains(response, "converse.listen('initialized'")
+        self.assertContains(response, "singleton: false")
+        self.assertContains(response, "converse.plugins.add('iyou-lifecycle'")
+        self.assertContains(response, "_converse.api.listen.on('connected', dismissLoadingSpinner)")
+        self.assertContains(response, "_converse.api.listen.on('statusInitialized', dismissLoadingSpinner)")
 
     def test_chat_retains_l1_and_l2_headers(self):
         user = User.objects.create_user(username="did:key:z6Mklayers123")
@@ -184,8 +186,8 @@ class ChatViewTest(TestCase):
         response = self.client.get(reverse("chat"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<script type="module">')
-        self.assertContains(response, "import * as conversePkg from")
-        self.assertContains(response, "conversePkg.converse || conversePkg.default")
+        self.assertContains(response, "import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js'")
+        self.assertContains(response, "auto_join_private_chats: autoJoinChats")
 
 
 
@@ -856,6 +858,29 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(note2["media_attachments"][0]["type"], "image")
         self.assertEqual(note2["media_attachments"][0]["url"], "https://cdn.iyou.me/image.jpg")
 
+    def test_api_feed_serializes_like_count(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        event1 = make_event("api_like_1", 1, pubkey=pk, created_at=1699999000, content="Liked note")
+        event2 = make_event("api_like_2", 1, pubkey=pk, created_at=1699998000, content="Another note")
+
+        def _fake_attach_reaction_counts(notes, relay_urls=None):
+            counts = {"api_like_1": 12, "api_like_2": 0}
+            for n in notes:
+                nid = n.get("id")
+                if nid in counts:
+                    n["like_count"] = counts[nid]
+            return notes
+
+        with patch("apps.core.views.relay_req", return_value={"api_like_1": event1, "api_like_2": event2}), \
+             patch("apps.core.views.attach_reaction_counts", side_effect=_fake_attach_reaction_counts):
+            response = self.client.get(reverse("api_feed") + "?until=1700000000&limit=10")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        notes = {n["id"]: n for n in data.get("notes", [])}
+        self.assertEqual(notes["api_like_1"]["like_count"], 12)
+        self.assertEqual(notes["api_like_2"]["like_count"], 0)
+
     def test_feed_renders_inline_media_attachments_and_unfurls_urls(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         k1_media_event = make_event("k1_media_1", 1, pubkey=pk, created_at=1700000000, content="Check this out:\nhttps://cdn.iyou.me/photo.png")
@@ -913,12 +938,153 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
                 {"root": root_event},
                 {},
                 {"rep": reply_event},
+                {},  # attach_reaction_counts => no reactions
             ]
             response = self.client.get(reverse("feed"))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "action-btn-reply")
         self.assertContains(response, "1")
+
+    def test_feed_renders_discovery_rail_placeholders_in_main_mode(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "TRENDING TOPICS")
+        self.assertContains(response, "#bitcoin")
+        self.assertContains(response, "#nostr")
+        self.assertContains(response, "#wine")
+        self.assertContains(response, "SOVEREIGN CREATORS")
+        self.assertContains(response, "Ben Justman")
+        self.assertContains(response, "Dan Byers")
+        self.assertContains(response, "+ Follow")
+
+    def test_feed_hides_discovery_rail_in_thread_mode(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        relay_events = {
+            "hero_root_1": make_event("hero_root_1", 1, pubkey=root_pk, content="Hero thread discussion"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed") + "?thread=hero_root_1")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "TRENDING TOPICS")
+        self.assertNotContains(response, "SOVEREIGN CREATORS")
+
+    def test_feed_context_provides_suggested_creators_and_tags(self):
+        u1 = User.objects.create_user(username="did:key:z6Mkcreatorcontext1")
+        UserLinkDeck.objects.create(
+            user=u1,
+            handle="creatorone",
+            display_name="Creator One",
+            is_public=True,
+            is_verified=True,
+        )
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("suggested_creators", response.context)
+        self.assertIn("trending_tags", response.context)
+        self.assertGreaterEqual(len(response.context["trending_tags"]), 3)
+        creators = response.context["suggested_creators"]
+        self.assertTrue(any(c.handle == "creatorone" for c in creators))
+
+    def test_right_rail_renders_dynamic_creator_cards(self):
+        u = User.objects.create_user(username="did:key:z6Mkcreatorcard1")
+        UserLinkDeck.objects.create(
+            user=u,
+            handle="testcreator",
+            display_name="Test Creator",
+            is_public=True,
+            is_verified=True,
+        )
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "@testcreator")
+        self.assertContains(response, "Test Creator")
+        self.assertContains(response, 'data-follow-target="did:key:z6Mkcreatorcard1"')
+        self.assertContains(response, 'data-follow-petname="testcreator"')
+
+
+class SearchAPITests(TestCase):
+    def setUp(self):
+        self.user_alice = User.objects.create_user(username="did:key:z6Mkalice123")
+        self.deck_alice = UserLinkDeck.objects.create(
+            user=self.user_alice,
+            handle="alice",
+            display_name="Alice Sovereign",
+            headline="Cryptography researcher",
+            nip05="alice@iyou.me",
+            avatar_url="https://example.com/alice.png",
+            is_verified=True,
+            is_public=True,
+        )
+
+        self.user_bob = User.objects.create_user(username="did:key:z6Mkbob456")
+        self.deck_bob = UserLinkDeck.objects.create(
+            user=self.user_bob,
+            handle="bob",
+            display_name="Bob Builder",
+            headline="Hardware hacker",
+            nip05="bob@iyou.me",
+            avatar_url="https://example.com/bob.png",
+            is_verified=False,
+            is_public=True,
+        )
+
+    def test_api_search_endpoint_returns_json_schema(self):
+        response = self.client.get(reverse("api_search") + "?q=nostr")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["query"], "nostr")
+        self.assertIn("counts", data)
+        self.assertIn("profiles", data["counts"])
+        self.assertIn("tags", data["counts"])
+        self.assertIn("results", data)
+        self.assertIn("profiles", data["results"])
+        self.assertIn("tags", data["results"])
+
+    def test_api_search_filters_profiles_by_handle_and_name(self):
+        # Search by handle "alice"
+        response = self.client.get(reverse("api_search") + "?q=alice")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        handles = [p["handle"] for p in data["results"]["profiles"]]
+        self.assertIn("alice", handles)
+        self.assertNotIn("bob", handles)
+
+        # Search by display name substring "Sovereign"
+        response_sov = self.client.get(reverse("api_search") + "?q=Sovereign")
+        self.assertEqual(response_sov.status_code, 200)
+        data_sov = response_sov.json()
+        handles_sov = [p["handle"] for p in data_sov["results"]["profiles"]]
+        self.assertIn("alice", handles_sov)
+        self.assertNotIn("bob", handles_sov)
+
+        # Search by hashtag prefix "#alice"
+        response_tag = self.client.get(reverse("api_search") + "?q=%23alice")
+        self.assertEqual(response_tag.status_code, 200)
+        data_tag = response_tag.json()
+        handles_tag = [p["handle"] for p in data_tag["results"]["profiles"]]
+        self.assertIn("alice", handles_tag)
+
+    def test_nav_search_dropdown_elements_render(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="feed-search-input"')
+        self.assertContains(response, 'id="search-results-dropdown"')
+        self.assertContains(response, 'id="search-dropdown-content"')
+        self.assertContains(response, 'id="search-dropdown-footer"')
+
+    def test_base_template_renders_toast_container(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="toast-container"')
+        self.assertContains(response, "toast_manager.js")
+
 
 
 

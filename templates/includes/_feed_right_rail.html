@@ -1,0 +1,143 @@
+{% load static %}
+<aside class="hidden lg:block w-72 xl:w-80 shrink-0 space-y-4 sticky top-20 font-mono text-xs select-none">
+  
+  <!-- 1. Trending Topics & Velocity Tags -->
+  <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">
+    <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-100 dark:border-slate-800">
+      <span class="text-[11px] font-bold text-slate-800 dark:text-slate-200 tracking-wider flex items-center gap-1.5">
+        <span>🔥</span> TRENDING TOPICS
+      </span>
+      <span class="text-[10px] text-slate-400 dark:text-slate-500">24H VELOCITY</span>
+    </div>
+
+    <div class="space-y-2.5">
+      {% for tag in trending_tags %}
+      <button type="button" 
+              class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
+              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#{{ tag.name }}'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #{{ tag.name }}', 'info');">
+        <div class="text-[10px] text-slate-400">{{ tag.category|default:'General' }}</div>
+        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#{{ tag.name }}</div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500">{{ tag.count }} mesh notes</div>
+      </button>
+      {% empty %}
+      <button type="button" 
+              class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
+              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#bitcoin'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #bitcoin', 'info');">
+        <div class="text-[10px] text-slate-400">Finance & Sovereign Capital</div>
+        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#bitcoin</div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500">1.4k mesh notes</div>
+      </button>
+
+      <button type="button" 
+              class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
+              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#nostr'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #nostr', 'info');">
+        <div class="text-[10px] text-slate-400">Protocol & Relays</div>
+        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#nostr</div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500">920 mesh notes</div>
+      </button>
+
+      <button type="button" 
+              class="w-full text-left p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/60 transition group"
+              onclick="var input=document.getElementById('feed-search-input'); if(input){ input.value='#wine'; input.dispatchEvent(new Event('input')); } if(typeof showToast === 'function') showToast('Filtering feed by #wine', 'info');">
+        <div class="text-[10px] text-slate-400">Agriculture & Viticulture</div>
+        <div class="text-xs font-semibold text-violet-600 dark:text-violet-400 group-hover:underline">#wine</div>
+        <div class="text-[10px] text-slate-400 dark:text-slate-500">312 mesh notes</div>
+      </button>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 2. Suggested Creators & Sovereign Peers -->
+  <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">
+    <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-100 dark:border-slate-800">
+      <span class="text-[11px] font-bold text-slate-800 dark:text-slate-200 tracking-wider flex items-center gap-1.5">
+        <span>👥</span> SOVEREIGN CREATORS
+      </span>
+      <a href="https://clar.iyou.me" target="_blank" class="text-[10px] text-violet-500 hover:underline">Directory ↗</a>
+    </div>
+
+    <div class="space-y-3">
+      {% for creator in suggested_creators %}
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          {% if creator.avatar_url %}
+          <img src="{{ creator.avatar_url }}" alt="{{ creator.display_name|default:creator.handle }}" class="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700" />
+          {% else %}
+          <div class="w-8 h-8 rounded-full bg-violet-950 text-violet-300 font-bold flex items-center justify-center shrink-0 border border-violet-800/60 text-xs">
+            {{ creator.display_name|default:creator.handle|slice:":1"|upper }}
+          </div>
+          {% endif %}
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-900 dark:text-slate-100 truncate text-xs flex items-center gap-1">
+              <span class="truncate">{{ creator.display_name|default:creator.handle }}</span>
+              {% if creator.is_verified %}
+              <svg class="w-3 h-3 text-violet-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+              {% endif %}
+            </div>
+            <a href="{% url 'profile' creator.handle %}" class="text-[10px] text-slate-400 hover:text-violet-500 truncate block">@{{ creator.handle }}</a>
+          </div>
+        </div>
+        <button type="button" 
+                class="px-2.5 py-1 bg-violet-600/90 hover:bg-violet-600 text-white rounded text-[10px] font-semibold shrink-0 transition"
+                data-follow-target="{{ creator.user.username }}"
+                data-follow-petname="{{ creator.handle }}">
+          + Follow
+        </button>
+      </div>
+      {% empty %}
+      <!-- Fallback Curated Creators -->
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-8 h-8 rounded-full bg-violet-950 text-violet-300 font-bold flex items-center justify-center shrink-0 border border-violet-800/60">
+            B
+          </div>
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-900 dark:text-slate-100 truncate text-xs">Ben Justman</div>
+            <div class="text-[10px] text-slate-400 truncate">@peonylanewine</div>
+          </div>
+        </div>
+        <button type="button" 
+                class="px-2.5 py-1 bg-violet-600/90 hover:bg-violet-600 text-white rounded text-[10px] font-semibold shrink-0 transition"
+                data-follow-target="npub153xmex42x4chdf757hp3q6zxagykkek7pdgwuwd074964dkyha9s82ryu8"
+                data-follow-petname="peonylanewine">
+          + Follow
+        </button>
+      </div>
+
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <div class="w-8 h-8 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center shrink-0 border border-slate-700">
+            D
+          </div>
+          <div class="min-w-0">
+            <div class="font-semibold text-slate-900 dark:text-slate-100 truncate text-xs">Dan Byers</div>
+            <div class="text-[10px] text-slate-400 truncate">@dcbyers13</div>
+          </div>
+        </div>
+        <button type="button" 
+                class="px-2.5 py-1 bg-violet-600/90 hover:bg-violet-600 text-white rounded text-[10px] font-semibold shrink-0 transition"
+                data-follow-target="npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64qv0jaks43tkvd"
+                data-follow-petname="dcbyers13">
+          + Follow
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- 3. Ethical / Managed Sponsor Unit Placeholder -->
+  {% if not is_sovereign %}
+  <div class="bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900/60 dark:to-slate-950 border border-dashed border-slate-300 dark:border-slate-800 rounded-xl p-3.5 text-center">
+    <div class="text-[9px] uppercase tracking-wider text-slate-400 mb-1 font-semibold flex items-center justify-center gap-1">
+      <span>🛡️</span> ECOSYSTEM SPONSOR
+    </div>
+    <p class="text-[11px] text-slate-600 dark:text-slate-400 mb-2.5 leading-snug">
+      Self-host your data with private keys on <strong class="text-violet-500">iyou_home</strong>.
+    </p>
+    <a href="https://iyou.me" target="_blank" class="inline-block px-3 py-1 bg-slate-900 dark:bg-slate-800 hover:bg-violet-600 dark:hover:bg-violet-600 text-white text-[10px] rounded font-medium transition">
+      Learn More ↗
+    </a>
+  </div>
+  {% endif %}
+
+</aside>
