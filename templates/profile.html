@@ -140,6 +140,13 @@
     </div>
   </div>
 
+  <!-- Post Composer (owner-profile only) -->
+  {% if is_owner %}
+  <section class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm mb-6" aria-label="Post to Nostr composer">
+    {% include "includes/_post_composer.html" %}
+  </section>
+  {% endif %}
+
   <!-- Tab Panels -->
   <!-- 1. Posts Panel -->
   <div id="tab-posts" class="tab-panel space-y-3">
@@ -215,6 +222,10 @@
 {% block extra_js %}
 <script src="{% static 'js/feed_interactions.js' %}"></script>
 <script>
+  window.userPubkey = window.userPubkey || "{{ user_pubkey_hex }}";
+  window.userNpub = window.userNpub || "{{ user_npub }}";
+  window.userDid = window.userDid || "{{ target_did }}";
+
   document.addEventListener("DOMContentLoaded", function() {
     const tabs = document.querySelectorAll(".profile-tab");
     const panels = document.querySelectorAll(".tab-panel");

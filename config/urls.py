@@ -38,11 +38,13 @@ from apps.core.auth_pkce import (
     PKCEOIDCAuthenticationRequestView,
     PKCEOIDCLogoutView,
 )
+from apps.core import views
 
 urlpatterns = [
     path('favicon.ico', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
     path('apple-touch-icon.png', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
     path('admin/', admin.site.urls),
+    path(".well-known/nostr.json", views.nip05_well_known, name="nip05_well_known"),
     path('oidc/authenticate/', PKCEOIDCAuthenticationRequestView.as_view(), name='oidc_authentication_init'),
     path('oidc/callback/', PKCEOIDCAuthenticationCallbackView.as_view(), name='oidc_authentication_callback'),
     path('oidc/logout/', PKCEOIDCLogoutView.as_view(), name='oidc_logout'),

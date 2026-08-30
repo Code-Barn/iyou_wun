@@ -525,7 +525,7 @@
     // ---------- Optimistic Feed Insert ----------
 
     function addNoteToFeed(event) {
-        var container = document.getElementById("feed-container") || document.getElementById("feedContainer");
+        var container = document.getElementById("feed-container") || document.getElementById("feedContainer") || document.getElementById("tab-posts");
         if (!container || !event) return;
 
         if (event.id) {
@@ -593,6 +593,18 @@
         if (postContent) postContent.value = "";
         var uploadStatus = document.getElementById("uploadStatus");
         if (uploadStatus) uploadStatus.classList.add("hidden");
+
+        if (container.id === "tab-posts") {
+            incrementProfilePostCount();
+        }
+    }
+
+    function incrementProfilePostCount() {
+        var postsTab = document.querySelector('.profile-tab[data-target="tab-posts"]');
+        if (!postsTab) return;
+        var match = postsTab.textContent.match(/\((\d+)\)/);
+        var count = match ? parseInt(match[1], 10) : 0;
+        postsTab.textContent = postsTab.textContent.replace(/\(\d+\)/, "(" + (count + 1) + ")");
     }
 
 

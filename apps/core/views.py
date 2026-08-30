@@ -2109,6 +2109,47 @@ def did_to_npub(did):
     return None
 
 
+def nip05_well_known(request):
+    """NIP-05 identity verification document, served at /.well-known/nostr.json.
+
+    External clients (Damus, Primal, Amethyst) query this to confirm that a
+    handle maps to a public key. Intentionally public: no login required.
+    """
+    name = request.GET.get("name", "").strip().lower()
+    payload = {"names": {}, "relays": {}, "nip46": {}}
+
+    if name:
+        deck = (
+            UserLinkDeck.objects.filter(is_public=True)
+            .filter(Q(handle__iexact=name) | Q(user__username__iexact=name))
+            .select_related("user")
+            .first()
+        )
+        if deck:
+            username = deck.user.username or ""
+            if re.match(r"^[0-9a-fA-F]{64}$", username):
+                pubkey_hex = username.lower()
+            elif username.startswith("did:"):
+                pubkey_hex = did_to_pubkey(username)
+            elif username.startswith("npub1"):
+                pubkey_hex = npub_to_hex(username)
+            else:
+                pubkey_hex = None
+
+            if pubkey_hex:
+                payload["names"][name] = pubkey_hex
+                payload["relays"][pubkey_hex] = [
+                    "wss://relay.iyou.me",
+                    "wss://nos.lol",
+                    "wss://relay.damus.io",
+                ]
+
+    response = JsonResponse(payload)
+    response["Access-Control-Allow-Origin"] = "*"
+    response["Content-Type"] = "application/json; charset=utf-8"
+    return response
+
+
 @login_required
 @csrf_exempt
 def api_cast_vote(request):

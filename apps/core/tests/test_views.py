@@ -1121,6 +1121,87 @@ class SearchAPITests(TestCase):
         self.assertContains(response, "toast_manager.js")
 
 
+class NIP05EndpointTests(TestCase):
+    NIP05_RELAYS = ["wss://relay.iyou.me", "wss://nos.lol", "wss://relay.damus.io"]
+
+    def test_nip05_returns_cors_header_wildcard(self):
+        response = self.client.get("/.well-known/nostr.json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+
+    def test_nip05_resolves_known_handle_to_pubkey(self):
+        pubkey_hex = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        user = User.objects.create_user(username=pubkey_hex)
+        UserLinkDeck.objects.create(
+            user=user,
+            handle="alice",
+            display_name="Alice Sovereign",
+            is_public=True,
+        )
+
+        response = self.client.get("/.well-known/nostr.json?name=alice")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+        data = response.json()
+        self.assertEqual(data["names"]["alice"], pubkey_hex)
+        self.assertIn(pubkey_hex, data["relays"])
+        self.assertEqual(data["relays"][pubkey_hex], self.NIP05_RELAYS)
+
+    def test_nip05_unknown_handle_returns_empty_mapping(self):
+        response = self.client.get("/.well-known/nostr.json?name=ghost")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["names"], {})
+        self.assertEqual(data["relays"], {})
+        self.assertEqual(data["nip46"], {})
+
+
+class ProfileComposerTests(TestCase):
+    PUBKEY_OWNER = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+    PUBKEY_PEER = "b1c6d3f8a2e94c705d2a97c13b6f4e283ad0f19c64e8b527a3d7f6c0e12ab845"
+
+    def _get_profile(self, npub):
+        with (
+            patch("apps.core.views.relay_req", return_value={}),
+            patch("apps.core.views.fetch_profile_data", return_value={}),
+        ):
+            return self.client.get(reverse("profile", args=[npub]))
+
+    def test_profile_renders_composer_when_owner(self):
+        owner = User.objects.create_user(username=self.PUBKEY_OWNER)
+        UserLinkDeck.objects.create(
+            user=owner,
+            handle="owner",
+            display_name="Owner",
+            is_public=True,
+        )
+        self.client.force_login(owner)
+
+        response = self._get_profile(hex_to_npub(self.PUBKEY_OWNER))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_owner"])
+        self.assertContains(response, "Post to Nostr")
+        self.assertContains(response, 'id="postContent"')
+        self.assertContains(response, 'id="btn-publish-note"')
+
+    def test_profile_omits_composer_when_visiting_peer(self):
+        peer = User.objects.create_user(username=self.PUBKEY_PEER)
+        UserLinkDeck.objects.create(
+            user=peer,
+            handle="peer",
+            display_name="Peer",
+            is_public=True,
+        )
+        viewer = User.objects.create_user(username=self.PUBKEY_OWNER)
+        self.client.force_login(viewer)
+
+        response = self._get_profile(hex_to_npub(self.PUBKEY_PEER))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.context["is_owner"])
+        self.assertNotContains(response, 'id="postContent"')
+        self.assertNotContains(response, "Post to Nostr")
+
+
 
 
 
