@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load static %}
+{% load static i18n %}
 
 {% block title %}Dashboard — iyou_wun{% endblock %}
 
@@ -186,6 +186,29 @@
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl text-xs font-mono">
+          <!-- 0. Interface Language (Idioma de la Interfaz) -->
+          <div class="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 md:col-span-2">
+            <form action="{% url 'set_language' %}" method="post" class="space-y-1.5" id="interface-lang-form">
+              {% csrf_token %}
+              <input name="next" type="hidden" value="{{ request.get_full_path }}" />
+              <label for="setting-interface-lang" class="block font-semibold text-slate-800 dark:text-slate-200">
+                Interface Language / Idioma
+              </label>
+              <div class="flex items-center gap-2">
+                <select name="language" id="setting-interface-lang" onchange="this.form.submit()" class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500">
+                  {% get_current_language as CURRENT_LANGUAGE %}
+                  {% get_available_languages as AVAILABLE_LANGUAGES %}
+                  {% for lang_code, lang_name in AVAILABLE_LANGUAGES %}
+                    <option value="{{ lang_code }}" {% if lang_code == CURRENT_LANGUAGE %}selected{% endif %}>
+                      {{ lang_name }} ({{ lang_code }})
+                    </option>
+                  {% endfor %}
+                </select>
+              </div>
+              <p class="text-[10px] text-slate-400">Controls the localized UI labels across navigation and action controls.</p>
+            </form>
+          </div>
+
           <!-- 1. NSFW / Sensitive Media Handling -->
           <div class="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <label for="setting-nsfw-pref" class="block font-semibold text-slate-800 dark:text-slate-200">

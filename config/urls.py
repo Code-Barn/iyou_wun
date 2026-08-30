@@ -39,6 +39,7 @@ from apps.core.auth_pkce import (
     PKCEOIDCLogoutView,
 )
 from apps.core import views
+from django.views.i18n import set_language
 
 urlpatterns = [
     path('favicon.ico', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
@@ -50,6 +51,8 @@ urlpatterns = [
     path('oidc/logout/', PKCEOIDCLogoutView.as_view(), name='oidc_logout'),
     path('accounts/logout/', PKCEOIDCLogoutView.as_view(), name='logout'),
     path('logout/', PKCEOIDCLogoutView.as_view()),
+    path('i18n/setlanguage/', set_language, name='set_language_alias'),
+    path('i18n/', include('django.conf.urls.i18n')),
     path('', include('apps.core.urls')),
 ]
 

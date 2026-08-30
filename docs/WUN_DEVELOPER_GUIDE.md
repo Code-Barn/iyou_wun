@@ -859,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**336 total across 7 test modules**; ruff clean):
+Tests cover (**340 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -868,13 +868,13 @@ Tests cover (**336 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (104 tests)
+### `test_views.py` (108 tests)
 - `HomeViewTest` — root redirect to /feed (1)
 - `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification (7)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
-- `ChatViewTest` — anonymous redirect, Converse init + lifecycle plugin, `?peer=` auto-join, nav links (13)
+- `ChatViewTest` — anonymous redirect, Converse init + lifecycle plugin, `?peer=` auto-join & peer_target context, nav links (14)
 - `GalleryViewTest` — media heading, nav links, tab context (4 — public-read)
-- `ProfileViewTest` — invalid npub error, valid render, hybrid local DB baseline fallback (4)
+- `ProfileViewTest` — invalid npub error, valid render, hybrid local DB baseline fallback, direct message button (5)
 - `DashboardProfileTest` — profile section, publish, handle vs display name persistence (7)
 - `MediaUploadProxyViewTest` — Blossom proxy behavior incl. dynamic endpoint resolution (6)
 - `FeedViewTrustLensContractTest` — Level0/0.5/1 trust pill contract (6)
@@ -885,6 +885,7 @@ Tests cover (**336 total across 7 test modules**; ruff clean):
 - `NotificationViewTests` — authenticated bell toggle, slide-out drawer markup, `/notifications` ledger tabs (Mentions/Reactions/Zaps) (4)
 - `NIP05EndpointTests` — `/.well-known/nostr.json` verification endpoint, name querying & JSON schema (3)
 - `ProfileComposerTests` — profile view quick note composer rendering and submission (2)
+- `I18nViewTest` — `/i18n/setlanguage/` cookie dispatch & Spanish feed UI translation (2)
 
 ### `test_feed.py` (65 tests)
 - `ProcessIntoFeedTest` — kind routing, reaction grouping/dedup, sovereignty flag, profile enrichment, sort/truncation, malformed events, poll extraction + scope tags + vote grouping, multi-relay dedup, NIP-10 tree builder, positional/unmarked tag parsing, batch reply counts, **batch Kind-7 reaction counts** (50)

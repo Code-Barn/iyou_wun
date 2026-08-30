@@ -357,6 +357,9 @@ class ChatView(LoginRequiredMixin, TemplateView):
         context["user_jid"] = user_jid
         context["xmpp_token"] = xmpp_token
         context["xmpp_password"] = xmpp_token
+
+        peer = self.request.GET.get("peer", "").strip()
+        context["peer_target"] = peer
         return context
 
 

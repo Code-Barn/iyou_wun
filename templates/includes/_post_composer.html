@@ -1,7 +1,8 @@
+{% load i18n %}
 {% if user_pubkey %}
 <div class="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 shadow-sm">
-    <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3 font-mono">Post to Nostr</h2>
-    <textarea id="postContent" class="w-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-lg p-3 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none overflow-x-hidden overflow-y-auto" rows="3" wrap="soft" placeholder="What's on your mind?"></textarea>
+    <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3 font-mono">{% trans "Post to Nostr" %}</h2>
+    <textarea id="postContent" class="w-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-lg p-3 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none overflow-x-hidden overflow-y-auto" rows="3" wrap="soft" placeholder="{% trans "What's on your mind?" %}"></textarea>
     <input type="file" id="composer-file-input" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
     <input type="file" id="mediaInput" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
     <div class="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
@@ -15,7 +16,7 @@
         <span id="uploadStatus" class="text-xs text-slate-500 hidden"></span>
       </div>
       <button type="button" id="btn-publish-note" class="px-4 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed" onclick="publishPost()">
-        <span id="postButtonText">Post Note</span>
+        <span id="postButtonText">{% trans "Post Note" %}</span>
         <span id="postButtonLoading" class="hidden"><svg class="animate-spin -ml-1 h-3.5 w-3.5 text-white inline-block" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> Waiting for Signature...</span>
       </button>
     </div>

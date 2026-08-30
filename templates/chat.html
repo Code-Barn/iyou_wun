@@ -14,6 +14,10 @@
   #conversejs .converse-chatbox, #conversejs .converse-controlbox {
     font-family: inherit;
   }
+  .dark #conversejs, .dark #conversejs .converse-chatbox, .dark #conversejs .converse-controlbox {
+    background-color: #0f172a !important;
+    border-color: #1e293b !important;
+  }
 </style>
 {% endblock %}
 
@@ -33,6 +37,9 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+  window.peerTarget = "{{ peer_target|default:'' }}";
+</script>
 <script type="module">
   import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js';
 
@@ -40,6 +47,7 @@
     const wsUrl = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";
     const jid = "{{ user_jid|default:'' }}";
     const password = "{{ xmpp_token|default:'' }}";
+    const xmppDomain = "{{ xmpp_domain|default:'iyou.me' }}";
 
     function dismissLoadingSpinner() {
       const loader = document.getElementById('chat-loading-overlay');
@@ -49,8 +57,8 @@
     }
 
     const urlParams = new URLSearchParams(window.location.search);
-    const peerParam = urlParams.get('peer');
-    const autoJoinChats = peerParam ? [peerParam.includes('@') ? peerParam : `${peerParam}@iyou.me`] : [];
+    const peerParam = window.peerTarget || urlParams.get('peer');
+    const autoJoinChats = peerParam ? [peerParam.includes('@') ? peerParam : `${peerParam}@${xmppDomain}`] : [];
 
     // Register lifecycle plugin for clean event hooks
     converse.plugins.add('iyou-lifecycle', {
@@ -60,6 +68,18 @@
         _converse.api.listen.on('statusInitialized', dismissLoadingSpinner);
       }
     });
+
+    if (peerParam) {
+      converse.plugins.add('auto-open-peer', {
+        initialize: function () {
+          const _converse = this._converse;
+          const targetJid = peerParam.includes('@') ? peerParam : `${peerParam}@${xmppDomain}`;
+          _converse.api.waitUntil('chatsInitialized').then(() => {
+            _converse.api.chats.open(targetJid);
+          });
+        }
+      });
+    }
 
     try {
       converse.initialize({
@@ -82,7 +102,7 @@
         singleton: false,
         auto_join_private_chats: autoJoinChats,
         theme: document.documentElement.classList.contains('dark') ? 'dracula' : 'concord',
-        whitelisted_plugins: ['iyou-lifecycle']
+        whitelisted_plugins: peerParam ? ['iyou-lifecycle', 'auto-open-peer'] : ['iyou-lifecycle']
       }).then(function() {
         // Fallback safety unhide after promise resolves
         setTimeout(dismissLoadingSpinner, 1000);

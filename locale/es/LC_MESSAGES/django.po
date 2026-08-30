@@ -1,0 +1,101 @@
+# Spanish translations for iyou_wun package.
+# Copyright (C) 2026 David Byers dba Byers Brands
+# This file is distributed under the same license as the iyou_wun package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: iyou_wun 1.0\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-30 18:20-0500\n"
+"PO-Revision-Date: 2026-08-30 18:20-0500\n"
+"Last-Translator: Antigravity <support@iyou.me>\n"
+"Language-Team: Spanish <es@li.org>\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Feed"
+msgstr "Malla"
+
+msgid "Gallery"
+msgstr "Galería"
+
+msgid "Dashboard"
+msgstr "Panel"
+
+msgid "Chat"
+msgstr "Chat"
+
+msgid "Post Note"
+msgstr "Publicar"
+
+msgid "Post to Nostr"
+msgstr "Publicar en Nostr"
+
+msgid "What's on your mind?"
+msgstr "¿En qué estás pensando?"
+
+msgid "Reply"
+msgstr "Responder"
+
+msgid "Repost"
+msgstr "Republicar"
+
+msgid "Like"
+msgstr "Me gusta"
+
+msgid "Tip"
+msgstr "Propina"
+
+msgid "Share"
+msgstr "Compartir"
+
+msgid "Translate"
+msgstr "Traducir"
+
+msgid "View Original"
+msgstr "Ver original"
+
+msgid "Global"
+msgstr "Global"
+
+msgid "Following"
+msgstr "Siguiendo"
+
+msgid "Inner Circle"
+msgstr "Círculo Cercano"
+
+msgid "Mutual"
+msgstr "Mutuo"
+
+msgid "Trending Topics"
+msgstr "Temas Populares"
+
+msgid "Notifications"
+msgstr "Notificaciones"
+
+msgid "Mark all as read"
+msgstr "Marcar todo como leído"
+
+msgid "Message"
+msgstr "Mensaje"
+
+msgid "Sign Out"
+msgstr "Cerrar sesión"
+
+msgid "Decentralized Identifier"
+msgstr "Identificador Descentralizado"
+
+msgid "Interface Language / Idioma"
+msgstr "Idioma de la Interfaz"
+
+msgid "Stream Language Filter"
+msgstr "Filtro de Idioma de Transmisión"
+
+msgid "Sensitive Media / NSFW (NIP-36)"
+msgstr "Contenido Sensible / NSFW (NIP-36)"
+
+msgid "Machine Noise Gate (Bot Filter)"
+msgstr "Filtro de Ruido de Máquina (Filtro de Bots)"

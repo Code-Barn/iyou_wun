@@ -1,4 +1,4 @@
-{% load static %}
+{% load static i18n %}
 <nav class="border-b transition-colors duration-200 bg-slate-100/90 border-slate-200 text-slate-800 dark:bg-slate-900/95 dark:border-slate-800 dark:text-slate-200 px-3 sm:px-6 py-2.5 font-mono text-xs max-w-full overflow-visible">
   <div class="max-w-5xl mx-auto flex flex-col gap-2.5">
     
@@ -7,16 +7,16 @@
       <!-- Left: View Mode Pills -->
       <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
         <a href="{% url 'feed' %}" class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'feed' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}">
-          [ 📝 Feed ]
+          [ 📝 {% trans "Feed" %} ]
         </a>
         <a href="{% url 'gallery' %}" class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'gallery' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}">
-          [ 🖼️ Gallery ]
+          [ 🖼️ {% trans "Gallery" %} ]
         </a>
         <a href="{% url 'dashboard' %}" class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'dashboard' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}">
-          [ 📊 Dashboard ]
+          [ 📊 {% trans "Dashboard" %} ]
         </a>
         <a href="{% url 'chat' %}" class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'chat' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}">
-          [ 💬 Chat ]
+          [ 💬 {% trans "Chat" %} ]
         </a>
         {% if user.is_authenticated or request.user.is_authenticated %}
         {% if not thread_mode and not thread_id and feed_mode != 'thread' %}
@@ -68,7 +68,7 @@
         <span class="text-slate-500 dark:text-slate-400 text-[10px] font-semibold mr-0.5">CIRCLES:</span>
         <button type="button" data-circle="global" 
                 class="circle-tab px-2 py-0.5 rounded bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950 transition-colors">
-          [ 🌐 Global ]
+          [ 🌐 {% trans "Global" %} ]
         </button>
         <button type="button" data-circle="iyou" 
                 class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200/80 dark:bg-slate-800/60 transition-colors">
@@ -76,15 +76,15 @@
         </button>
         <button type="button" data-circle="following" 
                 class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200/80 dark:bg-slate-800/60 transition-colors">
-          [ 👥 Following ]
+          [ 👥 {% trans "Following" %} ]
         </button>
         <button type="button" data-circle="inner" 
                 class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200/80 dark:bg-slate-800/60 transition-colors">
-          [ 🛡️ Inner Circle ]
+          [ 🛡️ {% trans "Inner Circle" %} ]
         </button>
         <button type="button" data-circle="mutual" 
                 class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200/80 dark:bg-slate-800/60 transition-colors">
-          [ 🤝 Mutual ]
+          [ 🤝 {% trans "Mutual" %} ]
         </button>
       </div>
 

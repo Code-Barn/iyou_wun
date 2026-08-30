@@ -53,14 +53,14 @@
   - Kebab-menu 🚩 Report / Flag Note action opens a reason-picker modal (spam, nudity, illegal, malware, profanity, other), publishes a signed NIP-56 Kind 1984 report, removes the card from the DOM, and confirms via toast.
 
 - [ ] **Phase 17 — Internationalization, Language Filtering & Inline Note Translation:**
-  - [ ] **17.1 UI Localization & gettext Infrastructure:**
+  - [x] **17.1 UI Localization & gettext Infrastructure:**
     - Configure Django `LocaleMiddleware` and translation settings (`LANGUAGES = [('en', 'English'), ('es', 'Español'), ...]`).
     - Wrap core UI labels, navigation buttons, and modal dialogs across templates in `{% trans %}` tags.
-    - Compile initial `.po`/`.mo` localization message catalogs for Tier 1 languages (`en`, `es`).
-  - [ ] **17.2 Dashboard Language & Content Preferences:**
+    - Compile initial `.po`/`.mo` localization message catalogs for Tier 1 languages (`en`, `es`) — **Done 2026-08-30**
+  - [x] **17.2 Dashboard Language & Content Preferences:**
     - Add a **Language & Locale** preference card in `/dashboard#settings`.
     - Store interface language choice in `django_language` cookie and `localStorage`.
-    - [x] Add **Feed Stream Language Preferences** selector (`English Only`, `Spanish Only`, `Global / All`) — **Done 2026-08-30**
+    - Add **Feed Stream Language Preferences** selector (`English Only`, `Spanish Only`, `Global / All`) — **Done 2026-08-30**
   - [x] **17.3 Stream Language Gate & Ingestion Filter:**
     - Enhance `detect_language()` in `apps/core/nip10.py` to parse NIP-01 `["lang", "<code>"]` tags and evaluate lightweight script heuristics.
     - Expose `data-lang="<code>"` on all server-rendered and client-rendered note cards.

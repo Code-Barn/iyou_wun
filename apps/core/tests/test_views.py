@@ -212,6 +212,15 @@ class ChatViewTest(TestCase):
         self.assertContains(response, "import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js'")
         self.assertContains(response, "auto_join_private_chats: autoJoinChats")
 
+    def test_chat_view_passes_peer_context(self):
+        user = User.objects.create_user(username="did:key:z6Mkpeerctx")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat") + "?peer=npub1testpeer123")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["peer_target"], "npub1testpeer123")
+        self.assertContains(response, 'window.peerTarget = "npub1testpeer123"')
+        self.assertContains(response, "auto-open-peer")
+
 
 
 
@@ -332,6 +341,19 @@ class ProfileViewTest(TestCase):
         self.assertContains(response, "https://example.com/db_avatar.png")
         self.assertContains(response, "https://example.com/db_banner.png")
         self.assertContains(response, "master@iyou.me")
+
+    def test_profile_renders_direct_message_button(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        npub = hex_to_npub(pk)
+        peer_user = User.objects.create_user(username="did:key:z6Mkpeeruser2")
+        self.client.force_login(peer_user)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f"/chat?peer={npub}")
+        self.assertContains(response, "💬 Message")
 
 
 class DashboardProfileTest(TestCase):
@@ -1586,6 +1608,23 @@ class NotificationViewTests(TestCase):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'id="notification-bell-btn"')
+
+
+class I18nViewTest(TestCase):
+    def test_i18n_set_language_sets_cookie_and_redirects(self):
+        response = self.client.post("/i18n/setlanguage/", data={"language": "es", "next": "/feed"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("django_language", response.cookies)
+        self.assertEqual(response.cookies["django_language"].value, "es")
+
+    def test_feed_renders_spanish_when_language_cookie_is_set(self):
+        self.client.cookies.load({"django_language": "es"})
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Malla")
+        self.assertContains(response, "Galería")
+        self.assertContains(response, "Panel")
 
 
 
