@@ -789,6 +789,31 @@ class FeedSanitizerTests(TestCase):
         self.assertEqual(len(roots), 1)
         self.assertEqual(roots[0]["id"], "clean_card")
 
+    def test_roster_telemetry_and_hex_dumps_dropped_as_noise(self):
+        clean_note = make_event("clean_human", 1, content="Hello mesh peers, welcome to iyou_wun!")
+        roster_note1 = make_event("roster_1", 1, content='{"channel:__roster": ["3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"]}')
+        roster_note2 = make_event("roster_2", 1, content="channel:__roster telemetry ping active")
+        hex_unbroken = make_event("hex_dump_128", 1, content="a" * 128)
+        repeated_hex = make_event(
+            "hex_repeated_64",
+            1,
+            content="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d\n32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245\n0000000000000000000000000000000000000000000000000000000000000001",
+        )
+
+        feed = process_into_feed(
+            {
+                "clean_human": clean_note,
+                "roster_1": roster_note1,
+                "roster_2": roster_note2,
+                "hex_dump_128": hex_unbroken,
+                "hex_repeated_64": repeated_hex,
+            }
+        )
+
+        roots = feed["roots"]
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "clean_human")
+
     def test_nip36_content_warning_flags_and_reasons_parsed(self):
         tagged_with_reason = make_event(
             "cw_1",

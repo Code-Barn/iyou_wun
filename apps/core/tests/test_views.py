@@ -1025,6 +1025,47 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "toggleNsfwFilter()")
         self.assertContains(response, "Shield:")
 
+    def test_nav_renders_iyou_circle_pill(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-circle="iyou"')
+        self.assertContains(response, "⚡ iyou")
+
+    def test_iyou_circle_scopes_feed_to_linkdeck_authors(self):
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user_deck, _ = User.objects.get_or_create(username="did:key:z6Mkiyou_author_1")
+        UserLinkDeck.objects.get_or_create(
+            user=user_deck,
+            handle="iyoucreator",
+            display_name="IYOU Creator",
+            is_public=True,
+        )
+
+        captured_filter = {}
+
+        def mock_relay_req(filter_obj, relay_urls=None):
+            captured_filter.update(filter_obj)
+            return {
+                "note_iyou": make_event("note_iyou", 1, pubkey="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d", content="Local ecosystem note"),
+            }
+
+        # 1. Test FeedView context GET ?circle=iyou
+        with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
+            response = self.client.get(reverse("feed") + "?circle=iyou")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("authors", captured_filter)
+        self.assertTrue(len(captured_filter["authors"]) > 0)
+
+        # 2. Test api_feed JSON GET ?circle=iyou
+        captured_filter.clear()
+        with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
+            response_api = self.client.get(reverse("api_feed") + "?circle=iyou")
+        self.assertEqual(response_api.status_code, 200)
+        self.assertIn("authors", captured_filter)
+        self.assertTrue(len(captured_filter["authors"]) > 0)
+
     def test_api_feed_deduplicates_and_returns_valid_notes(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         event1 = make_event("api_dup_1", 1, pubkey=pk, created_at=1699999000, content="Original note text")

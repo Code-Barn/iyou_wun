@@ -23,7 +23,7 @@ MEDIA_HOST_REGEX = re.compile(r"https?://(?:image\.nostr\.build|cdn\.iyou\.me|bl
 URL_REGEX = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 
 # --- Heuristic noise detection ---
-HEX_DUMP_REGEX = re.compile(r"^[0-9a-fA-F]{129,}$")
+HEX_DUMP_REGEX = re.compile(r"^[0-9a-fA-F]{128,}$")
 BASE64_BLOB_REGEX = re.compile(r"^[A-Za-z0-9+/=]{100,}$")
 STACK_TRACE_REGEX = re.compile(r"Traceback \(most recent call last\)|File \".*\", line \d+|\bin <module>\b")
 
@@ -81,6 +81,10 @@ def detect_machine_noise(content):
 
     stripped = content.strip()
 
+    # Telemetry and channel roster noise
+    if "channel:__roster" in content or "__roster" in content:
+        return True
+
     # Raw JSON payloads: text starts with '{' and parses as JSON in full.
     if stripped.startswith("{"):
         try:
@@ -94,11 +98,16 @@ def detect_machine_noise(content):
     if STACK_TRACE_REGEX.search(content):
         return True
 
+    # Repeated 64-character hex strings separated only by whitespace or newlines
+    tokens = stripped.split()
+    if len(tokens) >= 2 and all(len(t) == 64 and bool(re.fullmatch(r"[0-9a-fA-F]{64}", t)) for t in tokens):
+        return True
+
     compact = re.sub(r"\s+", "", content)
     if not compact:
         return False
 
-    # Raw hex dumps > 128 chars without spaces
+    # Raw hex dumps >= 128 chars without spaces
     if HEX_DUMP_REGEX.match(compact):
         return True
 

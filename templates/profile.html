@@ -125,9 +125,7 @@
 
         <!-- Bio / About -->
         {% if profile.about %}
-        <div class="text-sm text-slate-700 dark:text-slate-300 leading-relaxed max-w-3xl whitespace-pre-wrap pt-1">
-          {{ profile.about|linebreaksbr }}
-        </div>
+        <div class="text-sm sm:text-[15px] text-slate-700 dark:text-slate-300 leading-relaxed max-w-3xl whitespace-pre-line pt-1">{{ profile.about|linebreaksbr }}</div>
         {% endif %}
       </div>
 

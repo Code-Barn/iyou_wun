@@ -118,14 +118,8 @@
       <div class="blur-me backdrop-blur-md blur-sm select-none pointer-events-none">
     {% endif %}
 
-    {% if note.display_content %}
-    <div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
-      {{ note.display_content|linebreaksbr }}
-    </div>
-    {% elif note.content and not note.media_attachments %}
-    <div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">
-      {{ note.content|linebreaksbr }}
-    </div>
+    {% if note.display_content or note.content %}
+    <div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words select-text pt-0.5">{{ note.display_content|default:note.content|linebreaksbr|safe }}</div>
     {% endif %}
 
     {% if note.media_attachments %}

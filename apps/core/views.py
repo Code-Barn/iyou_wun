@@ -87,6 +87,33 @@ def dashboard(request):
     })
 
 
+def get_iyou_pubkeys():
+    """Extract public key hexes of registered UserLinkDeck creators and local users."""
+    iyou_users = list(
+        UserLinkDeck.objects.filter(is_public=True)
+        .exclude(user__username="")
+        .values_list("user__username", flat=True)
+    )
+    all_raw = set(iyou_users)
+    pubkeys = set()
+    for u in all_raw:
+        if not u:
+            continue
+        pk = did_to_pubkey(u)
+        if pk and len(pk) == 64:
+            pubkeys.add(pk.lower())
+        elif len(u) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", u):
+            pubkeys.add(u.lower())
+        elif u.startswith("npub1"):
+            try:
+                npk = npub_to_hex(u)
+                if npk and len(npk) == 64:
+                    pubkeys.add(npk.lower())
+            except Exception:
+                pass
+    return list(pubkeys)
+
+
 def calculate_trending_tags(notes, scope="global"):
     """
     Calculate top trending hashtags across notes stream with support for iyou/global scopes.
@@ -217,7 +244,10 @@ class FeedView(TemplateView):
             context["feed_mode"] = circle
             context["feed_circle"] = circle
 
-            if circle in ("following", "network") and user_pubkey:
+            if circle == "iyou":
+                iyou_pks = get_iyou_pubkeys()
+                feed_data = fetch_unified_feed(authors=iyou_pks, relay_urls=relays)
+            elif circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
                 if contacts:
                     feed_data = fetch_unified_feed(authors=contacts, relay_urls=relays)
@@ -453,7 +483,13 @@ def api_feed(request):
         clean_tag = tag.lstrip("#")
         filter_obj["#t"] = [clean_tag]
 
-    if circle in ("following", "network") and user_pubkey:
+    if circle == "iyou":
+        iyou_pks = get_iyou_pubkeys()
+        if iyou_pks:
+            filter_obj["authors"] = iyou_pks
+        else:
+            filter_obj["authors"] = CURATED_AUTHORS
+    elif circle in ("following", "network") and user_pubkey:
         contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
         if contacts:
             filter_obj["authors"] = contacts

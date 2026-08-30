@@ -20,6 +20,7 @@
     let activeSearchQuery = "";
 
     const CIRCLE_LABELS = {
+        iyou: "IYOU ECOSYSTEM",
         global: "GLOBAL MESH",
         following: "FOLLOWING (L1)",
         inner: "INNER CIRCLE (L0)",
@@ -114,6 +115,16 @@
         }
 
         if (isAuthorMatchingUser(pubkey, did)) {
+            return true;
+        }
+
+        if (circleMode === "iyou") {
+            if (card.querySelector(".sovereign-badge") || card.getAttribute("data-is-sovereign") === "true") {
+                return true;
+            }
+            if (did && (did.startsWith("did:key:") || did.startsWith("did:iyou:"))) {
+                return true;
+            }
             return true;
         }
 
@@ -324,6 +335,9 @@
             if (activeSearchQuery) {
                 emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes match the active filter and search query.</p>' +
                     '<p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>';
+            } else if (activeCircle === "iyou") {
+                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from the iyou Ecosystem.</p>' +
+                    '<p class="text-xs text-slate-500">Publish sovereign notes or connect local Link Decks to populate this circle.</p>';
             } else if (activeCircle === "following") {
                 emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in Following Circle.</p>' +
                     '<p class="text-xs text-slate-500">Follow more creators on the feed or link deck to populate your network.</p>';
@@ -459,6 +473,10 @@
         const scopeLabel = document.getElementById("active-circle-label");
         if (scopeLabel) {
             scopeLabel.textContent = CIRCLE_LABELS[activeCircle] || activeCircle.toUpperCase();
+        }
+
+        if (activeCircle === "iyou" && typeof global.showToast === "function") {
+            global.showToast("Filtering feed: iyou Ecosystem", "info");
         }
 
         // Update URL search params gracefully on feed and gallery
