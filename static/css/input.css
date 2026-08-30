@@ -2,6 +2,17 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  textarea {
+    overflow-x: hidden !important;
+    overflow-y: auto;
+    white-space: pre-wrap !important;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+}
+
 html, body {
   min-height: 100%;
 }
+

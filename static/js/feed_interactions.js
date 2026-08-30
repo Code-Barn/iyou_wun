@@ -510,7 +510,7 @@
 
         var replyDrawerHtml = '<div id="reply-box-' + escapeAttr(noteId) + '" class="hidden mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">' +
             '<div class="flex items-start gap-2.5">' +
-            '<textarea id="reply-input-' + escapeAttr(noteId) + '" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" rows="2" placeholder="Write a sovereign reply..."></textarea>' +
+            '<textarea id="reply-input-' + escapeAttr(noteId) + '" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none overflow-x-hidden overflow-y-auto" rows="2" wrap="soft" placeholder="Write a sovereign reply..."></textarea>' +
             '<div class="flex flex-col gap-1.5 flex-shrink-0">' +
             '<button type="button" id="reply-btn-' + escapeAttr(noteId) + '" class="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-mono font-medium transition" onclick="submitReply(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')">Reply</button>' +
             '<button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-mono transition" onclick="cancelReply(\'' + escapeAttr(noteId) + '\')">Cancel</button>' +
