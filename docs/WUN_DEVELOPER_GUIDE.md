@@ -359,7 +359,7 @@ Desktop feed renders a left-free **center stream column** (`max-w-2xl`) plus a s
 2. **SOVEREIGN CREATORS** — top 4 public `UserLinkDeck` profiles (`suggested_creators`, verified first, current viewer excluded) with avatar, verified badge, `@handle` link, and a `+ Follow` button (`data-follow-target` / `data-follow-petname`) wired into `ContactManager`; falls back to a curated seat (Ben Justman, Dan Byers) when the DB is empty.
 3. **ECOSYSTEM SPONSOR** — bordered placeholder unit for managed (`WUN_USER_LEVEL=1`) non-sovereign viewers.
 
-The feed also renders a **Relay Mesh Health Indicator** above the composer (`#relay-health-dot/indicator/...`), driven by `relay_pool.js`.
+The feed also renders a **Relay Mesh Health Widget** at the top of the right rail (`#relay-health-widget` — status dot, online/total pill, click-to-expand per-relay diagnostics drawer with latency + read/write/local scopes and a `/dashboard#settings` configure link), driven by `relay_pool.js`. It replaced the former `#relay-health-indicator` that sat above the composer.
 
 ### Media Support (Kind 1063)
 

@@ -298,6 +298,7 @@
 
             function checkDone() {
                 if (remaining <= 0) {
+                    self._updateHealthUI();
                     resolve({
                         localSuccess: localSuccess,
                         globalSuccess: globalSuccess,
@@ -394,8 +395,8 @@
     RelayPool.prototype._updateHealthUI = function () {
         if (typeof document === "undefined") return;
         var counts = this.getActiveRelayCount();
-        var dot = document.getElementById("relay-health-dot");
-        var text = document.getElementById("relay-health-text");
+        var dot = document.getElementById("relay-status-dot");
+        var label = document.getElementById("relay-status-label");
         var countEl = document.getElementById("relay-health-count");
 
         if (countEl) {
@@ -404,23 +405,142 @@
 
         if (dot) {
             if (counts.online > 0) {
-                dot.className = "inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                dot.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0";
             } else {
-                dot.className = "inline-block w-2 h-2 rounded-full bg-rose-500";
+                dot.className = "w-2 h-2 rounded-full bg-rose-500 shrink-0";
             }
         }
 
-        if (text) {
+        if (label) {
+            var base = "font-semibold truncate group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors";
             if (counts.online === 0) {
-                text.textContent = "Mesh Offline (Reconnecting...)";
-                text.className = "font-medium text-rose-500";
+                label.textContent = "Mesh Offline (Reconnecting...)";
+                label.className = base + " text-rose-500";
             } else if (counts.online < counts.total) {
-                text.textContent = "Mesh Degraded (" + counts.online + " Active)";
-                text.className = "font-medium text-amber-500 dark:text-amber-400";
+                label.textContent = "Mesh Degraded (" + counts.online + " Active)";
+                label.className = base + " text-amber-500 dark:text-amber-400";
             } else {
-                text.textContent = "Mesh Pool Active";
-                text.className = "font-medium text-slate-700 dark:text-slate-300";
+                label.textContent = "Mesh Pool Active";
+                label.className = base + " text-slate-700 dark:text-slate-200";
             }
+        }
+
+        // Live-refresh the open diagnostics drawer so latency/state stay current.
+        var drawer = document.getElementById("relay-diagnostics-drawer");
+        if (drawer && !drawer.classList.contains("hidden")) {
+            this.renderDiagnosticsList();
+        }
+    };
+
+    /**
+     * Escape a string for safe insertion into rendered HTML.
+     */
+    function escapeHtml(value) {
+        return String(value == null ? "" : value)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;");
+    }
+
+    /**
+     * Strip scheme/path from a relay URL for compact display:
+     *   wss://relay.damus.io    -> relay.damus.io
+     *   ws://127.0.0.1:9003     -> 127.0.0.1:9003
+     */
+    RelayPool.prototype._cleanRelayHostname = function (url) {
+        try {
+            var parsed = new URL(url);
+            return parsed.host;
+        } catch (e) {
+            var stripped = String(url || "")
+                .replace(/^wss?:\/\//i, "")
+                .replace(/\/+$/, "");
+            return stripped || url || "unknown";
+        }
+    };
+
+    /**
+     * Toggle the diagnostics drawer, rotate the chevron, and refresh relay rows.
+     */
+    RelayPool.prototype.toggleDiagnosticsPopover = function () {
+        if (typeof document === "undefined") return;
+        var drawer = document.getElementById("relay-diagnostics-drawer");
+        if (!drawer) return;
+
+        var toggle = document.getElementById("relay-health-toggle");
+        var chevron = document.getElementById("relay-chevron");
+        var willOpen = drawer.classList.contains("hidden");
+
+        drawer.classList.toggle("hidden");
+        if (chevron) {
+            chevron.classList.toggle("rotate-180", willOpen);
+        }
+        if (toggle) {
+            toggle.setAttribute("aria-expanded", willOpen ? "true" : "false");
+        }
+        if (willOpen) {
+            this.renderDiagnosticsList();
+        }
+    };
+
+    /**
+     * Render one row per pooled relay:
+     *        ●  nos.lol           [R][W]   42ms
+     *        ●  127.0.0.1:9003    [Local]  8ms
+     *   Status dot: emerald = online, amber = probing, rose = offline.
+     */
+    RelayPool.prototype.renderDiagnosticsList = function () {
+        if (typeof document === "undefined") return;
+        var listEl = document.getElementById("relay-diagnostics-list");
+        if (!listEl) return;
+
+        var self = this;
+        var rows = [];
+
+        this.relays.forEach(function (r) {
+            var statusClass = "bg-rose-500";
+            var latency = "<span class=\"text-[10px] text-slate-400 tabular-nums\">offline</span>";
+            if (r.status === "online") {
+                statusClass = "bg-emerald-500";
+                latency = "<span class=\"text-[10px] text-[#34d399] tabular-nums\">" +
+                    (r.latencyMs != null ? r.latencyMs : "?") + "ms</span>";
+            } else if (!r.status || r.status === "unknown") {
+                statusClass = "bg-amber-500";
+                latency = "<span class=\"text-[10px] text-slate-400 tabular-nums\">probing</span>";
+            }
+
+            var scopes = "";
+            if (r.read || r.write) {
+                if (r.read) scopes += "<span class=\"px-1 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20\">R</span>";
+                if (r.write) scopes += "<span class=\"px-1 rounded bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20\">W</span>";
+            }
+            if (r.isLocal) {
+                scopes += "<span class=\"px-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700\">Local</span>";
+            }
+            if (!scopes) {
+                scopes = "<span class=\"text-slate-400\">—</span>";
+            }
+
+            var hostname = escapeHtml(self._cleanRelayHostname(r.url));
+            rows.push(
+                "<div class=\"flex items-center justify-between gap-2 py-0.5\">" +
+                  "<div class=\"flex items-center gap-1.5 min-w-0\">" +
+                    "<span class=\"inline-block w-1.5 h-1.5 rounded-full shrink-0 " + statusClass + "\"></span>" +
+                    "<span class=\"truncate font-medium text-slate-700 dark:text-slate-200\">" + hostname + "</span>" +
+                  "</div>" +
+                  "<div class=\"flex items-center gap-1 shrink-0\">" +
+                    "<div class=\"flex items-center gap-0.5\">" + scopes + "</div>" +
+                    latency +
+                  "</div>" +
+                "</div>"
+            );
+        });
+
+        if (rows.length === 0) {
+            listEl.innerHTML = "<div class=\"text-slate-400 text-center py-2\">No relays configured.</div>";
+        } else {
+            listEl.innerHTML = rows.join("");
         }
     };
 

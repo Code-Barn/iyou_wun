@@ -17,6 +17,7 @@
 from unittest.mock import patch
 
 from django.test import TestCase
+from django.urls import reverse
 
 from ..views import process_into_feed
 from .helpers import make_event, VALID_PUBKEY_HEX
@@ -695,6 +696,33 @@ class RelayPoolAndFailoverTests(TestCase):
 
         self.assertEqual(feed["roots"], [])
         self.assertEqual(feed["total_replies"], 0)
+
+
+class FeedRelayHealthWidgetLayoutTest(TestCase):
+    """Relay health indicator relocation contract.
+
+    The mesh status widget lives at the top of the discovery rail
+    (`templates/includes/_feed_right_rail.html`) in main feed mode — it must
+    no longer render above the top post composer.
+    """
+
+    def _get_feed(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            return self.client.get(reverse("feed"))
+
+    def test_feed_renders_relay_health_widget_in_discovery_rail(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="relay-health-widget"')
+        self.assertContains(response, "TRENDING TOPICS")
+
+    def test_feed_composer_has_no_relay_health_indicator_above_it(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="relay-health-widget"')
+        self.assertNotContains(response, 'id="relay-health-indicator"')
+        self.assertNotContains(response, 'id="relay-health-dot"')
+        self.assertNotContains(response, 'id="relay-health-text"')
 
 
 

@@ -1,6 +1,42 @@
 {% load static %}
-<aside class="hidden lg:block w-72 xl:w-80 shrink-0 space-y-4 sticky top-20 font-mono text-xs select-none">
-  
+<aside class="hidden lg:block w-72 xl:w-80 shrink-0 space-y-4 sticky top-0 font-mono text-xs select-none">
+
+  <!-- Mesh Network Status & Relay Diagnostics Card -->
+  <div id="relay-health-widget" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 font-mono text-xs shadow-sm select-none">
+    <!-- Clickable Header Toggle -->
+    <button type="button" 
+            id="relay-health-toggle" 
+            class="w-full flex items-center justify-between gap-2 text-left focus:outline-none group"
+            aria-expanded="false"
+            aria-controls="relay-diagnostics-drawer"
+            onclick="window.relayPool?.toggleDiagnosticsPopover()">
+      <div class="flex items-center gap-2 min-w-0">
+        <span id="relay-status-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+        <span id="relay-status-label" class="font-semibold text-slate-700 dark:text-slate-200 truncate group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors">
+          Mesh Connected
+        </span>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <span id="relay-health-count" class="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[10px] text-slate-600 dark:text-slate-400 font-bold">
+          --/--
+        </span>
+        <span class="text-slate-400 text-[10px] transform transition-transform duration-200" id="relay-chevron">▼</span>
+      </div>
+    </button>
+
+    <!-- Expandable Diagnostics Drawer (Hidden by default) -->
+    <div id="relay-diagnostics-drawer" class="hidden mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 space-y-2">
+      <div class="text-[10px] text-slate-400 uppercase tracking-wider flex justify-between items-center">
+        <span>Active Relays</span>
+        <a href="/dashboard#settings" class="text-violet-500 hover:underline hover:text-violet-400">Configure ↗</a>
+      </div>
+      <div id="relay-diagnostics-list" class="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-[11px]">
+        <!-- Populated dynamically via JS -->
+        <div class="text-slate-400 text-center py-2">Probing mesh sockets...</div>
+      </div>
+    </div>
+  </div>
+
   <!-- 1. Trending Topics & Velocity Tags -->
   <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm">
     <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-100 dark:border-slate-800">

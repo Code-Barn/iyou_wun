@@ -1005,6 +1005,41 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, 'data-follow-target="did:key:z6Mkcreatorcard1"')
         self.assertContains(response, 'data-follow-petname="testcreator"')
 
+    def test_feed_renders_relay_health_widget_in_right_rail_main_mode(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="relay-health-widget"')
+        self.assertContains(response, 'id="relay-health-toggle"')
+        self.assertContains(response, 'id="relay-status-dot"')
+        self.assertContains(response, 'id="relay-status-label"')
+        self.assertContains(response, 'id="relay-health-count"')
+        self.assertContains(response, 'id="relay-diagnostics-drawer"')
+        self.assertContains(response, 'id="relay-diagnostics-list"')
+        self.assertContains(response, "Active Relays")
+        self.assertContains(response, "Configure ↗")
+        self.assertContains(response, "/dashboard#settings")
+        self.assertContains(response, "window.relayPool?.toggleDiagnosticsPopover()")
+
+    def test_feed_relay_health_indicator_removed_from_composer_area(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="relay-health-widget"')
+        self.assertNotContains(response, 'id="relay-health-indicator"')
+        self.assertNotContains(response, 'id="relay-health-dot"')
+        self.assertNotContains(response, 'id="relay-health-text"')
+
+    def test_feed_hides_relay_health_widget_in_thread_mode(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        relay_events = {
+            "hero_root_2": make_event("hero_root_2", 1, pubkey=root_pk, content="Thread health widget"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed") + "?thread=hero_root_2")
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="relay-health-widget"')
+
 
 class SearchAPITests(TestCase):
     def setUp(self):
