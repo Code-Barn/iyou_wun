@@ -93,6 +93,14 @@ class DashboardViewTest(TestCase):
         self.assertContains(response, "Stream Language Filter")
         self.assertContains(response, "Machine Noise Gate (Bot Filter)")
 
+    def test_base_template_renders_jump_to_top_button(self):
+        user = User.objects.create_user(username="did:iyou:0xtopbuttonuser")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="jump-to-top-btn"')
+        self.assertContains(response, 'aria-label="Jump to top"')
+
 
 class JwksConnectivityTest(TestCase):
     """Pings the IdP's JWKS endpoint to verify connectivity.

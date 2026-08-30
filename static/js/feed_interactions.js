@@ -1657,5 +1657,21 @@
     window.createPoll = createPoll;
     window.translateNote = translateNote;
     window.toggleOriginalNote = toggleOriginalNote;
+
+    // Jump to Top button visibility listener
+    document.addEventListener('DOMContentLoaded', function() {
+        var topBtn = document.getElementById('jump-to-top-btn');
+        if (topBtn) {
+            window.addEventListener('scroll', function() {
+                if (window.scrollY > 400) {
+                    topBtn.classList.remove('opacity-0', 'translate-y-4', 'pointer-events-none');
+                    topBtn.classList.add('opacity-100', 'translate-y-0', 'pointer-events-auto');
+                } else {
+                    topBtn.classList.add('opacity-0', 'translate-y-4', 'pointer-events-none');
+                    topBtn.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+                }
+            }, { passive: true });
+        }
+    });
 })();
 

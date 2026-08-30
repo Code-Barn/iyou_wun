@@ -859,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**340 total across 7 test modules**; ruff clean):
+Tests cover (**341 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -868,9 +868,9 @@ Tests cover (**340 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (108 tests)
+### `test_views.py` (109 tests)
 - `HomeViewTest` — root redirect to /feed (1)
-- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification (7)
+- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification, jump-to-top button render (8)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
 - `ChatViewTest` — anonymous redirect, Converse init + lifecycle plugin, `?peer=` auto-join & peer_target context, nav links (14)
 - `GalleryViewTest` — media heading, nav links, tab context (4 — public-read)

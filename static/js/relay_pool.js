@@ -499,46 +499,47 @@
         var rows = [];
 
         this.relays.forEach(function (r) {
-            var statusClass = "bg-rose-500";
-            var latency = "<span class=\"text-[10px] text-slate-400 tabular-nums\">offline</span>";
+            var statusDotClass = "bg-rose-500";
+            var latencyClass = "text-slate-400";
+            var latencyText = "offline";
+
             if (r.status === "online") {
-                statusClass = "bg-emerald-500";
-                latency = "<span class=\"text-[10px] text-[#34d399] tabular-nums\">" +
-                    (r.latencyMs != null ? r.latencyMs : "?") + "ms</span>";
+                statusDotClass = "bg-emerald-500";
+                latencyClass = "text-emerald-500 dark:text-emerald-400";
+                latencyText = (r.latencyMs != null ? r.latencyMs : "?") + "ms";
             } else if (!r.status || r.status === "unknown") {
-                statusClass = "bg-amber-500";
-                latency = "<span class=\"text-[10px] text-slate-400 tabular-nums\">probing</span>";
+                statusDotClass = "bg-amber-500";
+                latencyClass = "text-amber-500 dark:text-amber-400";
+                latencyText = "probing";
             }
 
-            var scopes = "";
-            if (r.read || r.write) {
-                if (r.read) scopes += "<span class=\"px-1 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20\">R</span>";
-                if (r.write) scopes += "<span class=\"px-1 rounded bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20\">W</span>";
-            }
-            if (r.isLocal) {
-                scopes += "<span class=\"px-1 rounded bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700\">Local</span>";
-            }
-            if (!scopes) {
-                scopes = "<span class=\"text-slate-400\">—</span>";
-            }
-
+            var isLocal = !!r.isLocal;
             var hostname = escapeHtml(self._cleanRelayHostname(r.url));
+
+            var leftCol =
+                '<div class="flex items-center gap-1.5 min-w-0">' +
+                  '<span class="w-1.5 h-1.5 rounded-full ' + statusDotClass + ' shrink-0"></span>' +
+                  '<span class="truncate text-slate-700 dark:text-slate-300 font-mono">' + hostname + '</span>' +
+                  (isLocal ? '<span class="px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 text-[9px] text-slate-500 font-mono shrink-0">Local</span>' : '') +
+                '</div>';
+
+            var rightCol =
+                '<div class="flex items-center gap-1 shrink-0 font-mono text-[10px]">' +
+                  '<span class="px-1 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80">R</span>' +
+                  '<span class="px-1 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800/80">W</span>' +
+                  '<span class="w-14 text-right tabular-nums ' + latencyClass + '">' + latencyText + '</span>' +
+                '</div>';
+
             rows.push(
-                "<div class=\"flex items-center justify-between gap-2 py-0.5\">" +
-                  "<div class=\"flex items-center gap-1.5 min-w-0\">" +
-                    "<span class=\"inline-block w-1.5 h-1.5 rounded-full shrink-0 " + statusClass + "\"></span>" +
-                    "<span class=\"truncate font-medium text-slate-700 dark:text-slate-200\">" + hostname + "</span>" +
-                  "</div>" +
-                  "<div class=\"flex items-center gap-1 shrink-0\">" +
-                    "<div class=\"flex items-center gap-0.5\">" + scopes + "</div>" +
-                    latency +
-                  "</div>" +
-                "</div>"
+                '<div class="flex items-center justify-between gap-2 py-0.5">' +
+                  leftCol +
+                  rightCol +
+                '</div>'
             );
         });
 
         if (rows.length === 0) {
-            listEl.innerHTML = "<div class=\"text-slate-400 text-center py-2\">No relays configured.</div>";
+            listEl.innerHTML = '<div class="text-slate-400 text-center py-2">No relays configured.</div>';
         } else {
             listEl.innerHTML = rows.join("");
         }
