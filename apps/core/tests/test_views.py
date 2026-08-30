@@ -642,10 +642,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "action-btn-repost")
         self.assertContains(response, "action-btn-like")
         self.assertContains(response, "action-btn-share")
-        self.assertContains(response, "💬")
-        self.assertContains(response, "🔁")
-        self.assertContains(response, "❤️")
-        self.assertContains(response, "↗️")
+        self.assertContains(response, '<span class="action-svg w-3.5 h-3.5 shrink-0"><svg')
 
     def test_feed_renders_kebab_menu_with_ecosystem_actions(self):
         relay_events = {
@@ -750,6 +747,70 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "First thoughtful reply")
         # Global compose button is not rendered in thread mode
         self.assertNotContains(response, 'id="btn-compose-note"')
+
+    def test_open_graph_tags_rendered_in_thread_and_profile(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        k0_event = make_event("og_k0_1", 0, pubkey=pk, created_at=1700000000, content=json.dumps({
+            "name": "OG Alice",
+            "about": "Thread OG test creator",
+            "picture": "https://cdn.iyou.me/og_avatar.png",
+        }))
+        hero_event = make_event("og_hero_1", 1, pubkey=pk, created_at=1700000100, content="OG thread hero note")
+        relay_data = {"og_k0_1": k0_event, "og_hero_1": hero_event}
+
+        # Thread mode: og:title + og:image with author avatar fallback
+        with patch("apps.core.views.relay_req", return_value=relay_data):
+            response = self.client.get(reverse("feed") + "?thread=og_hero_1")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<meta property="og:title" content="OG Alice on iyou_wun"')
+        self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/og_avatar.png"')
+
+        # Profile mode: profile metadata populates the og tags
+        npub = hex_to_npub(pk)
+        with patch("apps.core.views.relay_req", return_value=relay_data):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<meta property="og:title" content="OG Alice on iyou_wun"')
+        self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/og_avatar.png"')
+
+    def test_nip56_report_action_markup_present_in_kebab_menu(self):
+        with patch("apps.core.views.relay_req", return_value={
+            "e1": make_event("e1", 1, content="reportable fixture note"),
+        }):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Report / Flag Note")
+        self.assertContains(response, "openReportModal('e1'")
+
+
+class CyberGritErrorViewTests(TestCase):
+    """Verifies branded cyber-grit 404/500 error views render with themed copy."""
+
+    def test_custom_404_template_renders(self):
+        from django.test.utils import override_settings
+
+        with override_settings(DEBUG=False):
+            response = self.client.get("/nonexistent-route-xyz/")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertContains(response, "Mesh Node Not Found", status_code=404)
+        self.assertContains(response, "STATUS 404 // ROUTE_DISCONNECTED", status_code=404)
+        self.assertContains(response, "GOSSIP_ACTIVE", status_code=404)
+        self.assertContains(response, 'rel="stylesheet" href="/static/css/output.css"', status_code=404)
+
+    def test_custom_500_template_renders(self):
+        from django.test import RequestFactory
+        from django.views.defaults import server_error
+
+        request = RequestFactory().get("/boom")
+        response = server_error(request)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertContains(response, "Relay Pipeline Exception", status_code=500)
+        self.assertContains(response, "STATUS 500 // INTERNAL_TRANSMISSION_FAULT", status_code=500)
+        self.assertContains(response, "SECURE_LOG_RECORDED", status_code=500)
+        self.assertContains(response, "Retry Socket", status_code=500)
 
     def test_feed_mode_thread_direct_replies_and_drilldown_link(self):
         root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
@@ -1200,6 +1261,103 @@ class ProfileComposerTests(TestCase):
         self.assertFalse(response.context["is_owner"])
         self.assertNotContains(response, 'id="postContent"')
         self.assertNotContains(response, "Post to Nostr")
+
+
+class NotificationViewTests(TestCase):
+    """Layer 1 notification bell, slide-out drawer & /notifications ledger contract tests."""
+
+    PUBKEY_VIEWER = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+    PUBKEY_ACTOR = "b1c6d3f8a2e94c705d2a97c13b6f4e283ad0f19c64e8b527a3d7f6c0e12ab845"
+
+    def _notify_events(self):
+        return {
+            "ntf_mention": make_event(
+                "ntf_mention",
+                1,
+                pubkey=self.PUBKEY_ACTOR,
+                created_at=1700000600,
+                content="Replied with a thought",
+                tags=[["e", "root_a"], ["p", self.PUBKEY_VIEWER]],
+            ),
+            "ntf_like": make_event(
+                "ntf_like",
+                7,
+                pubkey=self.PUBKEY_ACTOR,
+                created_at=1700000700,
+                content="❤️",
+                tags=[["e", "root_a"], ["p", self.PUBKEY_VIEWER]],
+            ),
+            "ntf_repost": make_event(
+                "ntf_repost",
+                6,
+                pubkey=self.PUBKEY_ACTOR,
+                created_at=1700000800,
+                content="",
+                tags=[["e", "root_a"], ["p", self.PUBKEY_VIEWER]],
+            ),
+            "ntf_zap": make_event(
+                "ntf_zap",
+                9735,
+                pubkey=self.PUBKEY_ACTOR,
+                created_at=1700000900,
+                content='{"content":"Great post","description":""}',
+                tags=[["p", self.PUBKEY_VIEWER], ["amount", "21000"]],
+            ),
+        }
+
+    def _auth(self):
+        viewer = User.objects.create_user(username=self.PUBKEY_VIEWER)
+        self.client.force_login(viewer)
+
+    def test_notifications_view_auth_gated(self):
+        response = self.client.get(reverse("notifications"))
+        self.assertIn(response.status_code, (302, 401))
+
+    def test_notifications_view_renders_template_with_tabs(self):
+        self._auth()
+        with (
+            patch("apps.core.views.relay_req", return_value=self._notify_events()),
+            patch(
+                "apps.core.views.fetch_profile_data",
+                return_value={
+                    "name": "Actor",
+                    "display_name": "Actor Name",
+                    "picture": "https://cdn.iyou.me/avatar.png",
+                },
+            ),
+        ):
+            response = self.client.get(reverse("notifications"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "ACTIVITY &amp; NOTIFICATIONS")
+        self.assertContains(response, "Mentions / Replies")
+        self.assertContains(response, "Reactions")
+        self.assertContains(response, "Zaps")
+        self.assertContains(response, "id=\"notification-ledger\"")
+        self.assertContains(response, "Actor Name")
+        self.assertContains(response, "Replied with a thought")
+        self.assertContains(response, "❤️")
+        self.assertContains(response, "/feed?thread=root_a")
+        self.assertContains(response, "💬")
+        self.assertContains(response, "🔁")
+        self.assertContains(response, "⚡")
+
+    def test_standard_header_renders_notification_bell_when_authenticated(self):
+        self._auth()
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="notification-bell-btn"')
+        self.assertContains(response, 'id="notification-unread-dot"')
+        self.assertContains(response, "toggleNotificationDrawer()")
+        self.assertContains(response, "Activity Notifications")
+
+    def test_standard_header_omits_notification_bell_when_anonymous(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="notification-bell-btn"')
 
 
 

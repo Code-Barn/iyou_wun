@@ -35,6 +35,23 @@
 - [x] **Phase 14 — Dynamic Relay Pooling & NIP-65:** `relay_pool.js` (health probing, persisted pools, parallel double-broadcast, mesh health indicator) + server `fetch_user_nip65_relays()` and hardened `relay_req` failover — **Done 2026-08-30**
 - [x] **Phase 15 — Batch Reaction (Kind 7) Counting:** `attach_reaction_counts()` single-query like tallies surfaced on feed, profile, and `/api/feed` — **Done 2026-08-30**
 
+- [ ] **Phase 16 — v1.0 Release Hardening & Social Polish:**
+  - [x] **16.1 Dynamic Open Graph & Social Unfurling Engine:**
+    - Inject context-aware `<meta property="og:*">` and `<meta name="twitter:*">` tags for `/feed?thread=<id>`, `/@<handle>`, and `/gallery` so external link shares (Facebook, X, Discord, iMessage) render branded preview cards with author avatar, excerpt, and media thumbnails.
+    - Add branded fallback image `static/img/iyou_symbol.png` for root routes.
+  - [x] **16.2 NIP-10 Full-Lineage Ancestor Ladder:**
+    - Refactor `fetch_thread()` in `views.py` and `nip10.py` to resolve complete root-to-leaf ancestor chains (`root` → `intermediate ancestors` → `focused note` → `direct replies`) instead of clipping at single-hop parents.
+    - Add vertical connective thread guides in `_thread_post.html` and `feed_interactions.js`.
+  - [x] **16.3 Custom SVG Reaction Icons & Micro-Animations:**
+    - Replace generic system emojis (`❤️`, `🔁`, `💬`, `⚡`, `📤`) with themed Lucide/Heroicon SVGs in `_thread_post.html`, `gallery.html`, and `feed_interactions.js`.
+    - Add interactive active states (pink fill on like, rotating transition on repost, amber pulse on zap).
+  - [x] **16.4 Web Share API & Mobile Action Sheet:**
+    - Wire the Share button to invoke native `navigator.share()` on supported mobile browsers, falling back to clipboard copying on desktop.
+  - [x] **16.5 Cyber-Grit Branded Error Views:**
+    - Author custom `templates/404.html` and `templates/500.html` extending `base.html` with theme reactivity, return-to-mesh buttons, and error diagnostic codes.
+- [x] **16.6 NIP-56 Report/Flag Moderation (implementation):**
+    - Kebab-menu 🚩 Report / Flag Note action opens a reason-picker modal (spam, nudity, illegal, malware, profanity, other), publishes a signed NIP-56 Kind 1984 report, removes the card from the DOM, and confirms via toast.
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

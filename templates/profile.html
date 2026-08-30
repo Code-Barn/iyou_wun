@@ -3,6 +3,18 @@
 
 {% block title %}{{ profile.name|default:target_npub }} — iyou_wun{% endblock %}
 
+{% block og_tags %}
+{% if profile %}
+<meta property="og:site_name" content="iyou_wun" />
+<meta property="og:type" content="profile" />
+<meta property="og:title" content="{% firstof profile.display_name profile.name target_npub|truncatechars:20 %} on iyou_wun" />
+<meta property="og:description" content="{{ profile.about|default:'Sovereign creator on the iyou_wun mesh.'|striptags|truncatechars:180 }}" />
+<meta property="og:image" content="{{ profile.picture|default:og_image }}" />
+<meta property="og:url" content="{{ request.build_absolute_uri }}" />
+<meta name="twitter:card" content="summary_large_image" />
+{% endif %}
+{% endblock %}
+
 {% block content %}
 <div class="max-w-5xl mx-auto px-2 sm:px-4 py-4 sm:py-6">
   {% if error %}

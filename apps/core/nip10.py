@@ -292,6 +292,24 @@ def parse_nip10_tags(tags):
     return root_id, parent_id, reply_marker, mention_ids, reply_to_pubkey
 
 
+def resolve_ancestor_ids(event):
+    """Extract all unique 'e' tag ids in tag order.
+
+    The returned list captures the root, any intermediate ancestors, and the
+    immediate parent exactly as the author expressed them, so a caller can
+    batch-request the full NIP-10 lineage without walking one hop at a time.
+    """
+    ids = []
+    seen = set()
+    for tag in event.get("tags") or []:
+        if tag and len(tag) > 1 and tag[0] == "e":
+            eid = str(tag[1])
+            if eid and eid not in seen:
+                seen.add(eid)
+                ids.append(eid)
+    return ids
+
+
 
 def sanitize_media_url(url):
     """Ensure media attachments, Blossom assets, and avatars use HTTPS unless local."""

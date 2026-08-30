@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Notifications — iyou_wun{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl w-full mx-auto px-2 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
+  <div class="flex items-center justify-between mb-4">
+    <h1 class="text-lg font-semibold tracking-tight text-slate-800 dark:text-slate-100">ACTIVITY &amp; NOTIFICATIONS</h1>
+    <button type="button"
+            class="text-[10px] font-mono uppercase tracking-wider text-violet-600 hover:text-violet-500 dark:text-violet-400 transition"
+            onclick="markAllNotificationsRead()">Mark all as read</button>
+  </div>
+
+  {% if notifications %}
+  <div class="flex items-center gap-1.5 overflow-x-auto mb-4">
+    <button type="button"
+            class="notification-tab active flex items-center gap-1 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-mono border border-slate-200 dark:border-slate-800 text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 transition"
+            data-notify-tab="all"
+            onclick="setNotificationFilter('all', this)">All <span class="tabular-nums text-[10px]">({{ notification_total }})</span></button>
+    {% for tab in category_tabs %}
+    <button type="button"
+            class="notification-tab flex items-center gap-1 whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-mono border border-slate-200 dark:border-slate-800 text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 transition"
+            data-notify-tab="{{ tab.key }}"
+            onclick="setNotificationFilter('{{ tab.key }}', this)">{{ tab.label }} <span class="tabular-nums text-[10px]">({{ tab.count }})</span></button>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div id="notification-ledger" class="space-y-2">
+    {% for item in notifications %}
+    <a href="{{ item.thread_url }}"
+       class="notification-item relative flex items-start gap-3 p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-violet-500/60 hover:shadow-md transition"
+       data-notify-category="{{ item.category }}"
+       data-notify-ts="{{ item.created_at_epoch }}"
+       data-notify-id="{{ item.id }}">
+      {% if item.actor_avatar %}
+      <img src="{{ item.actor_avatar }}" alt="" referrerpolicy="no-referrer"
+           class="w-9 h-9 rounded-full object-cover bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0" />
+      {% else %}
+      <span class="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-sm shrink-0">{{ item.icon }}</span>
+      {% endif %}
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1.5">
+          <span class="notification-actor text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">{{ item.actor_name }}</span>
+          <span class="text-sm shrink-0" title="{{ item.category }}">{{ item.icon }}</span>
+          {% if item.is_self %}
+          <span class="text-[10px] uppercase font-mono bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 px-1 py-0.5 rounded-full border border-violet-200 dark:border-violet-800/60">you</span>
+          {% endif %}
+        </div>
+        <p class="notification-preview mt-0.5 text-xs text-slate-600 dark:text-slate-400 leading-relaxed break-words">{{ item.preview }}</p>
+        <div class="mt-1 flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
+          <span class="notification-time tabular-nums" data-ts="{{ item.created_at_epoch }}">●</span>
+          <span>→ {{ item.target_id|truncatechars:16 }}</span>
+        </div>
+      </div>
+    </a>
+    {% empty %}
+    <div class="text-center py-16 text-slate-400 font-mono text-xs">
+      All caught up — no activity yet.
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+  window.ledgerPage = true;
+</script>
+{% endblock %}

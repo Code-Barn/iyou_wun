@@ -461,6 +461,42 @@ class ProcessIntoFeedTest(TestCase):
         # Sub-reply count under direct_child
         self.assertEqual(hero["replies"][0]["reply_count"], 1)
 
+    def test_fetch_thread_resolves_multi_hop_ancestors(self):
+        from apps.core.views import fetch_thread
+
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        g_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        m_pk = "0000000000000000000000000000000000000000000000000000000000000002"
+        t_pk = "1111111111111111111111111111111111111111111111111111111111111111"
+
+        raw_events = {
+            "root_post": make_event("root_post", 1, pubkey=root_pk, content="Root"),
+            "grand_reply": make_event("grand_reply", 1111, pubkey=g_pk, content="Hop 1", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "root_post", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+            "intermediate": make_event("intermediate", 1111, pubkey=m_pk, content="Hop 2", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "grand_reply", "", "reply"],
+                ["p", g_pk, "", "reply"],
+            ]),
+            "deep_target": make_event("deep_target", 1111, pubkey=t_pk, content="Deep target", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "intermediate", "", "reply"],
+                ["p", m_pk, "", "reply"],
+            ]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=raw_events):
+            result = fetch_thread("deep_target")
+
+        self.assertEqual(result["thread_root"]["id"], "deep_target")
+        self.assertEqual(
+            [a["id"] for a in result["ancestors"]],
+            ["root_post", "grand_reply", "intermediate"],
+        )
+
     def test_kind_1_extracts_embedded_image_and_video_urls(self):
         from apps.core.nip10 import extract_media_from_note
 

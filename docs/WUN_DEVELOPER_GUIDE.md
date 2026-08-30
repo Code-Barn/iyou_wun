@@ -702,6 +702,46 @@ The navigation bar (`_nav.html`) probes `http://127.0.0.1:9001/` with a 300ms ti
 
 ---
 
+## v1.0 Release Polish Milestones
+
+The following release-readiness milestones (tracked in `TODO.md` as **Phase 16**) are outstanding work items that ship ahead of the v1.0 tag. Each is documented as a checklist item with planned implementation files.
+
+### 16.1 Dynamic Open Graph & Social Unfurling Engine
+
+**Files (planned):** `apps/core/views.py` (per-route `og:*` / `twitter:*` context), `templates/base.html` + view templates (`extra_head` blocks), `static/img/iyou_symbol.png`
+
+- Inject context-aware `<meta property="og:*">` and `<meta name="twitter:*">` tags for `/feed?thread=<id>`, `/@<handle>`, and `/gallery` so external link shares (Facebook, X, Discord, iMessage) render branded preview cards with author avatar, excerpt, and media thumbnails.
+- **Fallback image:** use `static/img/iyou_symbol.png` as the branded `og:image` for root routes. Source asset currently lives at `/iyou_symbol.png` (repo root) and must be moved under `static/img/` (plus `collectstatic` on the production build).
+- Meta tags should be authored server-side per route: hero thread notes pull the focused note's author avatar + excerpt; `/@<handle>` pulls the deck card avatar + headline; `/gallery` pulls the front-most media thumbnail.
+
+### 16.2 NIP-10 Full-Lineage Ancestor Ladder
+
+**Files (planned):** `apps/core/views.py` — `fetch_thread()`; `apps/core/nip10.py`; `templates/includes/_thread_post.html`; `static/js/feed_interactions.js`
+
+- Refactor `fetch_thread()` in `views.py` and the tree helpers in `nip10.py` to resolve complete root-to-leaf ancestor chains (`root` → `intermediate ancestors` → `focused note` → `direct replies`) instead of clipping at single-hop parents.
+- Add vertical connective thread guides in `_thread_post.html` and `feed_interactions.js` so interacting participants see the full lineage visual.
+
+### 16.3 Custom SVG Reaction Icons & Micro-Animations
+
+**Files (planned):** `templates/includes/_thread_post.html`, `templates/gallery.html`, `static/js/feed_interactions.js`
+
+- Replace generic system emojis (`❤️`, `🔁`, `💬`, `⚡`, `📤`) with themed Lucide/Heroicon SVGs.
+- Add interactive active states: pink fill on like, rotating transition on repost, amber pulse on zap.
+
+### 16.4 Web Share API & Mobile Action Sheet
+
+**Files (planned):** `static/js/feed_interactions.js` (Share handler)
+
+- Wire the Share button to invoke native `navigator.share()` on supported mobile browsers (`canShare`/`share` feature detection), falling back to clipboard copying on desktop (existing `copyNotePermalink`).
+
+### 16.5 Cyber-Grit Branded Error Views
+
+**Files (planned):** `templates/404.html`, `templates/500.html`
+
+- Author custom `404` and `500` templates extending `base.html` with theme reactivity (light/dark/stealth), return-to-mesh buttons (back to `/feed` + reload), and human-readable error diagnostic codes.
+
+---
+
 ## Project Layout
 
 ```
@@ -819,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**296 total across 7 test modules**; ruff clean):
+Tests cover (**320 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -828,7 +868,7 @@ Tests cover (**296 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (77 tests)
+### `test_views.py` (93 tests)
 - `HomeViewTest` — root redirect to /feed (1)
 - `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link (5)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
@@ -839,12 +879,19 @@ Tests cover (**296 total across 7 test modules**; ruff clean):
 - `MediaUploadProxyViewTest` — Blossom proxy behavior incl. dynamic endpoint resolution (6)
 - `FeedViewTrustLensContractTest` — Level0/0.5/1 trust pill contract (6)
 - `FeedViewTwoTierToolbarTest` — two-tier nav toolbar, circle scope badge, live tag search (5)
-- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, **discovery rail rendering** (21)
+- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, Open Graph metadata, NIP-56 report actions (10)
 - `SearchAPITests` — `/api/search/` JSON schema, handle/name/hashtag filtering, nav dropdown DOM, toast container (4)
+- `CyberGritErrorViewTests` — branded cyber-grit 404 & 500 error views, route disconnected / internal transmission fault copy, socket retry (18)
+- `NotificationViewTests` — authenticated bell toggle, slide-out drawer markup, `/notifications` ledger tabs (Mentions/Reactions/Zaps) (4)
+- `NIP05EndpointTests` — `/.well-known/nostr.json` verification endpoint, name querying & JSON schema (3)
+- `ProfileComposerTests` — profile view quick note composer rendering and submission (2)
 
-### `test_feed.py` (52 tests)
-- `ProcessIntoFeedTest` — kind routing, reaction grouping/dedup, sovereignty flag, profile enrichment, sort/truncation, malformed events, poll extraction + scope tags + vote grouping, multi-relay dedup, NIP-10 tree builder, batch reply counts, **batch Kind-7 reaction counts** (47)
+### `test_feed.py` (60 tests)
+- `ProcessIntoFeedTest` — kind routing, reaction grouping/dedup, sovereignty flag, profile enrichment, sort/truncation, malformed events, poll extraction + scope tags + vote grouping, multi-relay dedup, NIP-10 tree builder, batch reply counts, **batch Kind-7 reaction counts** (48)
 - `RelayPoolAndFailoverTests` — `relay_req` failover on primary down, all-relays-down → `{}`, NIP-65 (Kind 10002) relay parsing, empty-pubkey guard, unified-feed relay-outage grace (5)
+- `FeedSanitizerTests` — XSS sanitization, HTML stripping, URI scheme filtering, auto-linkification (3)
+- `AttachSocialCountsTests` — social reaction and reply count aggregation across relay responses (2)
+- `FeedRelayHealthWidgetLayoutTest` — relay health indicator widget layout and dynamic state rendering (2)
 
 ### `test_gallery.py` (32 tests)
 - `CategorizeMediaTest` — MIME grouping, NIP-94 extraction, duration/blurhash/blossom_hash, mixed media, wildcards (21)

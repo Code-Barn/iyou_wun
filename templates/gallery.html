@@ -31,6 +31,13 @@
         .video-card-overlay { opacity: 0; transition: opacity 0.2s ease; }
         .video-card:hover .video-card-overlay { opacity: 1; }
     </style>
+    <meta property="og:site_name" content="iyou_wun" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Media Gallery — iyou_wun" />
+    <meta property="og:description" content="Sovereign visuals, video, and audio from the iyou_wun mesh." />
+    <meta property="og:image" content="{{ og_image }}" />
+    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
+    <meta name="twitter:card" content="summary_large_image" />
 </head>
 <body class="bg-gray-950 min-h-screen text-white">
     {% include 'includes/_ecosystem_bar.html' %}

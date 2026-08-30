@@ -3,6 +3,20 @@
 
 {% block title %}Feed — iyou_wun{% endblock %}
 
+{% block og_tags %}
+{% if feed_mode == 'thread' and thread_root %}
+<meta property="og:site_name" content="iyou_wun" />
+<meta property="og:type" content="article" />
+<meta property="og:title" content="{{ thread_root.author_name|default:thread_root.npub|truncatechars:20 }} on iyou_wun" />
+<meta property="og:description" content="{{ thread_root.display_content|default:thread_root.content|striptags|truncatechars:180 }}" />
+<meta property="og:image" content="{{ thread_root.media_attachments.0.url|default:thread_root.author_avatar|default:og_image }}" />
+<meta property="og:url" content="{{ request.build_absolute_uri }}" />
+<meta name="twitter:card" content="summary_large_image" />
+{% else %}
+{{ block.super }}
+{% endif %}
+{% endblock %}
+
 {% block extra_head %}
 <style>
     .toast { animation: slideIn 0.3s ease-out; }

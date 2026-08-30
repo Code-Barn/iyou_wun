@@ -15,6 +15,7 @@
     var pendingReaction = null;
     var pendingRepost = null;
     var pendingNomination = null;
+    var pendingReport = null;
 
     window.pendingReply = null;
 
@@ -114,6 +115,17 @@
                 }
             });
             pendingRepost = null;
+            bridgeClient.pendingEvent = null;
+            bridgeClient.isProcessing = false;
+        } else if (pendingReport) {
+            bridgeClient.broadcastToRelays(signedEvent, null, function (localOk, anyOk) {
+                if (anyOk || localOk) {
+                    showToast("Note reported and hidden from feed", "success");
+                } else {
+                    showToast("Failed to broadcast report.", "error");
+                }
+            });
+            pendingReport = null;
             bridgeClient.pendingEvent = null;
             bridgeClient.isProcessing = false;
         } else if (pendingNomination) {
@@ -477,6 +489,13 @@
         var contentAndMediaHtml = (displayContent ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(displayContent) + '</div>' : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(noteContent) + '</div>' : ''));
         contentAndMediaHtml += mediaHtml;
 
+        var ICON_REPLY = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>';
+        var ICON_REPOST = '<svg class="w-3.5 h-3.5 transition-transform duration-500 group-hover/repost:rotate-180" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg>';
+        var ICON_HEART = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>';
+        var ICON_VOTE = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m18 9-1-1-1-1h-8l-1 1-1 1v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9z"></path><path d="M6 5V3h12v2"></path></svg>';
+        var ICON_ZAP = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path></svg>';
+        var ICON_SHARE = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><path d="m16 6-4-4-4 4"></path><path d="M12 2v13"></path></svg>';
+
         if (note.has_content_warning) {
             var cwReason = note.warning_reason || "Sensitive Content";
             contentAndMediaHtml = '<div class="content-warning-shield relative rounded-xl border border-amber-200 dark:border-amber-900/70 overflow-hidden mb-3">' +
@@ -521,11 +540,11 @@
             replyingToHtml +
             contentAndMediaHtml +
             '<div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">' +
-            '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span>💬</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
-            '<button type="button" class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span>🔁</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
-            '<button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="heart-icon">❤️</span><span class="action-count like-count-label">' + reactionLikeCount + '</span></button>' +
-            ((note.kind === 30023 || note.is_proposal || note.lud16) ? '<button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.kind) + '\', \'' + escapeAttr(note.lud16 || '') + '\')"><span>' + ((note.kind === 30023 || note.is_proposal) ? '🗳️ Vote' : '⚡ Tip') + '</span></button>' : '') +
-            '<button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote(\'' + escapeAttr(noteId) + '\')"><span>↗️</span><span class="hidden sm:inline">Share</span></button>' +
+            '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPLY + '</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
+            '<button type="button" class="action-btn-repost group/repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPOST + '</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
+            '<button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="heart-icon action-svg w-3.5 h-3.5 shrink-0">' + ICON_HEART + '</span><span class="action-count like-count-label">' + reactionLikeCount + '</span></button>' +
+            ((note.kind === 30023 || note.is_proposal || note.lud16) ? '<button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.kind) + '\', \'' + escapeAttr(note.lud16 || '') + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ((note.kind === 30023 || note.is_proposal) ? ICON_VOTE : ICON_ZAP) + '</span><span>' + ((note.kind === 30023 || note.is_proposal) ? 'Vote' : 'Tip') + '</span></button>' : '') +
+            '<button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(authorName || "") + '\', \'' + escapeAttr((displayContent || noteContent || "").slice(0, 140)) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_SHARE + '</span><span class="hidden sm:inline">Share</span></button>' +
             '</div>' +
             replyDrawerHtml +
             '</div></div>';
@@ -1169,13 +1188,18 @@
 
         var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-like, [data-note-id="' + noteId + '"] .action-btn-like');
         var countLabel = btn ? btn.querySelector(".like-count-label") : null;
-        if (btn) btn.classList.add("text-pink-600", "dark:text-pink-400", "font-bold");
+        if (btn) {
+            btn.classList.add("text-pink-600", "dark:text-pink-400", "font-bold", "liked");
+            var heartSvg = btn.querySelector(".heart-icon svg");
+            if (heartSvg) {
+                heartSvg.setAttribute("fill", "#ec4899");
+                heartSvg.setAttribute("stroke", "#ec4899");
+            }
+        }
         if (countLabel) {
             var curr = parseInt(countLabel.textContent, 10);
             countLabel.textContent = isNaN(curr) ? "1" : String(curr + 1);
         }
-
-        showToast("Reaction published to mesh", "heart");
 
         var event = {
             kind: 7,
@@ -1202,8 +1226,6 @@
         var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-repost, [data-note-id="' + noteId + '"] .action-btn-repost');
         if (btn) btn.classList.add("text-emerald-600", "dark:text-emerald-400", "font-bold");
 
-        showToast("Note reposted to mesh relays", "repost");
-
         var event = {
             kind: 6,
             content: "",
@@ -1226,6 +1248,75 @@
             "&snippet=" + encodeURIComponent(snippet || "") +
             "&ref=iyou_wun";
         window.open(url, "_blank");
+    }
+
+    function openReportModal(noteId, pubkey) {
+        var existing = document.getElementById("reportModal");
+        if (existing) existing.remove();
+
+        var reasons = ["spam", "nudity", "illegal", "malware", "profanity", "other"];
+        var options = reasons.map(function (r) {
+            return '<label class="flex items-center gap-2 p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors text-xs">' +
+                '<input type="radio" name="report-reason" value="' + r + '" class="accent-rose-600">' +
+                '<span class="text-slate-700 dark:text-slate-200">' + r.charAt(0).toUpperCase() + r.slice(1) + '</span>' +
+                '</label>';
+        }).join("");
+
+        var modal = document.createElement("div");
+        modal.id = "reportModal";
+        modal.className = "fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4";
+        modal.innerHTML =
+            '<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-md font-mono text-xs">' +
+            '<div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">' +
+            '<h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Report / Flag Note</h3>' +
+            '<button type="button" onclick="document.getElementById(\'reportModal\').remove()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-base leading-none">&times;</button>' +
+            '</div>' +
+            '<div class="p-4 space-y-2">' +
+            '<p class="text-slate-500 dark:text-slate-400 mb-1">Select a reason:</p>' +
+            options +
+            '</div>' +
+            '<div class="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">' +
+            '<button type="button" onclick="document.getElementById(\'reportModal\').remove()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded transition">Cancel</button>' +
+            '<button type="button" id="report-submit-btn" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded transition">Submit Report</button>' +
+            '</div>' +
+            '</div>';
+
+        document.body.appendChild(modal);
+        modal.classList.remove("hidden");
+        modal.querySelector("#report-submit-btn").addEventListener("click", function () {
+            var selected = modal.querySelector("input[name='report-reason']:checked");
+            var reason = selected ? selected.value : "other";
+            submitReport(noteId, pubkey, reason);
+        });
+    }
+
+    async function submitReport(noteId, pubkey, reason) {
+        if (!noteId) return;
+        var pk;
+        try { pk = await bridgeClient.getEffectivePubkey(); }
+        catch (e) { showToast(e.message || "Sign in with a sovereign key to report notes.", true); return; }
+
+        var modal = document.getElementById("reportModal");
+        if (modal) modal.remove();
+
+        var card = document.querySelector('[data-note-card-id="' + noteId + '"], [data-note-id="' + noteId + '"]');
+        var wrapper = card ? (card.closest(".feed-note-card") || card) : null;
+        if (wrapper) wrapper.remove();
+
+        var event = {
+            kind: 1984,
+            content: "Report: " + reason,
+            pubkey: pk,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: [
+                ["e", noteId, "wss://relay.iyou.me", reason],
+                ["p", pubkey || "", "wss://relay.iyou.me"]
+            ]
+        };
+
+        pendingReport = { noteId: noteId };
+        bridgeClient.isProcessing = true;
+        bridgeClient.signEvent(event);
     }
 
     async function nominatePostOfTheDay(noteId, authorPubkey) {
@@ -1336,13 +1427,17 @@
         }
     }
 
-    function shareNote(noteId) {
+    function shareNote(noteId, authorName, snippet) {
         var permalink = window.location.origin + "/feed?thread=" + encodeURIComponent(noteId);
         if (navigator.share) {
             navigator.share({
-                title: "Nostr Note on iyou_wun",
+                title: (authorName || "Author") + " on iyou_wun",
+                text: snippet || "Shared from iyou_wun",
                 url: permalink
-            }).catch(function () {
+            }).catch(function (err) {
+                if (err && err.name === "AbortError") {
+                    return;
+                }
                 copyNotePermalink(noteId);
             });
         } else {
@@ -1435,6 +1530,8 @@
     window.copyNotePermalink = copyNotePermalink;
     window.shareNote = shareNote;
     window.handleContextualAction = handleContextualAction;
+    window.openReportModal = openReportModal;
+    window.submitReport = submitReport;
     window.castPollVote = castPollVote;
     window.openPollModal = openPollModal;
     window.openPollCreateModal = openPollModal;

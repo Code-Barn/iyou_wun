@@ -104,6 +104,7 @@ class FeedView(TemplateView):
         context["relays"] = relays
         context["relay_count"] = len(relays)
         context["user_credentials"] = {}
+        context["og_image"] = og_fallback_image(self.request)
 
 
         thread_id = self.request.GET.get("thread") or self.request.GET.get("note") or self.request.GET.get("e")
@@ -855,10 +856,21 @@ def fetch_text_notes(authors=None, limit=20, relay_urls=None):
 
 
 
-def fetch_thread(thread_id, relay_urls=None):
-    """Fetch a target event (Hero), its ordered ancestor chain, and direct 1-level replies."""
-    from .nip10 import parse_nip10_tags
+MAX_ANCESTOR_DEPTH = 32
 
+
+def og_fallback_image(request):
+    """Absolute URL of the branded Open Graph fallback image."""
+    from django.templatetags.static import static
+
+    scheme = request.scheme if request.scheme else "https"
+    host = request.get_host()
+    return f"{scheme}://{host}{static('img/iyou_symbol.png')}"
+
+
+def fetch_thread(thread_id, relay_urls=None):
+    """Fetch a target event (Hero), its full root→…→parent ancestor chain, and direct 1-level replies."""
+    from .nip10 import parse_nip10_tags, resolve_ancestor_ids
 
     target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=relay_urls)
     if not target_raw:
@@ -868,15 +880,36 @@ def fetch_thread(thread_id, relay_urls=None):
     tags = target_event.get("tags", [])
     root_id, parent_id, marker, mention_ids, _ = parse_nip10_tags(tags)
 
-    ancestor_ids = []
-    if parent_id and parent_id != thread_id:
-        ancestor_ids.append(parent_id)
-    if root_id and root_id != thread_id and root_id not in ancestor_ids:
-        ancestor_ids.insert(0, root_id)
-
-    ancestors_raw = {}
-    if ancestor_ids:
-        ancestors_raw = relay_req({"ids": ancestor_ids, "limit": len(ancestor_ids)}, relay_urls=relay_urls)
+    # ---- Backfill the full ancestor chain (root → … → parent) ----
+    # The target only expresses its immediate parent + root; intermediate
+    # ancestors are resolved by walking each hop's own e-tags and batch-requiring
+    # any missing ids until the root is reached (bounded by MAX_ANCESTOR_DEPTH).
+    pool = dict(target_raw)
+    queue = [aid for aid in resolve_ancestor_ids(target_event) if aid != thread_id]
+    seen = set(queue)
+    seen.add(thread_id)
+    for _ in range(MAX_ANCESTOR_DEPTH):
+        if not queue:
+            break
+        missing = [q for q in queue if q not in pool]
+        if missing:
+            batch = list(dict.fromkeys(missing))[:20]
+            fetched = relay_req(
+                {"ids": batch, "kinds": [1, 1111], "limit": 20},
+                relay_urls=relay_urls,
+            )
+            pool.update(fetched)
+            seen.update(fetched)
+        newly_discovered = []
+        for q in queue:
+            ev = pool.get(q)
+            if not ev:
+                continue
+            for aid in resolve_ancestor_ids(ev):
+                if aid and aid != thread_id and aid not in seen:
+                    seen.add(aid)
+                    newly_discovered.append(aid)
+        queue = newly_discovered
 
     query_ids = [thread_id]
     if root_id and root_id != thread_id:
@@ -884,7 +917,7 @@ def fetch_thread(thread_id, relay_urls=None):
 
     descendants_raw = relay_req({"#e": query_ids, "kinds": [1, 1111], "limit": 100}, relay_urls=relay_urls)
 
-    combined = {**target_raw, **ancestors_raw, **descendants_raw}
+    combined = {**pool, **descendants_raw}
 
     pubkeys = set()
     for e in combined.values():
@@ -903,7 +936,7 @@ def fetch_thread(thread_id, relay_urls=None):
             try:
                 profiles[pk] = json.loads(e.get("content", "{}"))
             except (json.JSONDecodeError, TypeError):
-                profiles[pk] = {}
+                profiles.setdefault(pk, {})
 
     from .nip10 import _enrich_root
 
@@ -927,7 +960,7 @@ def fetch_thread(thread_id, relay_urls=None):
     if not thread_root:
         return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
 
-    # 2. Ancestor Resolution: Build strictly ordered list [grandparent, parent, ...]
+    # 2. Ancestor Resolution: Build strictly ordered list [root, …, grandparent, parent]
     ancestors = []
     curr_id = thread_root.get("parent_id") or thread_root.get("root_id")
     visited_ancestors = set()
@@ -939,6 +972,8 @@ def fetch_thread(thread_id, relay_urls=None):
             curr_id = anc.get("parent_id")
             if not curr_id and anc.get("root_id") and anc.get("root_id") != anc.get("id"):
                 curr_id = anc.get("root_id")
+            if curr_id == thread_id:
+                curr_id = None
         else:
             break
 
@@ -1389,8 +1424,8 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
             pk = e.get("pubkey", "")
             try:
                 profiles[pk] = json.loads(e.get("content", "{}"))
-            except json.JSONDecodeError:
-                profiles[pk] = {}
+            except (json.JSONDecodeError, TypeError):
+                profiles.setdefault(pk, {})
 
     return process_into_feed(raw_events, profiles, max_items=limit)
 
@@ -1402,6 +1437,176 @@ def fetch_contact_pubkeys(user_pubkey, relay_urls=None):
         tags = e.get("tags", [])
         return [tag[1] for tag in tags if tag and tag[0] == "p" and len(tag) > 1]
     return []
+
+
+NOTIFICATION_KINDS = [1, 6, 7, 9735]
+NOTIFICATION_CATEGORY_LABELS = {
+    "mentions": "Mentions / Replies",
+    "reposts": "Reposts",
+    "reactions": "Reactions",
+    "zaps": "Zaps",
+}
+NOTIFICATION_CATEGORY_ICONS = {
+    "mentions": "💬",
+    "reposts": "🔁",
+    "reactions": "❤️",
+    "zaps": "⚡",
+}
+
+NOTIFICATION_CATEGORY_OF_KIND = {
+    1: "mentions",
+    6: "reposts",
+    7: "reactions",
+    9735: "zaps",
+}
+
+
+def build_notification_preview(kind, content, tags=None):
+    """Human-readable preview snippet for a notification event."""
+    tags = tags or []
+    content = (content or "").strip()
+
+    if kind == 9735:
+        comment = ""
+        if content:
+            try:
+                zap_req = json.loads(content)
+            except (ValueError, TypeError):
+                zap_req = content
+            if isinstance(zap_req, dict):
+                comment = (zap_req.get("content") or "").strip() or (zap_req.get("description") or "").strip()
+            elif isinstance(zap_req, str):
+                comment = zap_req.strip()
+        amount = get_tag_value(tags, "amount") or ""
+        suffix = ""
+        if amount:
+            try:
+                suffix = f" · {int(amount) / 1000:g} sats"
+            except (ValueError, TypeError):
+                suffix = ""
+        if comment:
+            return "⚡ " + comment[:120] + suffix
+        return "⚡ Zapped your note" + suffix
+
+    if kind == 7:
+        if not content or content in ("+", "−", "-", "Like", "like", "❤️"):
+            return "Liked your note"
+        return f"Reacted {content[:8]} to your note"
+
+    if kind == 6:
+        snippet = content.replace("\n", " ").strip()[:80]
+        if snippet and snippet != content.replace("\n", " ").strip():
+            return "Reposted: " + snippet
+        return "Reposted your note"
+
+    collapsed = content.replace("\n", " ").strip()
+    if not collapsed:
+        return "Mentioned you"
+    return collapsed[:140] + ("…" if len(collapsed) > 140 else "")
+
+
+def fetch_notifications(user_pubkey, relay_urls=None, categories=None):
+    """Fetch inbound social interactions (`{"#p": [...]}`) and enrich actors.
+
+    Kinds: 1 mentions/replies, 6 reposts, 7 reactions, 9735 zaps (NIP-57).
+
+    Returns (items, counts) where items are sorted newest-first and each item
+    carries actor identity, a category, and a deep link into the matching thread.
+    """
+    if categories is None:
+        categories = list(NOTIFICATION_CATEGORY_LABELS.keys())
+    if not user_pubkey:
+        return [], {c: 0 for c in categories}
+
+    relays = relay_urls or DEFAULT_RELAYS
+    filter_obj = {"#p": [user_pubkey], "kinds": NOTIFICATION_KINDS, "limit": 40}
+    raw_events = relay_req(filter_obj, relay_urls=relays)
+    events = (
+        list(raw_events.values())
+        if isinstance(raw_events, dict)
+        else (raw_events if isinstance(raw_events, list) else [])
+    )
+
+    actor_pubkeys = {e.get("pubkey") for e in events if e.get("pubkey")}
+    profiles = {}
+    for pk in actor_pubkeys:
+        if pk == user_pubkey:
+            profiles[pk] = {}
+        else:
+            profiles[pk] = fetch_profile_data(pk, relay_urls=relays)
+
+    items = []
+    for e in events:
+        kind = e.get("kind")
+        category = NOTIFICATION_CATEGORY_OF_KIND.get(kind)
+        if category not in categories:
+            continue
+
+        tags = e.get("tags") or []
+        target_id = ""
+        for tag in tags:
+            if tag and tag[0] == "e" and len(tag) > 1 and tag[1]:
+                target_id = tag[1]
+                break
+        if not target_id:
+            target_id = e.get("id", "") or ""
+
+        pk = e.get("pubkey") or ""
+        prof = profiles.get(pk, {})
+        npub = hex_to_npub(pk) if pk else ""
+        actor_name = (
+            prof.get("display_name")
+            or prof.get("name")
+            or (npub[:20] if pk else "Anonymous")
+        )
+
+        items.append({
+            "id": e.get("id", ""),
+            "kind": kind,
+            "category": category,
+            "icon": NOTIFICATION_CATEGORY_ICONS.get(category, "🔔"),
+            "pubkey": pk,
+            "npub": npub,
+            "actor_name": actor_name,
+            "actor_avatar": prof.get("picture") or "",
+            "target_id": target_id,
+            "thread_url": f"/feed?thread={target_id}",
+            "content": (e.get("content") or ""),
+            "preview": build_notification_preview(kind, e.get("content", ""), tags),
+            "created_at_epoch": e.get("created_at") or 0,
+            "is_self": pk == user_pubkey,
+        })
+
+    items.sort(key=lambda n: n["created_at_epoch"], reverse=True)
+    counts = {c: 0 for c in categories}
+    for item in items:
+        counts[item["category"]] += 1
+
+    return items, counts
+
+
+class NotificationsView(LoginRequiredMixin, TemplateView):
+    template_name = "notifications.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        user_pubkey = did_to_pubkey(self.request.user.username)
+        relays = get_relays_for_request(self.request)
+
+        context["user_pubkey"] = user_pubkey
+        context["user_npub"] = did_to_npub(self.request.user.username) if user_pubkey else ""
+        context["relays_json"] = json.dumps(relays)
+        context["relays"] = relays
+
+        notifications, counts = fetch_notifications(user_pubkey, relay_urls=relays)
+        context["notifications"] = notifications
+        context["category_counts"] = counts
+        context["notification_total"] = len(notifications)
+        context["category_tabs"] = [
+            {"key": k, "label": NOTIFICATION_CATEGORY_LABELS[k], "count": counts.get(k, 0)}
+            for k in NOTIFICATION_CATEGORY_LABELS
+        ]
+        return context
 
 
 def fetch_user_nip65_relays(pubkey, relay_urls=None):
@@ -1459,6 +1664,13 @@ class GalleryView(TemplateView):
 
         context["notes"] = notes
         context["images"] = images
+        og_image = (
+            (notes[0].get("media_attachments") or [{}])[0].get("url")
+            or notes[0].get("thumbnail_url")
+            or notes[0].get("file_url")
+            or og_fallback_image(self.request)
+        ) if notes else og_fallback_image(self.request)
+        context["og_image"] = og_image
         context["videos"] = videos
         context["audio_items"] = audio
         context["other_items"] = other
@@ -1486,6 +1698,7 @@ class ProfileView(TemplateView):
         context["target_nostr_pubkey_hex"] = hex_pubkey
         context["npub"] = target_npub
         context["target_npub"] = target_npub
+        context["og_image"] = og_fallback_image(self.request)
 
         if not hex_pubkey:
             context["error"] = f"Invalid npub: {npub}"

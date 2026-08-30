@@ -17,6 +17,19 @@
       })();
     </script>
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
+    <style>
+      .notification-item-unread {
+        border-color: rgba(139, 92, 246, 0.55) !important;
+        background-color: rgba(139, 92, 246, 0.05);
+      }
+      .action-btn-like .heart-icon svg {
+        fill: none;
+      }
+      .action-btn-like.liked .heart-icon svg {
+        fill: rgb(236 72 153);
+        stroke: rgb(236 72 153);
+      }
+    </style>
     <!-- Favicons & App Icons -->
     <link rel="icon" type="image/png" href="{% static 'img/logo_square.png' %}">
     <link rel="apple-touch-icon" href="{% static 'img/logo_square.png' %}">
@@ -27,6 +40,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="Wun">
     <link rel="manifest" href="{% static 'manifest.json' %}">
+    {% block og_tags %}
+    <meta property="og:site_name" content="iyou_wun" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="iyou_wun — Sovereign Microblogging & Social Mesh" />
+    <meta property="og:description" content="Decentralized notes, links, media, and governance on the sovereign mesh." />
+    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/iyou_symbol.png' %}" />
+    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
+    <meta name="twitter:card" content="summary_large_image" />
+    {% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
 <body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-hidden">
@@ -43,6 +65,11 @@
     <script src="{% static 'js/toast_manager.js' %}"></script>
     <script src="{% static 'js/relay_pool.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
+    <script>
+      window.userPubkey = window.userPubkey || "{{ user_pubkey_hex|default:'' }}";
+      window.userNpub = window.userNpub || "{{ user_npub|default:'' }}";
+    </script>
+    <script src="{% static 'js/notification_manager.js' %}" defer></script>
     <script src="{% static 'js/contact_manager.js' %}" defer></script>
     <script src="{% static 'js/circle_feed_filter.js' %}" defer></script>
     <!-- Fullscreen Media Lightbox Modal -->
@@ -84,6 +111,9 @@
       }
     </script>
     {% include "includes/_toast_container.html" %}
+    {% if user.is_authenticated %}
+      {% include "includes/_notification_drawer.html" %}
+    {% endif %}
 </body>
 
 

@@ -10,6 +10,16 @@
 
     <div class="flex items-center gap-4">
       {% if user.is_authenticated or request.user.is_authenticated %}
+        <!-- Layer 1 Notification Trigger -->
+        <button id="notification-bell-btn"
+                type="button"
+                class="relative p-1.5 text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 focus:outline-none"
+                onclick="toggleNotificationDrawer()"
+                title="Activity Notifications">
+          <span class="text-sm">🔔</span>
+          <!-- Unread Badge Ping -->
+          <span id="notification-unread-dot" class="hidden absolute top-1 right-1 w-2 h-2 bg-violet-500 rounded-full animate-pulse"></span>
+        </button>
         <div class="flex items-center gap-2 font-mono">
           <a href="{% if user_profile_url %}{{ user_profile_url }}{% elif user_npub %}{% url 'profile' npub=user_npub %}{% else %}{% url 'dashboard' %}{% endif %}"
              class="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 transition group shadow-sm"
