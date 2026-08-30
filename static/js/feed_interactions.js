@@ -516,6 +516,17 @@
             '<button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 text-xs font-mono transition" onclick="cancelReply(\'' + escapeAttr(noteId) + '\')">Cancel</button>' +
             '</div></div></div>';
 
+        var translateBtnHtml = (note.lang && note.lang !== 'en') ?
+            '<button type="button" class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1" data-note-id="' + escapeAttr(noteId) + '" data-source-lang="' + escapeAttr(note.lang) + '" onclick="translateNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.lang) + '\', \'en\')"><span>🌐 Translate</span></button>' : '';
+
+        var translatedBoxHtml = '<div id="translated-box-' + escapeAttr(noteId) + '" class="hidden mt-2 p-2.5 rounded-lg bg-violet-50/50 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-800/40 text-sm sm:text-[15px] leading-relaxed">' +
+            '<div class="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-semibold mb-1 flex items-center justify-between">' +
+            '<span id="trans-label-' + escapeAttr(noteId) + '">TRANSLATED</span>' +
+            '<button type="button" class="hover:underline text-slate-500" onclick="toggleOriginalNote(\'' + escapeAttr(noteId) + '\')">View Original</button>' +
+            '</div>' +
+            '<div id="trans-text-' + escapeAttr(noteId) + '" class="text-slate-800 dark:text-slate-100"></div>' +
+            '</div>';
+
         return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '" data-lang="' + escapeAttr(note.lang || 'en') + '">' +
             '<div class="flex-shrink-0"><a href="/profile/' + npub + '/">' + avatarHtml + '</a></div>' +
             '<div class="flex-1 min-w-0">' +
@@ -527,6 +538,7 @@
             sovereignBadge +
             '</div>' +
             '<div class="flex items-center gap-2">' +
+            translateBtnHtml +
             '<a href="/feed?thread=' + encodeURIComponent(noteId) + '" class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition" title="View full conversation thread">' + formattedDate + '</a>' +
             '<div class="relative kebab-menu-wrap">' +
             '<button type="button" class="kebab-toggle-btn text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Post actions" onclick="toggleKebabMenu(event)">' +
@@ -542,6 +554,7 @@
             '</div></div></div></div>' +
             replyingToHtml +
             contentAndMediaHtml +
+            translatedBoxHtml +
             '<div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">' +
             '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPLY + '</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
             '<button type="button" class="action-btn-repost group/repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPOST + '</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
@@ -1516,6 +1529,94 @@
         initFeedPaginationObserver();
     }
 
+    // ---------- Inline Note Translation Engine ----------
+
+    function translateNote(noteId, sourceLang, targetLang) {
+        targetLang = targetLang || "en";
+        sourceLang = sourceLang || "auto";
+
+        var card = document.querySelector('[data-note-card-id="' + noteId + '"]') || document.querySelector('.feed-note-card[data-note-id="' + noteId + '"]');
+        if (!card) return;
+
+        var btn = card.querySelector('.translate-btn[data-note-id="' + noteId + '"]') || card.querySelector('.translate-btn');
+        var transBox = document.getElementById('translated-box-' + noteId);
+        var transText = document.getElementById('trans-text-' + noteId);
+        var transLabel = document.getElementById('trans-label-' + noteId);
+        var bodyContent = card.querySelector('.note-body-content');
+
+        if (!transBox || !transText || !bodyContent) return;
+
+        var originalText = bodyContent.innerText || bodyContent.textContent || "";
+        if (!originalText.trim()) return;
+
+        var prevBtnHtml = btn ? btn.innerHTML : "";
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<span>🌐 Translating...</span>';
+        }
+
+        fetch('/api/translate/', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({
+                text: originalText.trim(),
+                source_lang: sourceLang,
+                target_lang: targetLang
+            })
+        })
+        .then(function (res) {
+            if (!res.ok) throw new Error('Translation failed');
+            return res.json();
+        })
+        .then(function (data) {
+            if (data && data.success && data.translated_text) {
+                transText.textContent = data.translated_text;
+                if (transLabel) {
+                    transLabel.textContent = 'TRANSLATED FROM ' + (sourceLang || 'AUTO').toUpperCase();
+                }
+                bodyContent.classList.add('hidden');
+                transBox.classList.remove('hidden');
+                if (btn) {
+                    btn.innerHTML = '<span>🌐 Translated</span>';
+                }
+            } else {
+                throw new Error((data && data.error) || 'Translation error');
+            }
+        })
+        .catch(function (err) {
+            console.error('Translation error:', err);
+            if (typeof showToast === 'function') {
+                showToast('Unable to translate note: ' + (err.message || 'Service unavailable'), 'error');
+            }
+            if (btn) {
+                btn.innerHTML = prevBtnHtml;
+            }
+        })
+        .finally(function () {
+            if (btn) btn.disabled = false;
+        });
+    }
+
+    function toggleOriginalNote(noteId) {
+        var card = document.querySelector('[data-note-card-id="' + noteId + '"]') || document.querySelector('.feed-note-card[data-note-id="' + noteId + '"]');
+        if (!card) return;
+
+        var transBox = document.getElementById('translated-box-' + noteId);
+        var bodyContent = card.querySelector('.note-body-content');
+        if (!transBox || !bodyContent) return;
+
+        if (bodyContent.classList.contains('hidden')) {
+            bodyContent.classList.remove('hidden');
+            transBox.classList.add('hidden');
+        } else {
+            bodyContent.classList.add('hidden');
+            transBox.classList.remove('hidden');
+        }
+    }
+
     // ---------- Public API ----------
 
     window.postToNostr = postToNostr;
@@ -1553,5 +1654,7 @@
     window.addPollOption = addPollOption;
     window.removeOption = removeOption;
     window.createPoll = createPoll;
+    window.translateNote = translateNote;
+    window.toggleOriginalNote = toggleOriginalNote;
 })();
 

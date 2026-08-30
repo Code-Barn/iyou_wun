@@ -1087,6 +1087,64 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-lang="es"')
 
+    def test_thread_post_renders_translate_button_for_non_english(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        event_es = make_event("es_note_trans", 1, pubkey=pk, content="¡Hola mundo nostr! ¿Cómo estás?", tags=[["lang", "es"]])
+        event_en = make_event("en_note_trans", 1, pubkey=pk, content="Standard english text note", tags=[["lang", "en"]])
+        with patch("apps.core.views.relay_req", return_value={"es_note_trans": event_es, "en_note_trans": event_en}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="translate-btn')
+        self.assertContains(response, 'data-note-id="es_note_trans"')
+        self.assertContains(response, 'id="translated-box-es_note_trans"')
+        self.assertContains(response, "translateNote('es_note_trans', 'es', 'en')")
+
+    def test_api_translate_endpoint_returns_translated_payload(self):
+        from django.core.cache import cache
+        cache.clear()
+
+        # 1. Reject non-POST
+        resp_get = self.client.get(reverse("api_translate"))
+        self.assertEqual(resp_get.status_code, 405)
+
+        # 2. Reject empty text
+        resp_empty = self.client.post(
+            reverse("api_translate"),
+            data=json.dumps({"text": "", "source_lang": "es", "target_lang": "en"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp_empty.status_code, 400)
+
+        # 3. Valid translation payload
+        payload = {
+            "text": "¡Hola mundo nostr! ¿Cómo estás?",
+            "source_lang": "es",
+            "target_lang": "en",
+        }
+        resp_post = self.client.post(
+            reverse("api_translate"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(resp_post.status_code, 200)
+        data = resp_post.json()
+        self.assertTrue(data["success"])
+        self.assertIn("Hello nostr world", data["translated_text"])
+        self.assertEqual(data["source_lang"], "es")
+        self.assertEqual(data["target_lang"], "en")
+        self.assertFalse(data["cached"])
+
+        # 4. Verify Caching on second request
+        resp_cached = self.client.post(
+            reverse("api_translate"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(resp_cached.status_code, 200)
+        data_cached = resp_cached.json()
+        self.assertTrue(data_cached["cached"])
+        self.assertEqual(data_cached["translated_text"], data["translated_text"])
+
     def test_api_feed_deduplicates_and_returns_valid_notes(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         event1 = make_event("api_dup_1", 1, pubkey=pk, created_at=1699999000, content="Original note text")

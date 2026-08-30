@@ -859,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**333 total across 7 test modules**; ruff clean):
+Tests cover (**335 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -868,7 +868,7 @@ Tests cover (**333 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (101 tests)
+### `test_views.py` (103 tests)
 - `HomeViewTest` — root redirect to /feed (1)
 - `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector (6)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
@@ -879,7 +879,7 @@ Tests cover (**333 total across 7 test modules**; ruff clean):
 - `MediaUploadProxyViewTest` — Blossom proxy behavior incl. dynamic endpoint resolution (6)
 - `FeedViewTrustLensContractTest` — Level0/0.5/1 trust pill contract (6)
 - `FeedViewTwoTierToolbarTest` — two-tier nav toolbar, circle scope badge, live tag search (5)
-- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, Open Graph metadata, NIP-56 report actions, separate subheader links & jump to root conversation, scoped trending switcher & NSFW shield toggle, [ ⚡ iyou ] circle filter pill & LinkDeck author scoping, data-lang card decoration (17)
+- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, Open Graph metadata, NIP-56 report actions, separate subheader links & jump to root conversation, scoped trending switcher & NSFW shield toggle, [ ⚡ iyou ] circle filter pill & LinkDeck author scoping, data-lang card decoration, on-demand note translation endpoint (`/api/translate/`) & inline UI trigger button (19)
 - `SearchAPITests` — `/api/search/` JSON schema, handle/name/hashtag filtering, nav dropdown DOM, toast container (4)
 - `CyberGritErrorViewTests` — branded cyber-grit 404 & 500 error views, route disconnected / internal transmission fault copy, socket retry (18)
 - `NotificationViewTests` — authenticated bell toggle, slide-out drawer markup, `/notifications` ledger tabs (Mentions/Reactions/Zaps) (4)

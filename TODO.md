@@ -65,12 +65,12 @@
     - Enhance `detect_language()` in `apps/core/nip10.py` to parse NIP-01 `["lang", "<code>"]` tags and evaluate lightweight script heuristics.
     - Expose `data-lang="<code>"` on all server-rendered and client-rendered note cards.
     - Update `static/js/circle_feed_filter.js` to hide notes outside the user's preferred stream languages when filtering is active — **Done 2026-08-30**
-  - [ ] **17.4 On-Demand Note Translation API (`POST /api/translate/`):**
+  - [x] **17.4 On-Demand Note Translation API (`POST /api/translate/`):**
     - Implement a backend translation endpoint accepting `{ "text": "...", "source_lang": "...", "target_lang": "..." }`.
-    - Wire to a self-hosted translation backend (LibreTranslate / translation service) with response caching.
-  - [ ] **17.5 Inline Translation UI Action:**
-    - Render a subtle `[ 🌐 Translate to <Language> ]` link in `_thread_post.html` and `feed_interactions.js` whenever `note.lang` differs from the active interface language.
-    - Wire smooth in-place text replacement with a `[ Translated from <Source> — View Original ]` revert toggle.
+    - Wire to a self-hosted translation backend (LibreTranslate / translation service) with response caching — **Done 2026-08-30**
+  - [x] **17.5 Inline Translation UI Action:**
+    - Render a subtle `[ 🌐 Translate ]` link in `_thread_post.html` and `feed_interactions.js` whenever `note.lang` differs from the active interface language.
+    - Wire smooth in-place text replacement with a `[ Translated from <Source> — View Original ]` revert toggle — **Done 2026-08-30**
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

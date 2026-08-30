@@ -27,6 +27,7 @@ urlpatterns = [
     path('api/relays', views.api_relays, name='api_relays'),
     path('api/feed', views.api_feed, name='api_feed'),
     path('api/search/', views.api_search, name='api_search'),
+    path('api/translate/', views.api_translate, name='api_translate'),
     path('api/profile/save/', views.api_save_profile, name='api_save_profile'),
     path('api/vote', views.api_cast_vote, name='api_cast_vote'),
 

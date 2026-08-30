@@ -52,8 +52,18 @@
         {% endif %}
       </div>
 
-      <!-- Right Header Actions: Relative Timestamp & Kebab Dropdown -->
+      <!-- Right Header Actions: Translation Trigger, Relative Timestamp & Kebab Dropdown -->
       <div class="flex items-center gap-2">
+        {% if note.lang and note.lang != 'en' %}
+        <button type="button" 
+                class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1"
+                data-note-id="{{ note.id }}"
+                data-source-lang="{{ note.lang }}"
+                onclick="translateNote('{{ note.id }}', '{{ note.lang }}', 'en')">
+          <span>🌐 Translate</span>
+        </button>
+        {% endif %}
+
         <a href="{% url 'feed' %}?thread={{ note.id }}" 
            class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition"
            title="View full conversation thread">
@@ -121,6 +131,16 @@
     {% if note.display_content or note.content %}
     <div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words select-text pt-0.5">{{ note.display_content|default:note.content|linebreaksbr|safe }}</div>
     {% endif %}
+
+    <div id="translated-box-{{ note.id }}" class="hidden mt-2 p-2.5 rounded-lg bg-violet-50/50 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-800/40 text-sm sm:text-[15px] leading-relaxed">
+      <div class="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-semibold mb-1 flex items-center justify-between">
+        <span id="trans-label-{{ note.id }}">TRANSLATED</span>
+        <button type="button" class="hover:underline text-slate-500" onclick="toggleOriginalNote('{{ note.id }}')">
+          View Original
+        </button>
+      </div>
+      <div id="trans-text-{{ note.id }}" class="text-slate-800 dark:text-slate-100"></div>
+    </div>
 
     {% if note.media_attachments %}
     <div class="mt-3 space-y-2">
