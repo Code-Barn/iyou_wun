@@ -50,9 +50,30 @@
   - [x] **16.5 Cyber-Grit Branded Error Views:**
     - Author custom `templates/404.html` and `templates/500.html` extending `base.html` with theme reactivity, return-to-mesh buttons, and error diagnostic codes.
 - [x] **16.6 NIP-56 Report/Flag Moderation (implementation):**
-    - Kebab-menu 🚩 Report / Flag Note action opens a reason-picker modal (spam, nudity, illegal, malware, profanity, other), publishes a signed NIP-56 Kind 1984 report, removes the card from the DOM, and confirms via toast.
+  - Kebab-menu 🚩 Report / Flag Note action opens a reason-picker modal (spam, nudity, illegal, malware, profanity, other), publishes a signed NIP-56 Kind 1984 report, removes the card from the DOM, and confirms via toast.
+
+- [ ] **Phase 17 — Internationalization, Language Filtering & Inline Note Translation:**
+  - [ ] **17.1 UI Localization & gettext Infrastructure:**
+    - Configure Django `LocaleMiddleware` and translation settings (`LANGUAGES = [('en', 'English'), ('es', 'Español'), ...]`).
+    - Wrap core UI labels, navigation buttons, and modal dialogs across templates in `{% trans %}` tags.
+    - Compile initial `.po`/`.mo` localization message catalogs for Tier 1 languages (`en`, `es`).
+  - [ ] **17.2 Dashboard Language & Content Preferences:**
+    - Add a **Language & Locale** preference card in `/dashboard#settings`.
+    - Store interface language choice in `django_language` cookie and `localStorage`.
+    - Add **Feed Stream Language Preferences** multi-select (`English Only`, `Spanish Only`, `Global / All`).
+  - [ ] **17.3 Stream Language Gate & Ingestion Filter:**
+    - Enhance `detect_language()` in `apps/core/nip10.py` to parse NIP-01 `["lang", "<code>"]` tags and evaluate lightweight script heuristics.
+    - Expose `data-lang="<code>"` on all server-rendered and client-rendered note cards.
+    - Update `static/js/circle_feed_filter.js` to hide notes outside the user's preferred stream languages when filtering is active.
+  - [ ] **17.4 On-Demand Note Translation API (`POST /api/translate/`):**
+    - Implement a backend translation endpoint accepting `{ "text": "...", "source_lang": "...", "target_lang": "..." }`.
+    - Wire to a self-hosted translation backend (LibreTranslate / translation service) with response caching.
+  - [ ] **17.5 Inline Translation UI Action:**
+    - Render a subtle `[ 🌐 Translate to <Language> ]` link in `_thread_post.html` and `feed_interactions.js` whenever `note.lang` differs from the active interface language.
+    - Wire smooth in-place text replacement with a `[ Translated from <Source> — View Original ]` revert toggle.
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---
+
 
