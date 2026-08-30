@@ -725,6 +725,119 @@ class FeedRelayHealthWidgetLayoutTest(TestCase):
         self.assertNotContains(response, 'id="relay-health-text"')
 
 
+class FeedSanitizerTests(TestCase):
+    """Heuristic noise / NIP-36 content-warning sanitizer contract."""
+
+    def test_machine_noise_events_dropped_from_feed(self):
+        clean = make_event("clean_card", 1, content="Just a friendly note from the grid")
+        json_noise = make_event("noise_json", 1, content='{"device":"sensor-7","ts":1700000000,"payload":{"temp":22.4}}')
+        trace_noise = make_event(
+            "noise_trace",
+            1,
+            content='Traceback (most recent call last):\n  File "main.py", line 4, in <module>\n    boom()',
+        )
+        hex_noise = make_event("noise_hex", 1, content="a3b7" * 60)
+        b64_noise = make_event("noise_b64", 1, content="U29tZSBiaW5hcnkgYmxvYiBkYXRhIGhlcmUgdGhhdCBpcyBxdWl0ZSBsb25nIGFuZCBuZWVkcyBwYXJzaW5nIGNhcmVmdWxseTk4ODc2NTQzMjE=")
+
+        feed = process_into_feed(
+            {
+                "clean_card": clean,
+                "noise_json": json_noise,
+                "noise_trace": trace_noise,
+                "noise_hex": hex_noise,
+                "noise_b64": b64_noise,
+            }
+        )
+
+        roots = feed["roots"]
+        self.assertEqual(len(roots), 1)
+        self.assertEqual(roots[0]["id"], "clean_card")
+
+    def test_nip36_content_warning_flags_and_reasons_parsed(self):
+        tagged_with_reason = make_event(
+            "cw_1",
+            1,
+            content="Medical imagery ahead",
+            tags=[["content-warning", "Medical imagery"]],
+        )
+        tagged_no_reason = make_event("cw_2", 1, content="risky post", tags=[["content-warning"]])
+        marker_note = make_event("cw_3", 1, content="check this out #nsfw link hero")
+        french_note = make_event("cw_4", 1, content="Bonjour le monde", tags=[["lang", "fr"]])
+
+        feed = process_into_feed(
+            {
+                "cw_1": tagged_with_reason,
+                "cw_2": tagged_no_reason,
+                "cw_3": marker_note,
+                "cw_4": french_note,
+            }
+        )
+
+        by_id = {r["id"]: r for r in feed["roots"]}
+
+        self.assertTrue(by_id["cw_1"]["has_content_warning"])
+        self.assertEqual(by_id["cw_1"]["warning_reason"], "Medical imagery")
+
+        self.assertTrue(by_id["cw_2"]["has_content_warning"])
+        self.assertEqual(by_id["cw_2"]["warning_reason"], "Sensitive Content")
+
+        self.assertTrue(by_id["cw_3"]["has_content_warning"])
+        self.assertEqual(by_id["cw_3"]["warning_reason"], "Sensitive Content")
+
+        self.assertFalse(by_id["cw_4"]["has_content_warning"])
+        self.assertFalse(by_id["cw_4"]["warning_reason"])
+        self.assertEqual(by_id["cw_4"]["lang"], "fr")
+
+    def test_sanitize_defaults_lang_to_en(self):
+        from apps.core.nip10 import sanitize_event_content
+
+        result = sanitize_event_content(make_event("plain", 1, content="plain note"))
+        self.assertTrue(result["is_valid"])
+        self.assertEqual(result["lang"], "en")
+        self.assertFalse(result["has_content_warning"])
+
+
+class AttachSocialCountsTests(TestCase):
+    """Unified batch social-counts (replies, reposts, reactions) contract."""
+
+    def test_attach_social_counts_tallies_kind7_reactions_and_kind1_replies(self):
+        from apps.core.views import attach_social_counts
+
+        notes = [
+            {"id": "root_a", "content": "Root A", "replies": []},
+            {"id": "root_b", "content": "Root B", "replies": []},
+        ]
+
+        events = {
+            "like_1": make_event("like_1", 7, content="+", tags=[["e", "root_a"]]),
+            "like_2": make_event("like_2", 7, content="❤️", tags=[["e", "root_a"]]),
+            "like_b": make_event("like_b", 7, content="+", tags=[["e", "root_b"]]),
+            "dislike": make_event("dislike", 7, content="-", tags=[["e", "root_a"]]),
+            "reply": make_event("reply", 1, content="reply!", tags=[["e", "root_a"]]),
+            "repost": make_event("repost", 6, content="", tags=[["e", "root_b"]]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=events):
+            result = attach_social_counts(notes)
+
+        self.assertEqual(result[0]["like_count"], 2)
+        self.assertEqual(result[0]["reactions_count"], 2)
+        self.assertEqual(result[0]["reply_count"], 1)
+        self.assertEqual(result[0]["repost_count"], 0)
+
+        self.assertEqual(result[1]["like_count"], 1)
+        self.assertEqual(result[1]["reply_count"], 0)
+        self.assertEqual(result[1]["repost_count"], 1)
+
+    def test_attach_social_counts_empty_notes_returns_unchanged(self):
+        from apps.core.views import attach_social_counts
+
+        with patch("apps.core.views.relay_req", return_value={}) as mock_req:
+            result = attach_social_counts([])
+        self.assertEqual(result, [])
+        mock_req.assert_not_called()
+
+
 
 
 

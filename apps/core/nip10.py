@@ -22,6 +22,129 @@ AUDIO_EXT_REGEX = re.compile(r"https?://[^\s<>\"]+?\.(?:mp3|ogg|wav|m4a|flac)(?:
 MEDIA_HOST_REGEX = re.compile(r"https?://(?:image\.nostr\.build|cdn\.iyou\.me|blossom\.[^\s<>\"]+)/[^\s<>\"]+", re.IGNORECASE)
 URL_REGEX = re.compile(r"https?://[^\s<>\"]+", re.IGNORECASE)
 
+# --- Heuristic noise detection ---
+HEX_DUMP_REGEX = re.compile(r"^[0-9a-fA-F]{129,}$")
+BASE64_BLOB_REGEX = re.compile(r"^[A-Za-z0-9+/=]{100,}$")
+STACK_TRACE_REGEX = re.compile(r"Traceback \(most recent call last\)|File \".*\", line \d+|\bin <module>\b")
+
+ADULT_CONTENT_MARKERS = ("#nsfw", "#adult", "18+")
+
+
+def sanitize_event_content(event):
+    """Heuristic noise & NSFW classifier for a raw Nostr event.
+
+    Returns a dict:
+        {
+            "is_valid": bool,          # False => pure machine noise; drop from feed
+            "is_noise": bool,
+            "has_content_warning": bool,
+            "warning_reason": str,     # NIP-36 reason or "Sensitive Content"
+            "lang": str,               # ["lang", "<code>"] tag value or "en"
+        }
+
+    Machine-noise filter flags raw JSON telemetry payloads, stack traces,
+    long unbroken hex dumps, and unpadded base64 binary blobs published as
+    plain text cards.
+    """
+    if not isinstance(event, dict):
+        return {
+            "is_valid": False,
+            "is_noise": True,
+            "has_content_warning": False,
+            "warning_reason": "",
+            "lang": "en",
+        }
+
+    content = event.get("content")
+    if content is None:
+        content = ""
+    else:
+        content = str(content)
+
+    is_noise = detect_machine_noise(content)
+    has_cw, reason = detect_content_warning(event)
+    lang = detect_language(event)
+
+    return {
+        "is_valid": not is_noise,
+        "is_noise": is_noise,
+        "has_content_warning": has_cw,
+        "warning_reason": reason,
+        "lang": lang,
+    }
+
+
+def detect_machine_noise(content):
+    """Return True when content looks like pure machine output, not a human note."""
+    if not content:
+        return False
+
+    stripped = content.strip()
+
+    # Raw JSON payloads: text starts with '{' and parses as JSON in full.
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict) and parsed:
+            return True
+
+    # Stack traces
+    if STACK_TRACE_REGEX.search(content):
+        return True
+
+    compact = re.sub(r"\s+", "", content)
+    if not compact:
+        return False
+
+    # Raw hex dumps > 128 chars without spaces
+    if HEX_DUMP_REGEX.match(compact):
+        return True
+
+    # Base64 binary blobs (>= 100 chars, includes a digit, no spaces)
+    if (
+        len(compact) >= 100
+        and BASE64_BLOB_REGEX.match(compact)
+        and re.search(r"\d", compact)
+    ):
+        return True
+
+    return False
+
+
+def detect_content_warning(event):
+    """NIP-36 content-warning detection from tags and visible markers.
+
+    Returns (has_content_warning, warning_reason).
+    """
+    tags = event.get("tags") or []
+    content = event.get("content") or ""
+
+    reason = ""
+    for tag in tags:
+        if not tag:
+            continue
+        if tag[0] == "content-warning":
+            if len(tag) > 1 and str(tag[1]).strip():
+                reason = str(tag[1]).strip()
+            return True, reason or "Sensitive Content"
+
+    lowered = str(content).lower()
+    for marker in ADULT_CONTENT_MARKERS:
+        if marker in lowered:
+            return True, "Sensitive Content"
+
+    return False, ""
+
+
+def detect_language(event):
+    """Read the ["lang", "<code>"] tag, defaulting to 'en'."""
+    for tag in event.get("tags") or []:
+        if tag and tag[0] == "lang" and len(tag) > 1 and str(tag[1]).strip():
+            return str(tag[1]).strip().lower()
+    return "en"
+
 
 def extract_media_from_note(note):
     """Extract and unfurl media attachments from Kind 1063 tags or Kind 1 note content."""
@@ -240,6 +363,9 @@ def build_thread_tree(raw_events, profiles=None):
             "reply_count": 0,
             "reactions": [],
             "replies": [],
+            "has_content_warning": bool(e.get("has_content_warning")),
+            "warning_reason": e.get("warning_reason") or "",
+            "lang": e.get("lang") or "en",
         }
         return extract_media_from_note(note)
 
@@ -371,6 +497,9 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "reply_count": 0,
         "reactions": [],
         "replies": [],
+        "has_content_warning": bool(e.get("has_content_warning")),
+        "warning_reason": e.get("warning_reason") or "",
+        "lang": e.get("lang") or "en",
     }
 
     if kind == 1063:

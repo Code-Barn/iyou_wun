@@ -416,7 +416,7 @@
 
         var date = new Date((note.created_at || (Date.now() / 1000)) * 1000);
         var formattedDate = date.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-        var reactionLikeCount = (note.like_count && note.like_count > 0) ? String(note.like_count) : ((note.reactions && note.reactions.length) ? String(note.reactions.length) : "Like");
+        var reactionLikeCount = (note.like_count && note.like_count > 0) ? String(note.like_count) : ((note.reactions && note.reactions.length) ? String(note.reactions.length) : "");
         var repliesCount = (note.reply_count && note.reply_count > 0) ? String(note.reply_count) : "Reply";
         var repostCount = note.repost_count ? String(note.repost_count) : "Repost";
 
@@ -474,6 +474,18 @@
             replyingToHtml = '<div class="text-xs font-mono text-slate-400 dark:text-slate-500 mb-1 flex items-center gap-1"><span>↳ Replying to</span> <a href="' + replyLink + '" class="text-violet-600 dark:text-violet-400 hover:underline">@' + escapeHtml(displayTarget) + '</a></div>';
         }
 
+        var contentAndMediaHtml = (displayContent ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(displayContent) + '</div>' : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(noteContent) + '</div>' : ''));
+        contentAndMediaHtml += mediaHtml;
+
+        if (note.has_content_warning) {
+            var cwReason = note.warning_reason || "Sensitive Content";
+            contentAndMediaHtml = '<div class="content-warning-shield relative rounded-xl border border-amber-200 dark:border-amber-900/70 overflow-hidden mb-3">' +
+                '<div class="blur-me backdrop-blur-md blur-sm select-none pointer-events-none">' + contentAndMediaHtml + '</div>' +
+                '<button type="button" class="content-warning-reveal absolute inset-0 z-10 w-full h-full flex items-center justify-center" onclick="revealContentWarning(this)">' +
+                '<span class="px-4 py-2 rounded-full bg-amber-100 dark:bg-amber-950/90 border border-amber-300 dark:border-amber-800/80 text-xs font-mono font-medium text-amber-800 dark:text-amber-300 shadow-lg">⚠️ ' + escapeHtml(cwReason) + ' — Click to View</span>' +
+                '</button></div>';
+        }
+
         var replyDrawerHtml = '<div id="reply-box-' + escapeAttr(noteId) + '" class="hidden mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">' +
             '<div class="flex items-start gap-2.5">' +
             '<textarea id="reply-input-' + escapeAttr(noteId) + '" class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none" rows="2" placeholder="Write a sovereign reply..."></textarea>' +
@@ -507,8 +519,7 @@
             '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="copyNotePermalink(\'' + escapeAttr(noteId) + '\')">🔗 Copy Event ID / Link</button>' +
             '</div></div></div></div>' +
             replyingToHtml +
-            (displayContent ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(displayContent) + '</div>' : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? '<div class="note-text-content text-slate-800 dark:text-slate-200 text-sm leading-relaxed whitespace-pre-wrap break-words">' + escapeHtml(noteContent) + '</div>' : '')) +
-            mediaHtml +
+            contentAndMediaHtml +
             '<div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">' +
             '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span>💬</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
             '<button type="button" class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span>🔁</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
@@ -518,6 +529,18 @@
             '</div>' +
             replyDrawerHtml +
             '</div></div>';
+    }
+
+    // ---------- NIP-36 Content Warning Reveal ----------
+
+    function revealContentWarning(btn) {
+        var shield = btn && btn.closest ? btn.closest(".content-warning-shield") : null;
+        if (!shield) return;
+        var blurEl = shield.querySelector(".blur-me");
+        if (blurEl) {
+            blurEl.classList.remove("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
+        }
+        btn.classList.add("hidden");
     }
 
     // ---------- Optimistic Feed Insert ----------
@@ -1396,6 +1419,7 @@
 
     window.appendReplyToThread = appendReplyToThread;
     window.addNoteToFeed = addNoteToFeed;
+    window.revealContentWarning = revealContentWarning;
     window.appendNoteToFeed = appendNoteToFeed;
     window.loadMoreNotes = loadMoreNotes;
     window.getBlossomBaseUrl = getBlossomBaseUrl;

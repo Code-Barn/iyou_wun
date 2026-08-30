@@ -872,7 +872,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             return notes
 
         with patch("apps.core.views.relay_req", return_value={"api_like_1": event1, "api_like_2": event2}), \
-             patch("apps.core.views.attach_reaction_counts", side_effect=_fake_attach_reaction_counts):
+             patch("apps.core.views.attach_social_counts", side_effect=_fake_attach_reaction_counts):
             response = self.client.get(reverse("api_feed") + "?until=1700000000&limit=10")
 
         self.assertEqual(response.status_code, 200)

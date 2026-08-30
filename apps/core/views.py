@@ -137,8 +137,7 @@ class FeedView(TemplateView):
 
 
             notes = feed_data["roots"]
-            notes = attach_reply_counts(notes, relay_urls=relays)
-            notes = attach_reaction_counts(notes, relay_urls=relays)
+            notes = attach_social_counts(notes, relay_urls=relays)
             timestamps = []
             for n in notes:
                 ts = n.get("created_at")
@@ -396,8 +395,7 @@ def api_feed(request):
                 profiles[pk] = {}
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit)
-    feed_data["roots"] = attach_reply_counts(feed_data["roots"], relay_urls=relays)
-    feed_data["roots"] = attach_reaction_counts(feed_data["roots"], relay_urls=relays)
+    feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays)
 
 
     def _serialize(note):
@@ -1114,7 +1112,7 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     if profiles is None:
         profiles = {}
 
-    from .nip10 import build_thread_tree
+    from .nip10 import build_thread_tree, sanitize_event_content
     from datetime import datetime
 
     # Normalize and deduplicate input raw_events
@@ -1155,6 +1153,13 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     votes = []
 
     for eid, e in raw_events.items():
+        sanitized = sanitize_event_content(e)
+        if not sanitized["is_valid"]:
+            continue
+        e["has_content_warning"] = sanitized["has_content_warning"]
+        e["warning_reason"] = sanitized["warning_reason"]
+        e["lang"] = sanitized["lang"]
+
         kind = e.get("kind")
         if kind == 1:
             kind_1[eid] = e
@@ -1259,10 +1264,13 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     }
 
 
-def attach_reply_counts(notes, relay_urls=None):
+def attach_social_counts(notes, relay_urls=None):
     """
-    Given a list of note dictionaries, performs a single batch relay query
-    for all events tagging these notes in an 'e' tag, and sets note['reply_count'].
+    Unified batch social-counts query.
+
+    Issues a single relay filter over kinds [1, 6, 7, 1111] for every root
+    note ID (via '#' e tags) and sets note['reply_count'],
+    note['repost_count'], note['like_count'], and note['reactions_count'].
     """
     if not notes:
         return notes
@@ -1273,76 +1281,56 @@ def attach_reply_counts(notes, relay_urls=None):
 
     relays = relay_urls or DEFAULT_RELAYS
     filter_obj = {
-        "kinds": [1, 1111],
+        "kinds": [1, 6, 7, 1111],
         "#e": root_ids,
-        "limit": 500,
+        "limit": 800,
     }
 
     raw_events = relay_req(filter_obj, relay_urls=relays)
-    reply_events = list(raw_events.values()) if isinstance(raw_events, dict) else (raw_events if isinstance(raw_events, list) else [])
+    events = list(raw_events.values()) if isinstance(raw_events, dict) else (raw_events if isinstance(raw_events, list) else [])
 
-    counts = {rid: 0 for rid in root_ids}
-    for event in reply_events:
-        for tag in event.get("tags", []):
-            if len(tag) >= 2 and tag[0] == "e":
-                target_id = tag[1]
-                if target_id in counts:
-                    counts[target_id] += 1
+    reply_counts = {rid: 0 for rid in root_ids}
+    repost_counts = {rid: 0 for rid in root_ids}
+    like_counts = {rid: 0 for rid in root_ids}
 
-    for note in notes:
-        nid = note.get("id")
-        existing_replies = len(note.get("replies", []))
-        note["reply_count"] = max(existing_replies, counts.get(nid, 0))
-
-    return notes
-
-
-def attach_reaction_counts(notes, relay_urls=None):
-    """
-    Given a list of note dictionaries, performs a batch relay query
-    for Kind 7 (reaction) events referencing these notes in an 'e' tag,
-    and sets note['like_count'].
-    """
-    if not notes:
-        return notes
-
-    root_ids = [n["id"] for n in notes if n.get("id")]
-    if not root_ids:
-        return notes
-
-    relays = relay_urls or DEFAULT_RELAYS
-
-    # Query Kind 7 reaction events referencing any of our note IDs
-    filter_obj = {
-        "kinds": [7],
-        "#e": root_ids,
-        "limit": 1000,
-    }
-
-    raw_events = relay_req(filter_obj, relay_urls=relays)
-    reaction_events = (
-        list(raw_events.values())
-        if isinstance(raw_events, dict)
-        else (raw_events if isinstance(raw_events, list) else [])
-    )
-
-    # Tally valid likes (+, ❤️, or empty/emoji content) per target note ID
-    counts = {rid: 0 for rid in root_ids}
-    for event in reaction_events:
+    for event in events:
+        kind = event.get("kind")
         content = (event.get("content") or "").strip()
-        # Exclude explicit downvotes/dislikes (e.g., "-")
-        if content == "-":
+        # Exclude explicit downvotes/dislikes from the reaction tally
+        if kind == 7 and content == "-":
             continue
 
         for tag in event.get("tags", []):
-            if len(tag) >= 2 and tag[0] == "e":
-                target_id = tag[1]
-                if target_id in counts:
-                    counts[target_id] += 1
+            if len(tag) < 2 or tag[0] != "e":
+                continue
+            target_id = tag[1]
+            if target_id not in reply_counts:
+                continue
+            if kind in (1, 1111):
+                reply_counts[target_id] += 1
+            elif kind == 6:
+                repost_counts[target_id] += 1
+            elif kind == 7:
+                like_counts[target_id] += 1
 
-    # Set like_count on each note
     for note in notes:
         nid = note.get("id")
+
+        existing_reply_count = note.get("reply_count")
+        try:
+            existing_reply_int = int(existing_reply_count) if existing_reply_count is not None else 0
+        except (ValueError, TypeError):
+            existing_reply_int = 0
+        existing_replies = len(note.get("replies", []))
+        note["reply_count"] = max(existing_reply_int, existing_replies, reply_counts.get(nid, 0))
+
+        existing_reposts = note.get("repost_count")
+        try:
+            existing_reposts_int = int(existing_reposts) if existing_reposts is not None else 0
+        except (ValueError, TypeError):
+            existing_reposts_int = 0
+        note["repost_count"] = max(existing_reposts_int, repost_counts.get(nid, 0))
+
         existing_likes = note.get("like_count") or note.get("reactions") or 0
         if isinstance(existing_likes, dict):
             existing_likes = sum(existing_likes.values())
@@ -1352,9 +1340,20 @@ def attach_reaction_counts(notes, relay_urls=None):
             existing_likes_int = int(existing_likes)
         except (ValueError, TypeError):
             existing_likes_int = 0
-        note["like_count"] = max(existing_likes_int, counts.get(nid, 0))
+        note["like_count"] = max(existing_likes_int, like_counts.get(nid, 0))
+        note["reactions_count"] = note["like_count"]
 
     return notes
+
+
+def attach_reply_counts(notes, relay_urls=None):
+    """Backward-compatible wrapper: reply tally from the unified social-counts query."""
+    return attach_social_counts(notes, relay_urls=relay_urls)
+
+
+def attach_reaction_counts(notes, relay_urls=None):
+    """Backward-compatible wrapper: reaction tally from the unified social-counts query."""
+    return attach_social_counts(notes, relay_urls=relay_urls)
 
 
 def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
@@ -1593,9 +1592,8 @@ class ProfileView(TemplateView):
                 posts.append(note)
 
         relays = get_relays_for_request(self.request)
-        posts = attach_reply_counts(posts, relay_urls=relays)
-        posts = attach_reaction_counts(posts, relay_urls=relays)
-        replies = attach_reaction_counts(replies, relay_urls=relays)
+        posts = attach_social_counts(posts, relay_urls=relays)
+        replies = attach_social_counts(replies, relay_urls=relays)
         posts.sort(key=lambda x: x["created_at"], reverse=True)
         replies.sort(key=lambda x: x["created_at"], reverse=True)
         media_assets.sort(key=lambda x: x["created_at"], reverse=True)
