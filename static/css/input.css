@@ -30,3 +30,80 @@ html, body {
   min-height: 100%;
 }
 
+/* --- Plyr Theme Overrides & Video Viewports --- */
+:root {
+  --plyr-color-main: #7c3aed;
+  --plyr-video-control-color: #f8fafc;
+  --plyr-video-control-color-hover: #ffffff;
+  --plyr-video-control-background-hover: #6d28d9;
+}
+
+.plyr--video {
+  border-radius: 0.75rem;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
+}
+
+.plyr-video-container {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  background-color: #020617;
+  border-radius: 0.75rem;
+}
+
+.plyr-video-container.aspect-video {
+  aspect-ratio: 16 / 9;
+}
+
+.plyr-video-container.aspect-portrait {
+  aspect-ratio: 9 / 16;
+  max-height: 540px;
+}
+
+@keyframes spin-slow {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 8s linear infinite;
+}
+
+.audio-scrubber::-webkit-slider-runnable-track {
+  height: 4px;
+  background: #334155;
+  border-radius: 2px;
+}
+
+.audio-scrubber::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  background: #8b5cf6;
+  border-radius: 50%;
+  margin-top: -5px;
+  cursor: pointer;
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
+}
+
+.audio-scrubber::-moz-range-track {
+  height: 4px;
+  background: #334155;
+  border-radius: 2px;
+}
+
+.audio-scrubber::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  background: #8b5cf6;
+  border-radius: 50%;
+  border: none;
+  cursor: pointer;
+}
+

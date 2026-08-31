@@ -14,6 +14,8 @@
         }
       })();
     </script>
+    <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+    <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
         .modal-open { overflow: hidden; }
@@ -23,11 +25,10 @@
         .tab-inactive { color: #9ca3af; }
         .tab-inactive:hover { color: #fff; }
         .masonry-item { break-inside: avoid; }
-        audio::-webkit-media-controls-panel { background: #1e1b4b; }
-        .scrubber::-webkit-slider-runnable-track { height: 4px; background: #4c1d95; border-radius: 2px; }
-        .scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #a78bfa; border-radius: 50%; margin-top: -5px; cursor: pointer; }
-        .scrubber::-moz-range-track { height: 4px; background: #4c1d95; border-radius: 2px; }
-        .scrubber::-moz-range-thumb { width: 14px; height: 14px; background: #a78bfa; border-radius: 50%; border: none; cursor: pointer; }
+        .scrubber::-webkit-slider-runnable-track { height: 4px; background: #334155; border-radius: 2px; }
+        .scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: #8b5cf6; border-radius: 50%; margin-top: -5px; cursor: pointer; box-shadow: 0 0 8px rgba(139, 92, 246, 0.6); }
+        .scrubber::-moz-range-track { height: 4px; background: #334155; border-radius: 2px; }
+        .scrubber::-moz-range-thumb { width: 14px; height: 14px; background: #8b5cf6; border-radius: 50%; border: none; cursor: pointer; }
         .video-card-overlay { opacity: 0; transition: opacity 0.2s ease; }
         .video-card:hover .video-card-overlay { opacity: 1; }
     </style>
@@ -85,9 +86,24 @@
                     {% if note.media_type == "image" %}
                     <div class="aspect-square bg-gray-800 overflow-hidden cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><img src="{{ note.thumbnail_url|default:note.file_url }}" alt="{{ note.display_title|default:note.alt_text }}" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy"></div>
                     {% elif note.media_type == "video" %}
-                    <div class="aspect-video bg-gray-900 overflow-hidden relative cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata" muted></video><div class="video-card-overlay absolute inset-0 flex items-center justify-center bg-black/30"><span class="text-white text-5xl">&#9654;</span></div></div>
+                    <div class="plyr-video-container aspect-video bg-gray-950 overflow-hidden relative">
+                      <video class="gallery-video-player w-full h-full object-cover" playsinline controls preload="metadata" data-poster="{{ note.thumbnail_url|default:'' }}">
+                        <source src="{{ note.file_url }}" type="{{ note.mime_type|default:'video/mp4' }}" />
+                      </video>
+                    </div>
                     {% elif note.media_type == "audio" %}
-                    <div class="aspect-square bg-gradient-to-br from-violet-900/60 to-indigo-900/60 flex items-center justify-center cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><span class="text-6xl">&#127925;</span></div>
+                    <div class="aspect-square bg-gradient-to-br from-violet-950 via-slate-900 to-indigo-950 flex flex-col justify-between p-4 cursor-pointer relative overflow-hidden" onclick="openLightbox(this.closest('.gallery-card'))">
+                      <div class="flex items-center justify-between">
+                        <span class="text-3xl">🎵</span>
+                        {% if note.duration %}<span class="text-xs font-mono bg-violet-900/60 px-2 py-0.5 rounded text-violet-200">{{ note.duration }}s</span>{% endif %}
+                      </div>
+                      <div class="flex items-center justify-center my-auto">
+                        <div class="vinyl-disc w-20 h-20 rounded-full border-4 border-slate-800 bg-slate-900 flex items-center justify-center shadow-2xl">
+                          <div class="w-6 h-6 rounded-full bg-violet-600 flex items-center justify-center"><div class="w-2 h-2 rounded-full bg-black"></div></div>
+                        </div>
+                      </div>
+                      <p class="text-xs text-slate-300 font-sans truncate">{{ note.display_title|default:note.content|default:"Audio Track" }}</p>
+                    </div>
                     {% else %}
                     <div class="aspect-square bg-gray-800 flex items-center justify-center cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><span class="text-4xl text-gray-500">&#128196;</span></div>
                     {% endif %}
@@ -219,7 +235,12 @@
                      data-npub="{{ note.npub }}"
                      data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
                      data-sovereign="{{ note.is_sovereign }}">
-                    <div class="aspect-video bg-gray-950 relative cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))"><video src="{{ note.file_url }}" class="w-full h-full object-cover" preload="metadata" muted data-poster="{{ note.thumbnail_url }}"></video><div class="video-card-overlay absolute inset-0 flex items-center justify-center bg-black/30"><div class="w-14 h-14 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center"><span class="text-white text-2xl ml-1">&#9654;</span></div></div>{% if note.duration %}<span class="absolute bottom-2 right-2 bg-black/70 text-white text-xs px-2 py-0.5 rounded">{{ note.duration }}s</span>{% endif %}</div>
+                    <div class="plyr-video-container aspect-video bg-gray-950 overflow-hidden relative">
+                      <video class="gallery-video-player w-full h-full object-cover" playsinline controls preload="metadata" data-poster="{{ note.thumbnail_url|default:'' }}">
+                        <source src="{{ note.file_url }}" type="{{ note.mime_type|default:'video/mp4' }}" />
+                      </video>
+                      {% if note.duration %}<span class="absolute bottom-3 right-3 z-10 bg-black/80 text-white text-xs px-2 py-0.5 rounded font-mono pointer-events-none">{{ note.duration }}s</span>{% endif %}
+                    </div>
 
                     <!-- Card Metadata Footer -->
                     <div class="p-3 bg-slate-900/90 border-t border-slate-800 text-xs font-mono">
@@ -287,38 +308,40 @@
                      data-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
                      data-sovereign="{{ note.is_sovereign }}">
                     <div class="flex items-center gap-4 p-4">
-                      {% if note.author_avatar %}
-                      <img src="{{ note.author_avatar }}" class="w-16 h-16 rounded-lg object-cover flex-shrink-0" alt="">
-                      {% else %}
-                      <div class="w-16 h-16 rounded-lg bg-gradient-to-br from-violet-800 to-indigo-900 flex items-center justify-center flex-shrink-0"><span class="text-2xl">&#127925;</span></div>
-                      {% endif %}
+                      <div class="relative w-16 h-16 rounded-xl overflow-hidden flex-shrink-0 bg-gradient-to-br from-violet-900 to-indigo-950 flex items-center justify-center shadow-inner border border-violet-800/40 cursor-pointer" onclick="openLightbox(this.closest('.gallery-card'))">
+                        {% if note.author_avatar %}
+                        <img src="{{ note.author_avatar }}" class="vinyl-disc w-full h-full object-cover rounded-xl" alt="">
+                        {% else %}
+                        <span class="vinyl-disc text-3xl">🎵</span>
+                        {% endif %}
+                      </div>
                       <div class="min-w-0 flex-1">
-                        <p class="text-sm text-white font-medium truncate">{{ note.display_title|default:note.content|default:note.alt_text|truncatechars:40 }}</p>
+                        <p class="text-sm text-white font-medium truncate">{{ note.display_title|default:note.content|default:note.alt_text|default:"Audio Track"|truncatechars:40 }}</p>
                         <div class="flex items-center gap-1.5 mt-1">
                           <a href="{% url 'profile' npub=note.npub %}" class="text-xs font-mono text-gray-400 hover:text-violet-400 truncate max-w-[120px]" title="{{ note.author_name|default:note.npub }}">
                             {{ note.author_name|default:note.npub|truncatechars:14 }}
                           </a>
                           {% if note.nip05 %}
                           <span class="inline-flex items-center gap-0.5 text-[10px] text-violet-400 bg-violet-950/60 px-1 py-0.2 rounded border border-violet-800/60" title="{{ note.nip05 }}">
-                            <svg class="w-2.5 h-2.5 text-violet-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
+                            <svg class="w-2.5 h-2.5 text-violet-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>
                           </span>
                           {% endif %}
                           <span class="author-badge-slot" data-author-slot="{{ note.pubkey_hex|default:note.pubkey }}"></span>
                         </div>
                         <div class="flex items-center gap-2 mt-1">
-                          <span class="text-xs text-gray-600">{{ note.created_at|date:"M d" }}</span>
-                          {% if note.duration %}<span class="text-xs text-gray-600">{{ note.duration }}s</span>{% endif %}
+                          <span class="text-xs text-gray-500 font-mono">{{ note.created_at|date:"M d" }}</span>
+                          {% if note.duration %}<span class="text-xs text-gray-500 font-mono">{{ note.duration }}s</span>{% endif %}
                         </div>
                       </div>
                     </div>
                     <div class="px-4 pb-4">
-                      <div class="bg-gray-950 rounded-lg p-3 flex items-center gap-3">
-                        <button onclick="toggleAudioPlayer('{{ note.file_url }}', this)" class="audio-play-btn w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0 transition-colors" data-src="{{ note.file_url }}"><span class="text-white text-lg">&#9654;</span></button>
+                      <div class="bg-gray-950 rounded-xl p-3.5 flex items-center gap-3 border border-slate-800/80">
+                        <button onclick="toggleAudioPlayer('{{ note.file_url }}', this)" class="audio-play-btn w-10 h-10 rounded-full bg-violet-600 hover:bg-violet-500 flex items-center justify-center flex-shrink-0 transition-colors shadow-lg shadow-violet-900/30" data-src="{{ note.file_url }}"><span class="text-white text-lg ml-0.5">&#9654;</span></button>
                         <div class="flex-1 min-w-0">
-                          <input type="range" min="0" max="100" value="0" class="scrubber w-full h-1 appearance-none rounded-full bg-gray-700 cursor-pointer" data-src="{{ note.file_url }}">
-                          <div class="flex justify-between mt-1">
-                            <span class="text-xs text-gray-500 audio-current" data-src="{{ note.file_url }}">0:00</span>
-                            {% if note.duration %}<span class="text-xs text-gray-500">{{ note.duration }}s</span>{% endif %}
+                          <input type="range" min="0" max="100" value="0" class="scrubber audio-scrubber w-full h-1 appearance-none rounded-full bg-gray-800 cursor-pointer" data-src="{{ note.file_url }}">
+                          <div class="flex justify-between mt-1.5 font-mono text-[11px] text-gray-400">
+                            <span class="audio-current" data-src="{{ note.file_url }}">0:00</span>
+                            <span>{% if note.duration %}{{ note.duration }}s{% else %}--:--{% endif %}</span>
                           </div>
                         </div>
                       </div>
@@ -331,6 +354,17 @@
                 <p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>
             </div>
             {% else %}<div class="text-center py-16 text-gray-500"><p class="text-lg">No audio tracks found.</p></div>{% endif %}
+        </div>
+
+        <!-- Cursor-based Sentinel -->
+        <div id="gallery-pagination-sentinel" class="py-10 flex items-center justify-center font-mono text-xs text-slate-500" data-oldest-timestamp="{{ oldest_timestamp|default:'' }}" data-has-more="{% if has_more %}true{% else %}false{% endif %}">
+            <div id="gallery-loading-spinner" class="hidden flex items-center gap-2 text-violet-400">
+                <svg class="animate-spin h-5 w-5 text-violet-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                <span>Loading more media...</span>
+            </div>
         </div>
     </main>
 
@@ -363,7 +397,5 @@
     <script src="{% static 'js/gallery_player.js' %}"
             data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
-
-
 </body>
 </html>

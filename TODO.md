@@ -139,6 +139,18 @@
   - Composer calculates in-memory SHA-256 (`crypto.subtle.digest`), performs `PUT` upload to Blossom server (`https://cdn.iyou.me/upload` with local fallback), renders thumbnail preview dock in `#composer-media-preview-dock`, and attaches NIP-94 tags to the signed note.
 - [x] **24.5 Tests:** `test_nip36_expanded_sensitive_tags_flagged_properly`, `test_iyou_circle_returns_empty_when_no_registered_pubkeys`, `test_api_translate_resilient_fallback_returns_200`, `test_iyou_feed_zero_bleed_when_empty` — **Done 2026-08-31**
 
+### Phase 25: Media Gallery Viewports, Custom Players (Plyr.js/Audio) & Infinite Scroll
+- [x] **25.1 Plyr.js Video Viewport Integration:**
+  - Standardized `.plyr-video-container` video players with Plyr CDN styles/scripts, 16:9 and 9:16 aspect ratio support, and responsive video cards across gallery tabs.
+- [x] **25.2 Custom Audio Deck & Single-Instance Coordinator:**
+  - Modern audio cards featuring vinyl disc rotating animations, metadata headers, custom range scrubbers, playtime counters, and `stopActiveMedia()` coordination preventing overlapping audio/video playback.
+  - Keyboard navigation: Space (play/pause), M (mute/unmute), ArrowLeft/ArrowRight (5s seek).
+- [x] **25.3 Cursor-Based Gallery Pagination & Infinite Scroll:**
+  - `GET /api/gallery` endpoint supporting `until`, `type`, `pubkey`, and `limit` with JSON serialization.
+  - `#gallery-pagination-sentinel` with IntersectionObserver loading more media cards and re-hydrating Plyr/audio players without page reloads.
+- [x] **25.4 Tests:** `test_gallery_view_renders_plyr_and_categorized_decks`, `test_api_gallery_cursor_pagination` — **Done 2026-08-31**
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---
+

@@ -38,6 +38,7 @@ urlpatterns = [
     path('api/vote', views.api_cast_vote, name='api_cast_vote'),
 
     path('api/media/upload/', views.MediaUploadProxyView.as_view(), name='media_upload_proxy'),
+    path('api/gallery', views.api_gallery, name='api_gallery'),
     path('api/credentials/issue/', views.IssueCredentialView.as_view(), name='api_issue_credential'),
     path('api/config/', views.node_config, name='node_config'),
     path('.well-known/nostr.json', views.nip05_well_known, name='nip05_well_known'),

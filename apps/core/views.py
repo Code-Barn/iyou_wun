@@ -1029,12 +1029,16 @@ def _extract_display_title(content, summary="", alt_text=""):
     return ""
 
 
-def fetch_media_assets(authors=None, limit=50, relay_urls=None):
+def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
     """Fetch Kind 1063 media attachments and resolve Kind 0 profiles."""
     filter_obj = {"kinds": [1063], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
-
+    if until is not None:
+        try:
+            filter_obj["until"] = int(until)
+        except (ValueError, TypeError):
+            pass
 
     raw_events = relay_req(filter_obj, relay_urls=relay_urls)
     if not raw_events:
@@ -1083,6 +1087,9 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
         alt_val = get_tag_value(tags, "alt") or get_tag_value(tags, "summary") or ""
         display_title = _extract_display_title(raw_content, nip94["summary"], alt_val)
 
+        created_at_ts = int(e.get("created_at") or 0)
+        dt = datetime.fromtimestamp(created_at_ts)
+
         note = {
             "id": e.get("id", ""),
             "kind": 1063,
@@ -1095,7 +1102,9 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
             "lud16": profile.get("lud16") or "",
             "content": raw_content,
             "display_title": display_title,
-            "created_at": datetime.fromtimestamp(e.get("created_at", 0)),
+            "created_at": dt,
+            "created_at_ts": created_at_ts,
+            "created_at_datetime": dt,
             "tags": tags,
             "file_url": file_url,
             "media_url": file_url or "",
@@ -1115,7 +1124,7 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
         note["media_type"] = categorize_media(note)
         result.append(note)
 
-    result.sort(key=lambda x: x["created_at"], reverse=True)
+    result.sort(key=lambda x: x["created_at_ts"], reverse=True)
     return result[:limit]
 
 
@@ -2165,13 +2174,25 @@ class GalleryView(TemplateView):
 
         filter_pubkey = self.request.GET.get("pubkey")
         media_type = self.request.GET.get("type", "all")
+        until = self.request.GET.get("until")
         authors = [filter_pubkey] if filter_pubkey else None
-        notes = fetch_media_assets(authors=authors, relay_urls=relays)
+        notes = fetch_media_assets(authors=authors, limit=24, until=until, relay_urls=relays)
 
         images = [n for n in notes if n["media_type"] == "image"]
         videos = [n for n in notes if n["media_type"] == "video"]
         audio = [n for n in notes if n["media_type"] == "audio"]
         other = [n for n in notes if n["media_type"] == "other"]
+
+        min_ts = None
+        for n in notes:
+            ts = n.get("created_at_ts")
+            if ts is None:
+                dt = n.get("created_at")
+                ts = int(dt.timestamp()) if isinstance(dt, datetime) else (int(dt) if dt else 0)
+            else:
+                ts = int(ts)
+            if min_ts is None or ts < min_ts:
+                min_ts = ts
 
         context["notes"] = notes
         context["images"] = images
@@ -2187,6 +2208,8 @@ class GalleryView(TemplateView):
         context["other_items"] = other
         context["filter_pubkey"] = filter_pubkey
         context["active_type"] = media_type
+        context["oldest_timestamp"] = min_ts or ""
+        context["has_more"] = len(notes) >= 24
         context["counts"] = {
             "all": len(notes),
             "images": len(images),
@@ -2194,6 +2217,64 @@ class GalleryView(TemplateView):
             "audio": len(audio),
         }
         return context
+
+
+@csrf_exempt
+def api_gallery(request):
+    """Cursor-based JSON API endpoint for gallery media infinite scrolling.
+
+    Supports ?until=<timestamp>&type=all|images|videos|audio&pubkey=<hex_or_npub>&limit=<int>.
+    Returns { "success": true, "media": [...], "oldest_timestamp": min_epoch, "has_more": bool }.
+    """
+    media_type = (request.GET.get("type") or "all").strip().lower()
+    until = request.GET.get("until")
+    filter_pubkey = request.GET.get("pubkey")
+    try:
+        limit = int(request.GET.get("limit") or 24)
+    except (ValueError, TypeError):
+        limit = 24
+
+    relays = get_relays_for_request(request)
+    authors = [filter_pubkey] if filter_pubkey else None
+
+    notes = fetch_media_assets(authors=authors, limit=limit, until=until, relay_urls=relays)
+
+    if media_type in ("images", "image"):
+        filtered_notes = [n for n in notes if n.get("media_type") == "image"]
+    elif media_type in ("videos", "video"):
+        filtered_notes = [n for n in notes if n.get("media_type") == "video"]
+    elif media_type in ("audio", "music"):
+        filtered_notes = [n for n in notes if n.get("media_type") == "audio"]
+    else:
+        filtered_notes = notes
+
+    media_list = []
+    min_ts = None
+    for n in filtered_notes:
+        ts = n.get("created_at_ts")
+        if ts is None:
+            dt = n.get("created_at")
+            ts = int(dt.timestamp()) if isinstance(dt, datetime) else (int(dt) if dt else 0)
+        else:
+            ts = int(ts)
+
+        if min_ts is None or ts < min_ts:
+            min_ts = ts
+
+        dt = n.get("created_at")
+        item = dict(n)
+        item["created_at"] = dt.strftime("%Y-%m-%d %H:%M") if isinstance(dt, datetime) else str(dt)
+        item["created_at_epoch"] = ts
+        item["created_at_ts"] = ts
+        item["created_at_datetime"] = dt.isoformat() if isinstance(dt, datetime) else str(dt)
+        media_list.append(item)
+
+    return JsonResponse({
+        "success": True,
+        "media": media_list,
+        "oldest_timestamp": min_ts,
+        "has_more": len(notes) >= limit,
+    })
 
 
 class ProfileView(TemplateView):

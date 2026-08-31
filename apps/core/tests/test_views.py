@@ -312,6 +312,91 @@ class GalleryViewTest(TestCase):
         self.assertContains(response, "Dashboard")
         self.assertContains(response, "Gallery")
 
+    def test_gallery_view_renders_plyr_and_categorized_decks(self):
+        pk = "a" * 64
+        img_event = make_event("k1063_img", 1063, pubkey=pk, created_at=1700000100, tags=[
+            ["url", "https://cdn.example.com/art.jpg"],
+            ["m", "image/jpeg"],
+            ["alt", "Sovereign Painting"]
+        ])
+        vid_event = make_event("k1063_vid", 1063, pubkey=pk, created_at=1700000200, tags=[
+            ["url", "https://cdn.example.com/video.mp4"],
+            ["m", "video/mp4"],
+            ["alt", "Mesh Demo"],
+            ["dim", "1920x1080"],
+            ["duration", "45"]
+        ])
+        aud_event = make_event("k1063_aud", 1063, pubkey=pk, created_at=1700000300, tags=[
+            ["url", "https://cdn.example.com/podcast.mp3"],
+            ["m", "audio/mpeg"],
+            ["alt", "Decentralized Podcast"],
+            ["duration", "120"]
+        ])
+        relay_events = {"img": img_event, "vid": vid_event, "aud": aud_event}
+
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("gallery"))
+            self.assertEqual(response.status_code, 200)
+            self.assertTemplateUsed(response, "gallery.html")
+            self.assertContains(response, "plyr.css")
+            self.assertContains(response, "plyr.polyfilled.js")
+            self.assertContains(response, "plyr-video-container")
+            self.assertContains(response, "gallery-video-player")
+            self.assertContains(response, "audio-play-btn")
+            self.assertContains(response, "scrubber")
+            self.assertContains(response, "gallery-pagination-sentinel")
+            self.assertEqual(response.context["counts"]["images"], 1)
+            self.assertEqual(response.context["counts"]["videos"], 1)
+            self.assertEqual(response.context["counts"]["audio"], 1)
+            self.assertEqual(response.context["counts"]["all"], 3)
+
+    def test_api_gallery_cursor_pagination(self):
+        pk = "b" * 64
+        img_event = make_event("k1063_img2", 1063, pubkey=pk, created_at=1700000010, tags=[
+            ["url", "https://cdn.example.com/pic.png"],
+            ["m", "image/png"]
+        ])
+        vid_event = make_event("k1063_vid2", 1063, pubkey=pk, created_at=1700000020, tags=[
+            ["url", "https://cdn.example.com/short.mp4"],
+            ["m", "video/mp4"],
+            ["dim", "1080x1920"]
+        ])
+        aud_event = make_event("k1063_aud2", 1063, pubkey=pk, created_at=1700000030, tags=[
+            ["url", "https://cdn.example.com/song.mp3"],
+            ["m", "audio/mpeg"]
+        ])
+        relay_events = {"img": img_event, "vid": vid_event, "aud": aud_event}
+
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            # 1. Fetch All
+            res = self.client.get(reverse("api_gallery"), {"until": "1700000100", "type": "all"})
+            self.assertEqual(res.status_code, 200)
+            data = res.json()
+            self.assertTrue(data["success"])
+            self.assertEqual(len(data["media"]), 3)
+            self.assertEqual(data["oldest_timestamp"], 1700000010)
+
+            # 2. Fetch Videos Only
+            res_vid = self.client.get(reverse("api_gallery"), {"type": "videos"})
+            self.assertEqual(res_vid.status_code, 200)
+            data_vid = res_vid.json()
+            self.assertEqual(len(data_vid["media"]), 1)
+            self.assertEqual(data_vid["media"][0]["media_type"], "video")
+
+            # 3. Fetch Audio Only
+            res_aud = self.client.get(reverse("api_gallery"), {"type": "audio"})
+            self.assertEqual(res_aud.status_code, 200)
+            data_aud = res_aud.json()
+            self.assertEqual(len(data_aud["media"]), 1)
+            self.assertEqual(data_aud["media"][0]["media_type"], "audio")
+
+            # 4. Fetch Images Only
+            res_img = self.client.get(reverse("api_gallery"), {"type": "images"})
+            self.assertEqual(res_img.status_code, 200)
+            data_img = res_img.json()
+            self.assertEqual(len(data_img["media"]), 1)
+            self.assertEqual(data_img["media"][0]["media_type"], "image")
+
 
 class ProfileViewTest(TestCase):
     def test_invalid_npub_returns_error(self):
