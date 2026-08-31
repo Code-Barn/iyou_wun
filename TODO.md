@@ -107,17 +107,17 @@
 - [x] **22.4 Tests & tracking:** `ApiContactsFollowTests` (Kind 3 payload prep, follow append, unfollow removal, anonymous/invalid rejection) + `NIP05EndpointTests` root `_` and all-handles cases; Phase 22 codified in TODO.md — **Done 2026-08-31**
 
 ### Phase 23: Global Discovery, NIP-05 Handle Routing & Sovereign Identity Badging
-- [ ] **23.1 Universal Profile Identifier Resolver (`/profile/<identifier>`):**
+- [x] **23.1 Universal Profile Identifier Resolver (`/profile/<identifier>`):**
   - Update `ProfileView` and route regex to resolve `npub1...`, 64-character hex, and `handle@domain.com` (NIP-05 identifier).
   - Implement async/background NIP-05 lookup to fetch `https://<domain>/.well-known/nostr.json?name=<handle>` and resolve pubkey hex.
   - Auto-decorate NIP-05 handles in note cards and metadata rows as clickable profile links.
-- [ ] **23.2 Sovereign Enclave vs. Global Mesh Badging:**
+- [x] **23.2 Sovereign Enclave vs. Global Mesh Badging:**
   - Decorate authors in `_thread_post.html`, `profile.html`, and `feed_interactions.js`:
     - `[ ⚡ iyou ]`: Native sovereign peer registered in `UserLinkDeck` with active local enclave support.
     - `[ 🌐 Mesh ]`: External Nostr network peer discovered via public relay firehose.
     - `[ 🏷️ NIP-05 ]`: Verified external identifier badge.
   - Add active transport badge inside `#floating-chat-dock` (`Transport: ⚡ iyou Enclave` vs `Transport: 🌐 Nostr Relays`).
-- [ ] **23.3 Global Directory Search & NIP-50 Fallback (`purplepag.es` Indexing):**
+- [x] **23.3 Global Directory Search & NIP-50 Fallback (`purplepag.es` Indexing):**
   - Enhance `#feed-search-input` triage logic:
     - Bech32 string (`npub1`, `note1`, `nevent1`) -> immediate redirect.
     - NIP-05 address (`user@domain.com`) -> resolve and route to profile.

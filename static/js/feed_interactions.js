@@ -1871,10 +1871,236 @@
     window.translateNote = translateNote;
     window.toggleOriginalNote = toggleOriginalNote;
 
+    // ---------- Phase 23: Global Directory Search (NIP-50) ----------
+
+    const BECH32_CHARSET = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+    const GLOBAL_DIRECTORY_RELAYS = ["wss://purplepag.es", "wss://relay.nostr.band"];
+
+    function decodeBech32(str) {
+        // Minimal bech32 decoder -> { hrp, data(bytes[]) } | null
+        if (!str || typeof str !== "string") return null;
+        const clean = str.toLowerCase().replace(/\s*/g, "");
+        const pos = clean.lastIndexOf("1");
+        if (pos < 1 || pos + 1 > clean.length - 1) return null;
+        const hrp = clean.slice(0, pos);
+        const dataStr = clean.slice(pos + 1);
+        let acc = 0, bits = 0;
+        const values = [];
+        for (let i = 0; i < dataStr.length; i++) {
+            const c = dataStr.charCodeAt(i);
+            const d = BECH32_CHARSET.indexOf(dataStr[i]);
+            if (d === -1) return null;
+            acc = (acc << 5) | d;
+            bits += 5;
+            if (bits >= 8) {
+                bits -= 8;
+                values.push((acc >> bits) & 0xff);
+            }
+        }
+        return { hrp: hrp, bytes: values };
+    }
+
+    function decodeEventId(noteLike) {
+        // Decode note1.../nevent1... to a 64-char hex event id, or null.
+        const dec = decodeBech32(noteLike);
+        if (!dec || (dec.hrp !== "note" && dec.hrp !== "nevent")) return null;
+        let bytes = dec.bytes;
+        if (dec.hrp === "nevent") {
+            // NIP-19 nevent: [0,32] = event id hex bytes
+            if (bytes.length < 32) return null;
+            bytes = bytes.slice(0, 32);
+        }
+        let hex = "";
+        for (let i = 0; i < bytes.length; i++) {
+            hex += ("0" + bytes[i].toString(16)).slice(-2);
+        }
+        return hex.length === 64 ? hex : null;
+    }
+
+    function isIdentifierLike(q) {
+        return /^npub1[0-9a-z]{10,}$/i.test(q) ||
+            /^(note|nevent)1[0-9a-z]{10,}$/i.test(q) ||
+            /^[0-9a-fA-F]{64}$/.test(q) ||
+            /^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(q);
+    }
+
+    function routeGlobalQuery(query) {
+        const q = (query || "").trim();
+        if (!q) return;
+        if (/^npub1[0-9a-z]{10,}$/i.test(q) || /^[0-9a-fA-F]{64}$/.test(q)) {
+            window.location.href = "/profile/" + encodeURIComponent(q);
+            return;
+        }
+        if (/^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(q)) {
+            window.location.href = "/profile/" + encodeURIComponent(q);
+            return;
+        }
+        if (/^(note|nevent)1[0-9a-z]{10,}$/i.test(q)) {
+            const hex = decodeEventId(q);
+            window.location.href = "/feed?thread=" + (hex || encodeURIComponent(q));
+            return;
+        }
+    }
+
+    function showGlobalPopover() {
+        const p = document.getElementById("search-results-popover");
+        const legacy = document.getElementById("search-results-dropdown");
+        if (p) p.classList.remove("hidden");
+        if (legacy) legacy.classList.add("hidden");
+    }
+
+    function hideGlobalPopover() {
+        const p = document.getElementById("search-results-popover");
+        if (p) p.classList.add("hidden");
+    }
+
+    function renderGlobalResults(results) {
+        const list = document.getElementById("search-results-list");
+        if (!list) return;
+        list.innerHTML = "";
+        const items = results || [];
+        if (items.length === 0) {
+            list.innerHTML = '<div class="px-3 py-3 text-center text-slate-400">No global directory matches for this query.</div>';
+            showGlobalPopover();
+            return;
+        }
+        items.forEach(function (p) {
+            const pk = p.pubkey;
+            const prof = (typeof p.content === "string") ? (function () { try { return JSON.parse(p.content); } catch (e) { return {}; } })() : {};
+            const name = prof.name || prof.display_name || pk.slice(0, 8);
+            const display = prof.display_name || prof.name || "";
+            const handle = prof.nip05 || "";
+            const avatar = prof.picture || "";
+            const initialChar = (name[0] || "N").toUpperCase();
+            const avatarHtml = avatar
+                ? '<img src="' + avatar + '" alt="" class="w-7 h-7 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0">'
+                : '<div class="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 font-bold flex items-center justify-center text-[10px] shrink-0">' + initialChar + '</div>';
+
+            const item = document.createElement("div");
+            item.className = "flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors";
+            item.innerHTML =
+                avatarHtml +
+                '<div class="flex-1 min-w-0">' +
+                '<div class="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">' + name + '</div>' +
+                '<div class="text-[10px] text-slate-400 truncate">' + (handle || pk.slice(0, 12)) + '</div>' +
+                '</div>' +
+                '<a href="/profile/' + pk + '" class="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-[10px] font-semibold shrink-0">[ View Profile ]</a>';
+
+            list.appendChild(item);
+        });
+        showGlobalPopover();
+    }
+
+    function queryGlobalDirectory(query) {
+        // NIP-50 SEARCH against indexing directory relays
+        const q = (query || "").trim();
+        if (q.length < 2) {
+            hideGlobalPopover();
+            return;
+        }
+        const subId = "gsearch_" + Math.random().toString(36).substring(2, 10);
+        const filter = { kinds: [0], search: q, limit: 6 };
+        const collected = {};
+        let remaining = GLOBAL_DIRECTORY_RELAYS.length;
+
+        function finish() {
+            const results = Object.keys(collected).map(function (k) { return collected[k]; });
+            renderGlobalResults(results);
+        }
+
+        GLOBAL_DIRECTORY_RELAYS.forEach(function (relayUrl) {
+            let ws;
+            try {
+                ws = new WebSocket(relayUrl);
+            } catch (e) {
+                remaining--;
+                return;
+            }
+            const timer = setTimeout(function () {
+                try { ws.close(); } catch (e) {}
+                remaining--;
+                if (remaining <= 0) finish();
+            }, 3000);
+
+            ws.onopen = function () {
+                try { ws.send(JSON.stringify(["REQ", subId, filter])); } catch (e) {}
+            };
+            ws.onmessage = function (ev) {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    if (msg[0] === "EVENT" && msg[1] === subId && msg[2]) {
+                        const eid = msg[2].id || "";
+                        if (eid && !collected[eid]) collected[eid] = msg[2];
+                    } else if (msg[0] === "EOSE" && msg[1] === subId) {
+                        clearTimeout(timer);
+                        try { ws.close(); } catch (e) {}
+                        remaining--;
+                        if (remaining <= 0) finish();
+                    }
+                } catch (e) {}
+            };
+            ws.onerror = function () {
+                clearTimeout(timer);
+                try { ws.close(); } catch (e) {}
+                remaining--;
+                if (remaining <= 0) finish();
+            };
+            ws.onclose = function () {
+                remaining--;
+                if (remaining <= 0) finish();
+            };
+        });
+    }
+
+    function initGlobalDirectorySearch() {
+        const input = document.getElementById("feed-search-input");
+        if (!input) return;
+
+        let debounceTimer = null;
+
+        input.addEventListener("keydown", function (e) {
+            if (e.key === "Enter") {
+                const val = input.value.trim();
+                if (isIdentifierLike(val)) {
+                    // Intercept identifier routing before feed-search handler
+                    e.preventDefault();
+                    if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+                    routeGlobalQuery(val);
+                } else {
+                    hideGlobalPopover();
+                }
+            } else if (e.key === "Escape") {
+                hideGlobalPopover();
+            }
+        }, true); // capture phase so identifier routing takes precedence
+
+        input.addEventListener("input", function () {
+            const val = input.value.trim();
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function () {
+                if (val.length >= 2) {
+                    queryGlobalDirectory(val);
+                } else {
+                    hideGlobalPopover();
+                }
+            }, 350);
+        });
+
+        document.addEventListener("click", function (e) {
+            const popover = document.getElementById("search-results-popover");
+            const listEl = document.getElementById("search-results-list");
+            if (popover && e.target !== input && (!listEl || !popover.contains(e.target))) {
+                hideGlobalPopover();
+            }
+        });
+    }
+
     // Jump to Top button visibility listener
     document.addEventListener('DOMContentLoaded', function() {
         // Apply "Read More" clamping to server-rendered note bodies
         checkAndApplyClamping(document);
+
+        initGlobalDirectorySearch();
 
         var topBtn = document.getElementById('jump-to-top-btn');
         if (topBtn) {

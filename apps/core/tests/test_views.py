@@ -316,7 +316,8 @@ class GalleryViewTest(TestCase):
 class ProfileViewTest(TestCase):
     def test_invalid_npub_returns_error(self):
         response = self.client.get(reverse("profile", kwargs={"npub": "invalid"}))
-        self.assertContains(response, "Invalid npub")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Peer Not Found on Mesh")
 
     def test_valid_npub_renders_profile_page_with_streams_and_actions(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
@@ -658,6 +659,13 @@ class FeedViewTrustLensContractTest(TestCase):
         response = self._get_feed()
         self.assertContains(response, "trustLens.scan")
 
+    def test_nav_renders_search_results_popover(self):
+        response = self._get_feed()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="search-results-popover"')
+        self.assertContains(response, 'id="search-results-list"')
+        self.assertContains(response, 'id="feed-search-input"')
+
 
 class FeedViewTwoTierToolbarTest(TestCase):
     """Two-tier Layer 2 toolbar & circle feed filtering contract tests."""
@@ -982,7 +990,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "↳ Replying to")
         # Separate author profile link
-        self.assertContains(response, f'href="/profile/{root_npub}/"')
+        self.assertContains(response, f'href="/profile/{root_npub}"')
         self.assertContains(response, "@Alice In Chains")
         # Separate parent note link
         self.assertContains(response, 'href="/feed?thread=parent_note_123"')
@@ -1020,7 +1028,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         # A single parent note link ([parent ↗]) is rendered, not duplicated as a sub-subheader
         self.assertEqual(content.count("[parent ↗]"), 1)
         self.assertContains(response, "dedup_parent_999")
-        self.assertContains(response, f'href="/profile/{root_npub}/"')
+        self.assertContains(response, f'href="/profile/{root_npub}"')
         self.assertContains(response, "@Alice In Chains")
 
     def test_thread_header_renders_jump_to_root_link_when_reply(self):
@@ -1797,6 +1805,64 @@ class ApiContactsFollowTests(TestCase):
         bad = self._post(target_pubkey="not-a-pubkey", action="follow")
         self.assertEqual(bad.status_code, 400)
         self.assertFalse(bad.json()["success"])
+
+
+class _FakeNip05Resp:
+    """Minimal urllib response-style object supporting read() + context manager."""
+
+    def __init__(self, payload):
+        self._body = json.dumps(payload).encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+class UniversalProfileResolverTests(TestCase):
+    PUBKEY = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+
+    def _get_profile(self, identifier):
+        with (
+            patch("apps.core.views.relay_req", return_value={}),
+            patch("apps.core.views.fetch_profile_data", return_value={"name": "alice"}),
+        ):
+            return self.client.get(reverse("profile", args=[identifier]))
+
+    def test_profile_view_resolves_hex_and_npub(self):
+        from apps.core.views import hex_to_npub
+
+        npub = hex_to_npub(self.PUBKEY)
+        self.assertTrue(npub)
+
+        hex_resp = self._get_profile(self.PUBKEY)
+        npub_resp = self._get_profile(npub)
+
+        self.assertEqual(hex_resp.status_code, 200)
+        self.assertEqual(hex_resp.context["hex_pubkey"], self.PUBKEY)
+        self.assertEqual(npub_resp.status_code, 200)
+        self.assertEqual(npub_resp.context["hex_pubkey"], self.PUBKEY)
+
+    def test_profile_view_resolves_nip05_identifier(self):
+        payload = {"names": {"alice": self.PUBKEY}, "relays": {self.PUBKEY: []}}
+        with (
+            patch("urllib.request.urlopen", return_value=_FakeNip05Resp(payload)),
+            patch("apps.core.views.relay_req", return_value={}),
+            patch("apps.core.views.fetch_profile_data", return_value={"name": "alice"}),
+        ):
+            resp = self.client.get(reverse("profile", args=["alice@example.com"]))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["hex_pubkey"], self.PUBKEY)
+
+    def test_profile_view_unknown_identifier_renders_error_card(self):
+        resp = self._get_profile("ghost")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Peer Not Found on Mesh", resp.content.decode())
 
 
 class ProfileComposerTests(TestCase):

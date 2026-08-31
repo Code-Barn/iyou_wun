@@ -508,7 +508,8 @@ def build_thread_tree(raw_events, profiles=None):
     if profiles is None:
         profiles = {}
 
-    from .views import hex_to_npub, resolve_author_did
+    from .views import get_iyou_pubkeys, hex_to_npub, resolve_author_did
+    iyou_native_set = set(get_iyou_pubkeys())
 
     def _ts_to_datetime(ts):
         from datetime import datetime
@@ -537,6 +538,8 @@ def build_thread_tree(raw_events, profiles=None):
             "npub": hex_to_npub(pk) if pk else "",
             "nip05": prof.get("nip05") or "",
             "lud16": prof.get("lud16") or "",
+            "is_iyou_native": bool(pk in iyou_native_set),
+            "has_nip05": bool(prof.get("nip05")),
             "content": e.get("content", ""),
             "created_at": _ts_to_datetime(e.get("created_at", 0)),
             "tags": tags,
@@ -654,7 +657,7 @@ def build_thread_tree(raw_events, profiles=None):
 
 def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pubkey=""):
     """Enrich a root event (Kind 1, 1063, 30023) with author profile."""
-    from .views import hex_to_npub, get_tag_value, resolve_author_did
+    from .views import get_iyou_pubkeys, hex_to_npub, get_tag_value, resolve_author_did
     pk = e.get("pubkey", "")
     prof = profiles.get(pk, {})
     tags = e.get("tags", [])
@@ -675,6 +678,8 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "npub": hex_to_npub(pk) if pk else "",
         "nip05": prof.get("nip05") or "",
         "lud16": prof.get("lud16") or "",
+        "is_iyou_native": bool(pk and pk in set(get_iyou_pubkeys())),
+        "has_nip05": bool(prof.get("nip05")),
         "content": e.get("content", ""),
         "created_at": ts_fn(e.get("created_at", 0)),
         "tags": tags,

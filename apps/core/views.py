@@ -22,6 +22,7 @@ import ssl
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from datetime import datetime, timedelta
@@ -808,6 +809,60 @@ def npub_to_hex(npub_str):
         return bytes(decoded).hex()
     except Exception:
         return None
+
+
+def resolve_universal_identifier(identifier):
+    """Resolve an npub1..., 64-char hex, or user@domain.com (NIP-05) identifier
+    to a (pubkey_hex, npub) tuple. Returns (None, None) when unresolvable.
+
+    NIP-05 identifiers are resolved by querying the remote domain's
+    .well-known/nostr.json manifest within a short timeout.
+    """
+    if not identifier or not isinstance(identifier, str):
+        return (None, None)
+    ident = identifier.strip()
+    lower = ident.lower()
+
+    if lower.startswith("npub1"):
+        pubkey_hex = npub_to_hex(ident)
+        if not pubkey_hex:
+            return (None, None)
+        return (pubkey_hex, hex_to_npub(pubkey_hex))
+
+    if len(lower) == 64 and re.fullmatch(r"[0-9a-fA-F]{64}", ident):
+        pubkey_hex = lower
+        return (pubkey_hex, hex_to_npub(pubkey_hex))
+
+    if "@" in ident:
+        name, _, domain = ident.partition("@")
+        name = name.strip().lower()
+        domain = domain.strip()
+        if not name or not domain:
+            return (None, None)
+        url = (
+            "https://{0}/.well-known/nostr.json?name={1}".format(
+                domain, urllib.parse.quote(name)
+            )
+        )
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "iyou_wun/1.0 (+https://iyou.me; NIP-05 resolver)",
+                    "Accept": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+            raw_pk = (data.get("names") or {}).get(name)
+            if not raw_pk or not re.fullmatch(r"[0-9a-fA-F]{64}", str(raw_pk)):
+                return (None, None)
+            pubkey_hex = str(raw_pk).lower()
+            return (pubkey_hex, hex_to_npub(pubkey_hex))
+        except Exception:
+            return (None, None)
+
+    return (None, None)
 
 
 def fetch_profile_data(hex_pubkey, relay_urls=None):
@@ -2125,18 +2180,17 @@ class ProfileView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        npub = kwargs.get("npub")
-        hex_pubkey = npub_to_hex(npub)
-        target_npub = hex_to_npub(hex_pubkey) if hex_pubkey else npub
-        context["hex_pubkey"] = hex_pubkey
-        context["target_pubkey_hex"] = hex_pubkey
-        context["target_nostr_pubkey_hex"] = hex_pubkey
-        context["npub"] = target_npub
-        context["target_npub"] = target_npub
+        identifier = kwargs.get("npub")
+        hex_pubkey, target_npub = resolve_universal_identifier(identifier)
+        context["hex_pubkey"] = hex_pubkey or ""
+        context["target_pubkey_hex"] = hex_pubkey or ""
+        context["target_nostr_pubkey_hex"] = hex_pubkey or ""
+        context["npub"] = target_npub or identifier or ""
+        context["target_npub"] = target_npub or identifier or ""
         context["og_image"] = og_fallback_image(self.request)
 
         if not hex_pubkey:
-            context["error"] = f"Invalid npub: {npub}"
+            context["error"] = f"Peer Not Found on Mesh: {identifier}"
             return context
 
         profile = fetch_profile_data(hex_pubkey)

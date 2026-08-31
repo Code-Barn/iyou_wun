@@ -22,7 +22,11 @@ urlpatterns = [
     path('feed', views.FeedView.as_view(), name='feed'),
     path('notifications/', views.NotificationsView.as_view(), name='notifications'),
     path('gallery', views.GalleryView.as_view(), name='gallery'),
-    path('profile/<str:npub>/', views.ProfileView.as_view(), name='profile'),
+    re_path(
+        r"^profile/(?P<npub>[a-zA-Z0-9_@.-]+)/?$",
+        views.ProfileView.as_view(),
+        name="profile",
+    ),
     path('chat', views.ChatView.as_view(), name='chat'),
     path('api/relays', views.api_relays, name='api_relays'),
     path('api/feed', views.api_feed, name='api_feed'),

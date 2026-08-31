@@ -292,6 +292,11 @@
     }
 
     const displayName = peerName || peerId.slice(0, 10) + '...';
+    const peerTarget = resolvePeerTarget(peerId);
+    const isNative = peerTarget && peerTarget.type === 'xmpp';
+    const transportBadge = isNative
+      ? '<span class="text-[9px] text-violet-400 font-mono">Transport: ⚡ iyou Enclave</span>'
+      : '<span class="text-[9px] text-slate-400 font-mono">Transport: 🌐 Nostr Relays</span>';
     const avatarHtml = peerAvatar
       ? `<img src="${peerAvatar}" class="w-5 h-5 rounded-full object-cover" />`
       : `<div class="w-5 h-5 rounded-full bg-violet-900 text-violet-300 flex items-center justify-center text-[10px]">${displayName[0].toUpperCase()}</div>`;
@@ -304,7 +309,10 @@
       <div class="px-3 py-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between cursor-pointer select-none" onclick="toggleMinimizeChat('${peerId}')">
         <div class="flex items-center gap-2 min-w-0">
           ${avatarHtml}
-          <span class="font-bold text-slate-800 dark:text-slate-100 truncate">${displayName}</span>
+          <div class="min-w-0 flex flex-col leading-tight">
+            <span class="font-bold text-slate-800 dark:text-slate-100 truncate">${displayName}</span>
+            ${transportBadge}
+          </div>
         </div>
         <div class="flex items-center gap-1.5 shrink-0 text-slate-400">
           <button type="button" onclick="event.stopPropagation(); toggleMinimizeChat('${peerId}')" class="hover:text-slate-600 dark:hover:text-slate-200 px-1">_</button>

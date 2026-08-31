@@ -1000,6 +1000,39 @@ class AttachSocialCountsTests(TestCase):
         self.assertEqual(tags[0][2], "wss://relay.iyou.me")
         self.assertEqual(tags[1][0], "p")
 
+    def test_note_enrichment_decorates_iyou_native_and_mesh_badges(self):
+        from django.contrib.auth.models import User
+        from apps.core.models import UserLinkDeck
+        from apps.core.nip10 import _enrich_root
+
+        native_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        mesh_pk = "b1c6d3f8a2e94c705d2a97c13b6f4e283ad0f19c64e8b527a3d7f6c0e12ab845"
+
+        native_user = User.objects.create_user(username=native_pk)
+        UserLinkDeck.objects.create(user=native_user, handle="native", is_public=True)
+
+        profiles = {
+            native_pk: {"nip05": ""},
+            mesh_pk: {"nip05": "jack@fiatjef.com"},
+        }
+        ts = lambda x: x  # noqa: E731
+
+        native_note = _enrich_root(
+            {"pubkey": native_pk, "id": "a1", "content": "hi", "tags": [], "created_at": 0},
+            1, profiles, ts,
+        )
+        mesh_note = _enrich_root(
+            {"pubkey": mesh_pk, "id": "a2", "content": "yo", "tags": [], "created_at": 0},
+            1, profiles, ts,
+        )
+
+        # Registered UserLinkDeck creator -> [ ⚡ iyou ] native badge
+        self.assertTrue(native_note["is_iyou_native"])
+        self.assertFalse(native_note["has_nip05"])
+        # External mesh peer with a verified NIP-05 -> [ 🏷️ ] badge, not native
+        self.assertFalse(mesh_note["is_iyou_native"])
+        self.assertTrue(mesh_note["has_nip05"])
+
     def test_fetch_thread_includes_indexing_fallback_relays_for_ancestors(self):
         from apps.core.views import fetch_thread
 
