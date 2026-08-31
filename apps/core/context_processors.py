@@ -33,7 +33,11 @@ def user_identity(request):
     pubkey = did_to_pubkey(request.user.username)
     npub = hex_to_npub(pubkey) if pubkey else ""
     deck = UserLinkDeck.objects.filter(user=request.user).first()
-    handle = deck.handle if deck else ""
+    handle = ""
+    if deck and deck.handle:
+        handle = deck.handle.lstrip("@")
+    elif request.user.username and not request.user.username.startswith("did:"):
+        handle = request.user.username
 
     return {
         "user_pubkey_hex": pubkey,

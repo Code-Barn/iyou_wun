@@ -56,16 +56,12 @@
         </span>
         <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
         {% if note.is_iyou_native %}
-        <span class="px-1.5 py-0.2 rounded bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-700/60 text-[10px] font-mono font-semibold" title="Native Sovereign Peer in iyou Enclave">
+        <span class="px-1.5 py-0.2 rounded bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-700/60 text-[10px] font-mono font-semibold" title="Native Sovereign Peer">
           ⚡ iyou
         </span>
-        {% elif note.has_nip05 %}
-        <span class="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60 text-[10px] font-mono" title="NIP-05 Verified Identifier">
-          🏷️ {{ note.nip05|truncatechars:18 }}
-        </span>
-        {% else %}
-        <span class="px-1.5 py-0.2 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700/60 text-[10px] font-mono" title="Public Nostr Relay Peer">
-          🌐 Mesh
+        {% elif note.nip05 or note.has_nip05 %}
+        <span class="px-1.5 py-0.2 rounded bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/60 text-[10px] font-mono" title="{{ note.nip05 }}">
+          🏷️ {{ note.nip05|truncatechars:20 }}
         </span>
         {% endif %}
         {% if note.kind == 1063 and note.is_sovereign %}

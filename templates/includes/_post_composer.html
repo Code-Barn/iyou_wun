@@ -1,5 +1,6 @@
 {% load i18n %}
 {% if user_pubkey %}
+<div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
     <div class="flex items-center justify-between gap-2 mb-3">
       <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-200 font-mono">{% trans "Post to Nostr" %}</h2>
       <span id="composer-active-persona-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60">

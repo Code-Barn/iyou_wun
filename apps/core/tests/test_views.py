@@ -584,7 +584,7 @@ class DashboardProfileTest(TestCase):
         self.assertContains(response, 'id="persona-switcher-container"')
         self.assertContains(response, 'id="persona-switcher-btn"')
         self.assertContains(response, 'id="active-persona-dot"')
-        self.assertContains(response, 'id="active-persona-label"')
+        self.assertContains(response, 'id="active-persona-display-name"')
         self.assertContains(response, 'id="active-persona-level"')
         self.assertContains(response, 'id="persona-switcher-dropdown"')
         self.assertContains(response, 'id="persona-list-container"')
@@ -592,6 +592,25 @@ class DashboardProfileTest(TestCase):
         self.assertContains(response, "Active Enclave Personas")
         self.assertContains(response, "Manage in iyou_home")
         self.assertContains(response, "[ ⚙️ Edit ]")
+
+    def test_standard_header_displays_user_handle_when_available(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(user=user, handle="@alice_sovereign")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "@alice_sovereign")
+        self.assertContains(response, 'id="active-persona-display-name"')
+
+    def test_feed_view_renders_two_column_layout_and_right_rail(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "lg:col-span-8")
+        self.assertContains(response, "lg:col-span-4")
+        self.assertContains(response, "TRENDING TOPICS")
 
     def test_standard_header_omits_persona_switcher_when_anonymous(self):
         with patch("apps.core.views.relay_req", return_value={}):

@@ -331,24 +331,33 @@
 
     TauriBridgeClient.prototype.updateActivePersonaUI = function (profile) {
         if (!profile) return;
-        var labelEl = document.getElementById("active-persona-label");
+        var labelEl = document.getElementById("active-persona-display-name") || document.getElementById("active-persona-label");
+        var altLabelEl = document.getElementById("active-persona-label");
         var levelEl = document.getElementById("active-persona-level");
         var dotEl = document.getElementById("active-persona-dot");
 
-        var nameStr = profile.name || profile.profile_name || profile.label || "";
-        if (!nameStr) {
-            if (profile.did) {
-                nameStr = profile.did.slice(0, 16) + "...";
-            } else if (profile.nostr_pubkey_hex) {
-                nameStr = profile.nostr_pubkey_hex.slice(0, 12) + "...";
-            } else {
-                nameStr = "Sovereign";
-            }
+        var nameStr = "";
+        if (profile.handle) {
+            nameStr = "@" + String(profile.handle).replace(/^@/, "");
+        } else if (profile.name || profile.profile_name || profile.label) {
+            nameStr = profile.name || profile.profile_name || profile.label;
+        } else if (profile.npub) {
+            nameStr = profile.npub.slice(0, 14) + "...";
+        } else if (profile.did) {
+            nameStr = profile.did.slice(0, 16) + "...";
+        } else if (profile.nostr_pubkey_hex) {
+            nameStr = profile.nostr_pubkey_hex.slice(0, 12) + "...";
+        } else {
+            nameStr = "Sovereign";
         }
 
         if (labelEl) {
             labelEl.textContent = nameStr;
             labelEl.title = profile.did || profile.nostr_pubkey_hex || nameStr;
+        }
+        if (altLabelEl && altLabelEl !== labelEl) {
+            altLabelEl.textContent = nameStr;
+            altLabelEl.title = profile.did || profile.nostr_pubkey_hex || nameStr;
         }
 
         var level = profile.level !== undefined ? profile.level : profile.derivation_index;
@@ -385,7 +394,20 @@
             var pPk = p.nostr_pubkey_hex || p.pubkey_hex || p.pubkey || "";
             var isActive = (activeId && pId && String(activeId) === String(pId)) || (activePk && pPk && String(activePk).toLowerCase() === String(pPk).toLowerCase());
 
-            var name = p.name || p.profile_name || p.label || (p.did ? p.did.slice(0, 16) + '...' : (pPk ? pPk.slice(0, 10) + '...' : 'Persona'));
+            var name = "";
+            if (p.handle) {
+                name = "@" + String(p.handle).replace(/^@/, "");
+            } else if (p.name || p.profile_name || p.label) {
+                name = p.name || p.profile_name || p.label;
+            } else if (p.npub) {
+                name = p.npub.slice(0, 14) + "...";
+            } else if (p.did) {
+                name = p.did.slice(0, 16) + "...";
+            } else if (pPk) {
+                name = pPk.slice(0, 10) + "...";
+            } else {
+                name = "Persona";
+            }
             var level = p.level !== undefined ? p.level : p.derivation_index;
             var levelStr = (level === 1) ? "L1" : (level ? "L" + level : "L2");
 

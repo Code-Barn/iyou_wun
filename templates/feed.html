@@ -27,7 +27,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-6xl w-full mx-auto px-2 sm:px-4 py-4 sm:py-6 overflow-x-hidden">
+<div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
     {% if messages %} {% for message in messages %}
     <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
         <div class="flex">
@@ -37,10 +37,10 @@
     </div>
     {% endfor %} {% endif %}
 
-    <div class="flex items-start justify-center gap-6">
+    <div class="grid grid-cols-1 {% if feed_mode != 'thread' %}lg:grid-cols-12{% endif %} gap-6 items-start">
       
-      <!-- Center Stream Column -->
-      <main class="w-full max-w-2xl min-w-0 flex-1 space-y-4">
+      <!-- Main Feed Column (Left 8 Cols in main mode, centered in thread mode) -->
+      <div class="{% if feed_mode != 'thread' %}lg:col-span-8{% else %}max-w-2xl mx-auto w-full{% endif %} space-y-4 min-w-0">
         
         {% if feed_mode == 'thread' %}
         <!-- Thread Mode: Dedicated Conversation View -->
@@ -149,9 +149,10 @@
                data-author-pubkey="{{ note.pubkey_hex|default:note.pubkey }}"
                data-author-did="{{ note.author_did|default:'' }}"
                data-note-tags="{{ note.tags_json|default:'' }}"
-               {% if note.has_content_warning %}data-has-content-warning="true"{% endif %}
+               {% if note.has_content_warning %}data-has-cw="true" data-has-content-warning="true"{% endif %}
                {% if note.lang %}data-lang="{{ note.lang }}"{% endif %}
-               data-created-at="{% if note.created_at_epoch %}{{ note.created_at_epoch }}{% else %}{{ note.created_at|date:'U' }}{% endif %}">
+               data-created-at="{% if note.created_at_epoch %}{{ note.created_at_epoch }}{% else %}{{ note.created_at|date:'U' }}{% endif %}"
+               data-is-iyou="{% if note.is_iyou_native %}true{% else %}false{% endif %}">
             {% include "includes/_thread_post.html" with note=note %}
 
             {% if note.replies %}
@@ -178,7 +179,7 @@
         </div>
 
         <!-- Infinite Scroll Sentinel & Load More Fallback -->
-        <div id="feed-pagination-sentinel" class="py-8 text-center" data-oldest-timestamp="{{ oldest_timestamp|default:'' }}">
+        <div id="feed-pagination-sentinel" class="py-6 text-center" data-oldest-timestamp="{{ oldest_timestamp|default:'' }}">
           <!-- Animated Mesh Spinner -->
           <div id="feed-loading-spinner" class="hidden flex items-center justify-center gap-2 text-xs font-mono text-slate-400">
             <div class="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
@@ -186,7 +187,7 @@
           </div>
 
           <!-- Manual Fallback Button -->
-          <button id="load-more-btn" type="button" class="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 rounded-lg text-xs font-mono text-slate-600 dark:text-slate-300 transition-colors shadow-sm" onclick="loadMoreNotes()">
+          <button id="load-more-btn" type="button" class="px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 rounded-lg text-xs font-mono text-slate-600 dark:text-slate-300 transition" onclick="loadMoreNotes()">
             ↓ Load More Notes
           </button>
 
@@ -197,11 +198,13 @@
         </div>
         {% endif %}
 
-      </main>
+      </div>
 
-      <!-- Right Discovery Column (Desktop Only) -->
+      <!-- Right Rail Sticky Column (Right 4 Cols - Main Feed Mode only) -->
       {% if feed_mode != 'thread' %}
-      {% include "includes/_feed_right_rail.html" %}
+      <aside class="hidden lg:block lg:col-span-4 sticky top-20 space-y-4">
+        {% include "includes/_feed_right_rail.html" %}
+      </aside>
       {% endif %}
 
     </div>

@@ -1247,3 +1247,13 @@ class FeedPhase24Test(TestCase):
         # Tag overrides content
         self.assertEqual(detect_language({"tags": [["lang", "fr"]], "content": "Hello world"}), "fr")
         self.assertEqual(detect_language({"tags": [["lang", "es-ES"]], "content": "Hello world"}), "es")
+
+    def test_thread_post_omits_generic_mesh_badge(self):
+        pk = "c" * 64
+        event = make_event("mesh_test_note_1", 1, pubkey=pk, content="Public relay note test", tags=[])
+        with patch("apps.core.views.relay_req", return_value={"e1": event}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Public relay note test")
+        self.assertNotContains(response, "🌐 Mesh")
+

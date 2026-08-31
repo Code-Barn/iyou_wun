@@ -33,8 +33,14 @@
               onclick="togglePersonaDropdown()"
             >
               <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" id="active-persona-dot" title="Sovereign Key Active"></span>
-              <span class="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[140px] sm:max-w-[180px]" id="active-persona-label">
-                {% if user_handle %}@{{ user_handle }}{% else %}{{ user.username|default:request.user.username|truncatechars:20 }}{% endif %}
+              <span id="active-persona-display-name" class="truncate max-w-[140px] font-mono text-xs font-medium text-slate-700 dark:text-slate-200">
+                {% if user_handle %}
+                  @{{ user_handle }}
+                {% elif user_npub %}
+                  {{ user_npub|truncatechars:14 }}
+                {% else %}
+                  {{ request.user.username|default:user.username|truncatechars:16 }}
+                {% endif %}
               </span>
               <span class="text-[10px] px-1 py-0.5 rounded bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 font-bold" id="active-persona-level">
                 L1
