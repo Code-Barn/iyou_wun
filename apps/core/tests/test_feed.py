@@ -1205,3 +1205,45 @@ class FeedPhase24Test(TestCase):
         feed = fetch_unified_feed(authors=[])
         self.assertEqual(feed["roots"], [])
         self.assertEqual(feed["replies"], {})
+
+    def test_detect_language_expanded_scripts_and_stopwords(self):
+        from apps.core.nip10 import detect_language
+
+        # Thai script
+        self.assertEqual(detect_language("สวัสดีครับ ยินดีที่ได้รู้จัก"), "th")
+        self.assertEqual(detect_language({"content": "ทดสอบระบบภาษาไทย"}), "th")
+
+        # French stop words / markers
+        self.assertEqual(detect_language("Bonjour tout le monde"), "fr")
+        self.assertEqual(detect_language({"content": "Merci beaucoup avec nous pour cette opportunité"}), "fr")
+
+        # Italian stop words
+        self.assertEqual(detect_language("Ciao a tutti, come state?"), "it")
+        self.assertEqual(detect_language({"content": "Grazie a tutti, sono molto felice con questo progetto"}), "it")
+
+        # German stop words / markers
+        self.assertEqual(detect_language("Guten Morgen, danke für alles"), "de")
+        self.assertEqual(detect_language({"content": "Schöne Grüße aus Deutschland"}), "de")
+
+        # Spanish
+        self.assertEqual(detect_language("¡Hola mundo nostr! ¿Cómo estás?"), "es")
+        self.assertEqual(detect_language({"content": "Gracias por todos los mensajes, hasta luego"}), "es")
+
+        # Portuguese
+        self.assertEqual(detect_language("Olá amigos, obrigado por tudo, você está bem?"), "pt")
+
+        # Japanese, Chinese, Korean, Cyrillic, Arabic, Greek, Hebrew
+        self.assertEqual(detect_language("こんにちは、ノストラ！"), "ja")
+        self.assertEqual(detect_language("你好，欢迎来到去中心化社交网络"), "zh")
+        self.assertEqual(detect_language("안녕하세요 노스트라"), "ko")
+        self.assertEqual(detect_language("Привет мир ностр"), "ru")
+        self.assertEqual(detect_language("مرحبا بالعالم"), "ar")
+        self.assertEqual(detect_language("Γειά σου κόσμε"), "el")
+        self.assertEqual(detect_language("שלום עולם"), "he")
+
+        # Default English
+        self.assertEqual(detect_language("Hello nostr world, hope everyone is doing well"), "en")
+
+        # Tag overrides content
+        self.assertEqual(detect_language({"tags": [["lang", "fr"]], "content": "Hello world"}), "fr")
+        self.assertEqual(detect_language({"tags": [["lang", "es-ES"]], "content": "Hello world"}), "es")

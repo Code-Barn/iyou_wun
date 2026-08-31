@@ -162,53 +162,114 @@ parse_content_warning = detect_content_warning
 
 
 # --- Language Detection Heuristics ---
-CJK_REGEX = re.compile(r"[\u4e00-\u9fff\u3040-\u30ff]")
+THAI_REGEX = re.compile(r"[\u0e00-\u0e7f]")
 JA_KANA_REGEX = re.compile(r"[\u3040-\u30ff]")
+KOREAN_REGEX = re.compile(r"[\uac00-\ud7af]")
+CJK_REGEX = re.compile(r"[\u4e00-\u9fff]")
 CYRILLIC_REGEX = re.compile(r"[\u0400-\u04ff]")
 ARABIC_REGEX = re.compile(r"[\u0600-\u06ff]")
+GREEK_REGEX = re.compile(r"[\u0370-\u03ff]")
+HEBREW_REGEX = re.compile(r"[\u0590-\u05ff]")
+
 SPANISH_MARKERS = ("¿", "¡", "ñ", "Ñ")
-SPANISH_WORDS = ("está", "para", "como", "pero", "este", "esta", "todos", "bien", "gracias", "hola", "buenos", "buenas", "por qué", "porque")
+FRENCH_MARKERS = ("œ", "Œ", "ç", "Ç", "d'", "l'", "qu'", "c'", "j'", "n'", "s'")
+GERMAN_MARKERS = ("ä", "ö", "ü", "Ä", "Ö", "Ü", "ß")
+
+SPANISH_WORDS = {
+    "el", "la", "los", "las", "un", "una", "unos", "unas", "por", "para",
+    "gracias", "hola", "está", "este", "esta", "estos", "estas", "bueno",
+    "buenos", "buenas", "como", "cómo", "pero", "todos", "todas", "bien",
+    "porque", "por qué", "que", "qué", "amigo", "amigos", "mundo",
+}
+
+FRENCH_WORDS = {
+    "le", "la", "les", "des", "du", "de", "un", "une", "est", "sont",
+    "pour", "avec", "dans", "nous", "vous", "cette", "cet", "ces", "merci",
+    "oui", "non", "bonjour", "bonsoir", "tout", "tous", "toute", "toutes",
+    "monde", "au", "aux", "sur", "faire", "plus", "pas", "qui", "que",
+}
+
+ITALIAN_WORDS = {
+    "il", "lo", "la", "i", "gli", "le", "un", "uno", "una", "per", "con",
+    "sono", "questo", "questa", "questi", "queste", "grazie", "ciao", "tutto",
+    "tutti", "tutta", "tutte", "della", "degli", "delle", "del", "dei", "nel",
+    "nella", "negli", "nelle", "come", "state", "stai", "stiamo", "bene",
+    "anche", "amici", "amico", "mondo",
+}
+
+GERMAN_WORDS = {
+    "der", "die", "das", "dem", "den", "des", "ein", "eine", "einer", "einem",
+    "einen", "und", "nicht", "mit", "auf", "für", "danke", "guten", "morgen",
+    "tag", "abend", "ist", "sind", "wir", "ihr", "sie", "bitte", "sehr",
+}
+
+PORTUGUESE_WORDS = {
+    "o", "a", "os", "as", "um", "uma", "uns", "umas", "com", "para", "por",
+    "você", "voces", "vocês", "obrigado", "obrigada", "não", "são", "do", "da",
+    "dos", "das", "no", "na", "nos", "nas", "como", "está", "este", "esta",
+    "bom", "boa", "dia", "tarde", "noite", "olá", "tudo", "bem",
+}
 
 
-def detect_language(event):
-    """Detect language ISO 639-1 code from NIP-01 ["lang", "<code>"] tags or script heuristics.
+def detect_language(event_or_content):
+    """Detect language ISO 639-1 code from NIP-01 ["lang", "<code>"] tags, script heuristics, or stop-words.
 
-    Returns ISO 639-1 code (e.g. 'en', 'es', 'ja', 'zh', 'ru', 'ar', 'de', 'fr', etc.).
+    Returns ISO 639-1 code (e.g. 'en', 'es', 'fr', 'it', 'de', 'pt', 'th', 'ja', 'zh', 'ru', 'ar', 'ko', 'el', 'he').
     """
-    if not isinstance(event, dict):
+    if isinstance(event_or_content, dict):
+        # 1. NIP-01 / NIP-36 tag check
+        for tag in event_or_content.get("tags") or []:
+            if tag and tag[0] == "lang" and len(tag) > 1 and str(tag[1]).strip():
+                code = str(tag[1]).strip().lower()
+                return code.split("-")[0] if "-" in code else code
+        content = str(event_or_content.get("content") or "")
+    elif isinstance(event_or_content, str):
+        content = event_or_content
+    else:
         return "en"
 
-    # 1. NIP-01 / NIP-36 tag check
-    for tag in event.get("tags") or []:
-        if tag and tag[0] == "lang" and len(tag) > 1 and str(tag[1]).strip():
-            code = str(tag[1]).strip().lower()
-            return code.split("-")[0] if "-" in code else code
-
-    # 2. Content script heuristics
-    content = str(event.get("content") or "")
-    if not content:
+    if not content or not content.strip():
         return "en"
 
-    # Japanese kana check
+    # 2. Non-Latin Script Heuristics
+    if THAI_REGEX.search(content):
+        return "th"
     if JA_KANA_REGEX.search(content):
         return "ja"
-
-    # CJK Han characters (Chinese)
+    if KOREAN_REGEX.search(content):
+        return "ko"
     if CJK_REGEX.search(content):
         return "zh"
-
-    # Cyrillic (Russian / Slavic)
     if CYRILLIC_REGEX.search(content):
         return "ru"
-
-    # Arabic
     if ARABIC_REGEX.search(content):
         return "ar"
+    if GREEK_REGEX.search(content):
+        return "el"
+    if HEBREW_REGEX.search(content):
+        return "he"
 
-    # Spanish markers in Latin prose
+    # 3. Latin Script / Token-based Heuristics
     lowered = content.lower()
-    if any(marker in lowered for marker in SPANISH_MARKERS) or any(re.search(rf"\b{re.escape(w)}\b", lowered) for w in SPANISH_WORDS):
-        return "es"
+    has_spanish_markers = any(m in content for m in SPANISH_MARKERS) or any(m in lowered for m in ("¿", "¡", "ñ"))
+    has_french_markers = any(m in lowered for m in FRENCH_MARKERS)
+    has_german_markers = any(m in lowered for m in GERMAN_MARKERS)
+
+    tokens = set(re.findall(r"[a-zà-öø-ÿ]+", lowered))
+    if not tokens and not (has_spanish_markers or has_french_markers or has_german_markers):
+        return "en"
+
+    scores = {
+        "es": len(tokens & SPANISH_WORDS) + (3 if has_spanish_markers else 0),
+        "fr": len(tokens & FRENCH_WORDS) + (2 if has_french_markers else 0),
+        "it": len(tokens & ITALIAN_WORDS),
+        "de": len(tokens & GERMAN_WORDS) + (2 if has_german_markers else 0),
+        "pt": len(tokens & PORTUGUESE_WORDS),
+    }
+
+    best_lang, best_score = max(scores.items(), key=lambda item: item[1])
+    if best_score > 0:
+        return best_lang
 
     return "en"
 
@@ -540,6 +601,10 @@ def build_thread_tree(raw_events, profiles=None):
 
         quoted_event_id, quoted_pubkey = parse_nip18_quote_tags(tags, e.get("content", ""))
 
+        raw_ts = e.get("created_at", 0)
+        dt_val = _ts_to_datetime(raw_ts)
+        ts_num = int(raw_ts if not hasattr(raw_ts, "timestamp") else raw_ts.timestamp())
+
         note = {
             "id": e.get("id", ""),
             "kind": e.get("kind"),
@@ -553,7 +618,9 @@ def build_thread_tree(raw_events, profiles=None):
             "is_iyou_native": bool(pk in iyou_native_set),
             "has_nip05": bool(prof.get("nip05")),
             "content": e.get("content", ""),
-            "created_at": _ts_to_datetime(e.get("created_at", 0)),
+            "created_at": dt_val,
+            "created_at_ts": ts_num,
+            "created_at_datetime": dt_val,
             "tags": tags,
             "author_name": prof.get("display_name") or prof.get("name") or "",
             "author_avatar": sanitize_media_url(prof.get("picture", "")),
@@ -679,6 +746,9 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
     reply_name = reply_prof.get("display_name") or reply_prof.get("name") or ""
 
     quoted_event_id, quoted_pubkey = parse_nip18_quote_tags(tags, e.get("content", ""))
+    raw_ts = e.get("created_at", 0)
+    dt_val = ts_fn(raw_ts)
+    ts_num = int(raw_ts if not hasattr(raw_ts, "timestamp") else raw_ts.timestamp())
 
     note = {
         "id": e.get("id", ""),
@@ -693,7 +763,9 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "is_iyou_native": bool(pk and pk in set(get_iyou_pubkeys())),
         "has_nip05": bool(prof.get("nip05")),
         "content": e.get("content", ""),
-        "created_at": ts_fn(e.get("created_at", 0)),
+        "created_at": dt_val,
+        "created_at_ts": ts_num,
+        "created_at_datetime": dt_val,
         "tags": tags,
         "author_name": prof.get("display_name") or prof.get("name") or "",
         "author_avatar": sanitize_media_url(prof.get("picture", "")),

@@ -429,6 +429,42 @@
         };
     }
 
+    function formatLocalTimestamp(ts) {
+        if (!ts) return '';
+        var sec = Number(ts);
+        var date;
+        if (!isNaN(sec) && sec > 0) {
+            if (sec > 1000000000000) {
+                date = new Date(sec);
+            } else {
+                date = new Date(sec * 1000);
+            }
+        } else {
+            date = new Date(ts);
+        }
+        if (isNaN(date.getTime())) return '';
+        var now = new Date();
+        var diffSec = Math.floor((now - date) / 1000);
+        if (diffSec < 60 && diffSec >= 0) return 'just now';
+        if (diffSec < 3600 && diffSec >= 60) return Math.floor(diffSec / 60) + 'm ago';
+        if (diffSec < 86400 && diffSec >= 3600) return Math.floor(diffSec / 3600) + 'h ago';
+        return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    }
+
+    function hydrateLocalTimestamps(root) {
+        var context = root || document;
+        var elements = context.querySelectorAll('.note-timestamp[data-timestamp]');
+        elements.forEach(function (el) {
+            var ts = el.getAttribute('data-timestamp') || (el.dataset && el.dataset.timestamp);
+            if (ts) {
+                var formatted = formatLocalTimestamp(ts);
+                if (formatted) {
+                    el.textContent = formatted;
+                }
+            }
+        });
+    }
+
     // ---------- Template Builder for Cards ----------
 
     function buildCardHtml(note) {
@@ -445,8 +481,9 @@
         var replyToName = note.reply_to_name || "";
         var replyToNpub = note.reply_to_npub || "";
 
-        var date = new Date((note.created_at || (Date.now() / 1000)) * 1000);
-        var formattedDate = date.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+        var tsSec = note.created_at_epoch || (typeof note.created_at === 'number' ? note.created_at : (note.created_at_ts || Math.floor(Date.now() / 1000)));
+        var date = new Date(Number(tsSec) * 1000);
+        var formattedDate = formatLocalTimestamp(tsSec) || date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
         var reactionLikeCount = (note.like_count && note.like_count > 0) ? String(note.like_count) : ((note.reactions && note.reactions.length) ? String(note.reactions.length) : "");
         var repliesCount = (note.reply_count && note.reply_count > 0) ? String(note.reply_count) : "Reply";
         var repostCount = note.repost_count ? String(note.repost_count) : "Repost";
@@ -581,7 +618,11 @@
             '</div>' +
             '<div class="flex items-center gap-2">' +
             translateBtnHtml +
-            '<a href="/feed?thread=' + encodeURIComponent(noteId) + '" class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition" title="View full conversation thread">' + formattedDate + '</a>' +
+            '<a href="/feed?thread=' + encodeURIComponent(noteId) + '" class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition" title="View full conversation thread">' +
+            '<time class="note-timestamp text-slate-400 dark:text-slate-500 hover:underline" data-timestamp="' + escapeAttr(String(tsSec)) + '" title="' + escapeAttr(date.toISOString()) + '">' +
+            escapeHtml(formattedDate) +
+            '</time>' +
+            '</a>' +
             '<div class="relative kebab-menu-wrap">' +
             '<button type="button" class="kebab-toggle-btn text-slate-400 hover:text-slate-200 p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition" aria-label="Post actions" onclick="toggleKebabMenu(event)">' +
             '<svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"></path></svg>' +
@@ -731,6 +772,7 @@
         } else {
             container.appendChild(wrapper);
         }
+        hydrateLocalTimestamps(wrapper);
 
         if (window.trustLens && typeof window.trustLens.scan === "function") {
             window.trustLens.scan(container);
@@ -814,6 +856,7 @@
 
             container.appendChild(wrapper);
             checkAndApplyClamping(wrapper);
+            hydrateLocalTimestamps(wrapper);
 
             if (note.kind === 30023) {
                 var newForm = wrapper.querySelector(".poll-vote-form");
@@ -1846,6 +1889,8 @@
     window.closePollModal = closePollModal;
     window.addPollOption = addPollOption;
     window.removeOption = removeOption;
+    window.formatLocalTimestamp = formatLocalTimestamp;
+    window.hydrateLocalTimestamps = hydrateLocalTimestamps;
     // ---------- Self-Moderation Actions (Hide, Mute, Block) ----------
 
     function getStorageArray(key) {
@@ -2162,10 +2207,13 @@
         }
     });
 
-    // Jump to Top button visibility listener
+    // Jump to Top button visibility & initialization listener
     document.addEventListener('DOMContentLoaded', function() {
         // Apply "Read More" clamping to server-rendered note bodies
         checkAndApplyClamping(document);
+
+        // Hydrate local timestamps on server-rendered cards
+        hydrateLocalTimestamps(document);
 
         initGlobalDirectorySearch();
 
@@ -2182,5 +2230,9 @@
             }, { passive: true });
         }
     });
+
+    if (document.readyState === "complete" || document.readyState === "interactive") {
+        hydrateLocalTimestamps(document);
+    }
 })();
 

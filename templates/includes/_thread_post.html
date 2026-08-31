@@ -88,7 +88,11 @@
         <a href="{% url 'feed' %}?thread={{ note.id }}" 
            class="text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 font-mono whitespace-nowrap transition"
            title="View full conversation thread">
-          {{ note.created_at|date:"M j, H:i" }}
+          <time class="note-timestamp text-slate-400 dark:text-slate-500 hover:underline"
+                data-timestamp="{{ note.created_at_ts|default:note.created_at }}"
+                title="{% if note.created_at_datetime %}{{ note.created_at_datetime|date:'c' }}{% else %}{{ note.created_at }}{% endif %}">
+            {{ note.time_ago|default:note.created_at }}
+          </time>
         </a>
 
         <div class="relative kebab-menu-wrap">
