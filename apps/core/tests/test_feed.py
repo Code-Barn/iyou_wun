@@ -1160,12 +1160,48 @@ class FeedModerationContractTest(TestCase):
         self.assertEqual(root["pubkey"], "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d")
         self.assertTrue(root["npub"].startswith("npub1"))
 
+class FeedPhase24Test(TestCase):
+    """Phase 24 tests: iyou circle scoping and expanded NIP-36 sensitive content detection."""
 
+    def test_nip36_expanded_sensitive_tags_flagged_properly(self):
+        from apps.core.nip10 import detect_content_warning, parse_content_warning, build_thread_tree, sanitize_event_content
 
+        # Tag types
+        self.assertEqual(detect_content_warning({"tags": [["content-warning", "NSFW"]]}), (True, "NSFW"))
+        self.assertEqual(detect_content_warning({"tags": [["nsfw"]]}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"tags": [["sensitive"]]}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"tags": [["nudity"]]}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"tags": [["l", "ISO-3166-1", "US", "content-warning"]]}), (True, "Sensitive Content"))
+        self.assertEqual(parse_content_warning({"tags": [["content-warning", "spoiler"]]}), (True, "spoiler"))
 
+        # Hashtag / inline content markers
+        self.assertEqual(detect_content_warning({"content": "Check out this art #nsfw"}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"content": "Contains #sensitive materials"}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"content": "Warning: #18+ content inside"}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"content": "Explicit #adult scene"}), (True, "Sensitive Content"))
 
+        # Clean content
+        self.assertEqual(detect_content_warning({"content": "Hello nostr world", "tags": []}), (False, ""))
 
+        # Verify enrichment
+        e = make_event("cw_note_1", 1, content="Sensitive post", tags=[["nsfw"]])
+        tree = build_thread_tree([e])
+        self.assertEqual(len(tree["roots"]), 1)
+        root = tree["roots"][0]
+        self.assertTrue(root["has_content_warning"])
+        self.assertEqual(root["warning_reason"], "Sensitive Content")
 
+        classifier = sanitize_event_content(e)
+        self.assertTrue(classifier["has_content_warning"])
+        self.assertEqual(classifier["warning_reason"], "Sensitive Content")
 
+    def test_iyou_circle_returns_empty_when_no_registered_pubkeys(self):
+        from apps.core.views import fetch_text_notes, fetch_unified_feed
 
+        # When authors list is empty []
+        notes = fetch_text_notes(authors=[])
+        self.assertEqual(notes, [])
 
+        feed = fetch_unified_feed(authors=[])
+        self.assertEqual(feed["roots"], [])
+        self.assertEqual(feed["replies"], {})

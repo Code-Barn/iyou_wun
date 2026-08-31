@@ -29,7 +29,7 @@ HEX_DUMP_REGEX = re.compile(r"^[0-9a-fA-F]{128,}$")
 BASE64_BLOB_REGEX = re.compile(r"^[A-Za-z0-9+/=]{100,}$")
 STACK_TRACE_REGEX = re.compile(r"Traceback \(most recent call last\)|File \".*\", line \d+|\bin <module>\b")
 
-ADULT_CONTENT_MARKERS = ("#nsfw", "#adult", "18+")
+ADULT_CONTENT_MARKERS = ("#nsfw", "#adult", "#sensitive", "#18+", "18+")
 
 
 def sanitize_event_content(event):
@@ -129,17 +129,26 @@ def detect_content_warning(event):
 
     Returns (has_content_warning, warning_reason).
     """
+    if not isinstance(event, dict):
+        return False, ""
+
     tags = event.get("tags") or []
     content = event.get("content") or ""
 
     reason = ""
     for tag in tags:
-        if not tag:
+        if not tag or not isinstance(tag, (list, tuple)):
             continue
-        if tag[0] == "content-warning":
+        first_tag = str(tag[0]).strip().lower()
+        if first_tag in ("content-warning", "nsfw", "sensitive", "nudity"):
             if len(tag) > 1 and str(tag[1]).strip():
                 reason = str(tag[1]).strip()
             return True, reason or "Sensitive Content"
+        if first_tag in ("l", "label"):
+            for item in tag[1:]:
+                item_str = str(item).strip().lower()
+                if item_str in ("content-warning", "nsfw", "sensitive", "nudity"):
+                    return True, "Sensitive Content"
 
     lowered = str(content).lower()
     for marker in ADULT_CONTENT_MARKERS:
@@ -147,6 +156,9 @@ def detect_content_warning(event):
             return True, "Sensitive Content"
 
     return False, ""
+
+
+parse_content_warning = detect_content_warning
 
 
 # --- Language Detection Heuristics ---
@@ -555,8 +567,8 @@ def build_thread_tree(raw_events, profiles=None):
             "reply_count": 0,
             "reactions": [],
             "replies": [],
-            "has_content_warning": bool(e.get("has_content_warning")),
-            "warning_reason": e.get("warning_reason") or "",
+            "has_content_warning": bool(e.get("has_content_warning") or detect_content_warning(e)[0]),
+            "warning_reason": e.get("warning_reason") or detect_content_warning(e)[1] or "",
             "lang": e.get("lang") or detect_language(e) or "en",
         }
         return extract_media_from_note(note)
@@ -695,8 +707,8 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "reply_count": 0,
         "reactions": [],
         "replies": [],
-        "has_content_warning": bool(e.get("has_content_warning")),
-        "warning_reason": e.get("warning_reason") or "",
+        "has_content_warning": bool(e.get("has_content_warning") or detect_content_warning(e)[0]),
+        "warning_reason": e.get("warning_reason") or detect_content_warning(e)[1] or "",
         "lang": e.get("lang") or detect_language(e) or "en",
     }
 

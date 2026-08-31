@@ -259,7 +259,10 @@
 
     TauriBridgeClient.prototype.getBridgeUrl = function () {
         var scriptTag = document.querySelector('script[src*="bridge_client.js"]');
-        return (scriptTag && scriptTag.getAttribute("data-bridge-url")) || "";
+        var url = (scriptTag && scriptTag.getAttribute("data-bridge-url")) || "";
+        if (url) return url;
+        if (typeof window !== "undefined" && window.TAURI_SIGNING_BRIDGE) return window.TAURI_SIGNING_BRIDGE;
+        return "wss://home.iyou.me:9001/";
     };
 
     TauriBridgeClient.prototype.connect = function (onMessage) {
@@ -288,8 +291,16 @@
                 clearTimeout(connectTimeout);
                 self.connectionLock = "OPEN";
                 self.socket = socket;
+                window.activeFeedSocket = socket;
+                var bridgeStatusEl = document.getElementById("persona-bridge-status");
+                if (bridgeStatusEl) {
+                    bridgeStatusEl.textContent = "Bridge Connected";
+                    bridgeStatusEl.className = "text-emerald-500 font-normal";
+                }
                 if (self.pendingSignedPayload) return;
                 socket.send(JSON.stringify({ type: "get_profile" }));
+                socket.send(JSON.stringify({ type: "list_profiles" }));
+                socket.send(JSON.stringify({ type: "LIST_PERSONAS" }));
             };
             socket.onmessage = function (event) {
                 self._handleMessage(event.data);
@@ -304,7 +315,13 @@
             socket.onclose = function () {
                 clearTimeout(connectTimeout);
                 self.socket = null;
+                window.activeFeedSocket = null;
                 self.connectionLock = "IDLE";
+                var bridgeStatusEl = document.getElementById("persona-bridge-status");
+                if (bridgeStatusEl) {
+                    bridgeStatusEl.textContent = "Bridge Offline";
+                    bridgeStatusEl.className = "text-slate-400 font-normal";
+                }
             };
         } catch (err) {
             this.connectionLock = "IDLE";
@@ -312,22 +329,133 @@
         }
     };
 
+    TauriBridgeClient.prototype.updateActivePersonaUI = function (profile) {
+        if (!profile) return;
+        var labelEl = document.getElementById("active-persona-label");
+        var levelEl = document.getElementById("active-persona-level");
+        var dotEl = document.getElementById("active-persona-dot");
+
+        var nameStr = profile.name || profile.profile_name || profile.label || "";
+        if (!nameStr) {
+            if (profile.did) {
+                nameStr = profile.did.slice(0, 16) + "...";
+            } else if (profile.nostr_pubkey_hex) {
+                nameStr = profile.nostr_pubkey_hex.slice(0, 12) + "...";
+            } else {
+                nameStr = "Sovereign";
+            }
+        }
+
+        if (labelEl) {
+            labelEl.textContent = nameStr;
+            labelEl.title = profile.did || profile.nostr_pubkey_hex || nameStr;
+        }
+
+        var level = profile.level !== undefined ? profile.level : profile.derivation_index;
+        var levelStr = (level === 1) ? "L1" : (level ? "L" + level : "L2");
+        if (levelEl) {
+            levelEl.textContent = levelStr;
+            levelEl.className = "text-[10px] px-1 py-0.5 rounded font-bold " +
+                (levelStr === "L1" 
+                    ? "bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300"
+                    : "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300");
+        }
+
+        if (dotEl) {
+            dotEl.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block";
+            dotEl.title = "Active: " + nameStr + " (" + levelStr + ")";
+        }
+    };
+
+    TauriBridgeClient.prototype.renderPersonaDropdownList = function (profiles) {
+        var container = document.getElementById("persona-list-container");
+        if (!container) return;
+
+        if (!profiles || profiles.length === 0) {
+            container.innerHTML = '<div class="px-2 py-2 text-slate-400 text-center text-[11px]">No active personas found in vault.</div>';
+            return;
+        }
+
+        var activePk = window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex || window.activeProfile.pubkey) : null;
+        var activeId = window.activeProfile ? (window.activeProfile.id || window.activeProfile.profile_id) : null;
+
+        var html = "";
+        profiles.forEach(function (p) {
+            var pId = p.id || p.profile_id || p.nostr_pubkey_hex || "";
+            var pPk = p.nostr_pubkey_hex || p.pubkey_hex || p.pubkey || "";
+            var isActive = (activeId && pId && String(activeId) === String(pId)) || (activePk && pPk && String(activePk).toLowerCase() === String(pPk).toLowerCase());
+
+            var name = p.name || p.profile_name || p.label || (p.did ? p.did.slice(0, 16) + '...' : (pPk ? pPk.slice(0, 10) + '...' : 'Persona'));
+            var level = p.level !== undefined ? p.level : p.derivation_index;
+            var levelStr = (level === 1) ? "L1" : (level ? "L" + level : "L2");
+
+            var badgeClass = (levelStr === "L1")
+                ? "bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300"
+                : "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300";
+
+            var activeDot = isActive
+                ? '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>'
+                : '<span class="w-1.5 h-1.5 rounded-full bg-transparent shrink-0"></span>';
+
+            var activeBg = isActive
+                ? 'bg-violet-50/80 dark:bg-violet-950/40 text-violet-900 dark:text-violet-200 font-semibold border-violet-300 dark:border-violet-700/60'
+                : 'hover:bg-slate-50 dark:hover:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-transparent';
+
+            html += '<button type="button" ' +
+                'onclick="switchPersona(\'' + escapeAttr(pId) + '\')" ' +
+                'class="w-full text-left px-2.5 py-1.5 rounded-lg flex items-center justify-between gap-2 border transition text-xs ' + activeBg + '">' +
+                '<div class="flex items-center gap-2 min-w-0">' +
+                activeDot +
+                '<span class="truncate">' + escapeHtml(name) + '</span>' +
+                '</div>' +
+                '<span class="text-[10px] px-1 py-0.5 rounded font-bold shrink-0 ' + badgeClass + '">' +
+                escapeHtml(levelStr) +
+                '</span>' +
+                '</button>';
+        });
+
+        container.innerHTML = html;
+    };
+
     TauriBridgeClient.prototype._handleMessage = function (data) {
         try {
             var message = JSON.parse(data);
 
-            if (message.type === "profile_sync") {
-                var previousPubkey = window.activeProfile ? window.activeProfile.nostr_pubkey_hex : null;
-                window.activeProfile = message.profile;
-                var newPubkey = message.profile ? message.profile.nostr_pubkey_hex : null;
-                if (previousPubkey !== newPubkey) {
-                    // Identity switch: local trust view is stale, invalidate and re-scan.
-                    this.clearAliasCache();
-                    if (window.trustLens && typeof window.trustLens.reset === "function") {
-                        window.trustLens.reset();
+            if (message.type === "profiles_list" || message.type === "LIST_PERSONAS_RESPONSE" || message.type === "personas_list") {
+                var rawProfiles = message.profiles || message.personas || message.payload || [];
+                // Filter out Level 0 Anchor identity (level === 0, derivation_index === 0, is_anchor, or ANCHOR role)
+                var validProfiles = rawProfiles.filter(function (p) {
+                    if (!p) return false;
+                    if (p.level === 0 || p.derivation_index === 0) return false;
+                    if (p.is_anchor === true || p.role === "ANCHOR" || p.name === "ANCHOR") return false;
+                    return true;
+                });
+                window.enclavePersonas = validProfiles;
+                this.renderPersonaDropdownList(validProfiles);
+                return;
+            }
+
+            if (message.type === "profile_sync" || message.type === "profile_activated" || message.type === "active_profile_changed" || message.type === "SET_ACTIVE_PERSONA_RESPONSE") {
+                var prof = message.profile || message.active_profile || message.persona;
+                if (prof) {
+                    var previousPubkey = window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex) : null;
+                    window.activeProfile = prof;
+                    this.updateActivePersonaUI(prof);
+                    if (window.enclavePersonas && window.enclavePersonas.length > 0) {
+                        this.renderPersonaDropdownList(window.enclavePersonas);
                     }
-                    if (window.trustLens && typeof window.trustLens.scan === "function") {
-                        window.trustLens.scan();
+                    window.dispatchEvent(new CustomEvent('persona:changed', { detail: prof }));
+
+                    var newPubkey = prof.nostr_pubkey_hex || prof.pubkey_hex;
+                    if (previousPubkey && newPubkey && previousPubkey !== newPubkey) {
+                        // Identity switch: local trust view is stale, invalidate and re-scan.
+                        this.clearAliasCache();
+                        if (window.trustLens && typeof window.trustLens.reset === "function") {
+                            window.trustLens.reset();
+                        }
+                        if (window.trustLens && typeof window.trustLens.scan === "function") {
+                            window.trustLens.scan();
+                        }
                     }
                 }
                 return;
@@ -384,13 +512,13 @@
     };
 
     TauriBridgeClient.prototype.getEffectivePubkey = async function () {
-        var bridgePk = window.activeProfile ? window.activeProfile.nostr_pubkey_hex : null;
+        var bridgePk = window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex || window.activeProfile.pubkey) : null;
         var templatePk = (typeof window.userPubkey !== "undefined" && window.userPubkey) ? window.userPubkey : null;
         var pk = (bridgePk && bridgePk.length === 64) ? bridgePk : templatePk;
         if (!pk || pk.length !== 64 || !/^[a-fA-F0-9]{64}$/.test(pk)) {
             throw new Error("Identity Synchronization Required: No valid secp256k1 pubkey found");
         }
-        return pk;
+        return pk.toLowerCase();
     };
 
     TauriBridgeClient.prototype.broadcastToRelays = function (signedEvent, relayList, onDone) {
@@ -556,6 +684,59 @@
         } catch (e) { /* ignore */ }
     }
 
+    // ---------- Persona Switcher API ----------
+
+    window.switchPersona = function (profileId) {
+        var socket = window.activeFeedSocket || (window.bridgeClient && window.bridgeClient.socket);
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+            console.warn('Bridge socket not connected');
+            showToast("Bridge socket not connected.", true);
+            return;
+        }
+        socket.send(JSON.stringify({
+            type: "set_active_profile",
+            profile_id: profileId
+        }));
+        socket.send(JSON.stringify({
+            type: "SET_ACTIVE_PERSONA",
+            profile_id: profileId,
+            persona_id: profileId
+        }));
+        var dropdown = document.getElementById('persona-switcher-dropdown');
+        if (dropdown) dropdown.classList.add('hidden');
+        var btn = document.getElementById('persona-switcher-btn');
+        if (btn) btn.setAttribute('aria-expanded', 'false');
+    };
+
+    function togglePersonaDropdown() {
+        var dropdown = document.getElementById('persona-switcher-dropdown');
+        var btn = document.getElementById('persona-switcher-btn');
+        if (!dropdown) return;
+        var isHidden = dropdown.classList.contains('hidden');
+        if (isHidden) {
+            dropdown.classList.remove('hidden');
+            if (btn) btn.setAttribute('aria-expanded', 'true');
+            var socket = window.activeFeedSocket || (window.bridgeClient && window.bridgeClient.socket);
+            if (socket && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: "list_profiles" }));
+                socket.send(JSON.stringify({ type: "LIST_PERSONAS" }));
+            }
+        } else {
+            dropdown.classList.add('hidden');
+            if (btn) btn.setAttribute('aria-expanded', 'false');
+        }
+    }
+    window.togglePersonaDropdown = togglePersonaDropdown;
+
+    document.addEventListener('click', function (e) {
+        var container = document.getElementById('persona-switcher-container');
+        var dropdown = document.getElementById('persona-switcher-dropdown');
+        var btn = document.getElementById('persona-switcher-btn');
+        if (dropdown && container && !container.contains(e.target)) {
+            dropdown.classList.add('hidden');
+            if (btn) btn.setAttribute('aria-expanded', 'false');
+        }
+    });
 
     // ---------- Public API ----------
 

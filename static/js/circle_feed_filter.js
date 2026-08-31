@@ -119,13 +119,23 @@
         }
 
         if (circleMode === "iyou") {
-            if (card.querySelector(".sovereign-badge") || card.getAttribute("data-is-sovereign") === "true") {
+            const authorPk = normalizeKey(pubkey || (card.dataset && card.dataset.authorPubkey) || card.getAttribute("data-author-pubkey") || card.getAttribute("data-pubkey"));
+            const authorDid = normalizeKey(did || (card.dataset && card.dataset.authorDid) || card.getAttribute("data-author-did") || card.getAttribute("data-did"));
+            const isIyouAttr = (card.dataset && (card.dataset.isIyou === "true" || card.dataset.isSovereign === "true")) ||
+                               card.getAttribute("data-is-iyou") === "true" ||
+                               card.getAttribute("data-is-sovereign") === "true";
+
+            if (isIyouAttr) return true;
+
+            const iyouKeys = (global.IYOU_ECOSYSTEM_KEYS || window.IYOU_ECOSYSTEM_KEYS || []).map(normalizeKey);
+            if (authorPk && iyouKeys.includes(authorPk)) return true;
+            if (authorDid && iyouKeys.includes(authorDid)) return true;
+
+            if (card.querySelector(".sovereign-badge") || card.querySelector("[data-is-iyou='true']")) {
                 return true;
             }
-            if (did && (did.startsWith("did:key:") || did.startsWith("did:iyou:"))) {
-                return true;
-            }
-            return true;
+
+            return false;
         }
 
         if (circleMode === "following") {
@@ -302,12 +312,16 @@
 
         // 3. NSFW / Content Warning Check
         var hasCw = (card.dataset && (card.dataset.hasCw === "true" || card.dataset.hasContentWarning === "true")) ||
+                    card.getAttribute("data-has-cw") === "true" ||
                     card.getAttribute("data-has-content-warning") === "true" ||
-                    (data && data.root && (data.root.getAttribute("data-has-content-warning") === "true" || (data.root.dataset && data.root.dataset.hasContentWarning === "true"))) ||
+                    (data && data.root && (data.root.getAttribute("data-has-cw") === "true" || data.root.getAttribute("data-has-content-warning") === "true" || (data.root.dataset && (data.root.dataset.hasCw === "true" || data.root.dataset.hasContentWarning === "true")))) ||
                     !!card.querySelector(".content-warning-shield") ||
                     !!card.querySelector(".sensitive-content-warning");
         if (nsfwPref === "hide" && hasCw) {
+            card.classList.add("sr-hidden");
             return false;
+        } else {
+            card.classList.remove("sr-hidden");
         }
 
         return true;
@@ -405,8 +419,8 @@
                 emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes match the active filter and search query.</p>' +
                     '<p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>';
             } else if (activeCircle === "iyou") {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from the iyou Ecosystem.</p>' +
-                    '<p class="text-xs text-slate-500">Publish sovereign notes or connect local Link Decks to populate this circle.</p>';
+                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from the iyou ecosystem yet.</p>' +
+                    '<p class="text-xs text-slate-500">Notes posted by registered accounts will appear here.</p>';
             } else if (activeCircle === "following") {
                 emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in Following Circle.</p>' +
                     '<p class="text-xs text-slate-500">Follow more creators on the feed or link deck to populate your network.</p>';

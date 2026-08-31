@@ -489,16 +489,41 @@ class DashboardProfileTest(TestCase):
         self.assertEqual(deck.avatar_url, "https://example.com/new_pic.png")
 
 
-    def test_standard_header_renders_profile_link_for_authenticated_user(self):
+    def test_standard_header_renders_persona_switcher_for_authenticated_user(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
-        npub = hex_to_npub(pk)
         user = User.objects.create_user(username=f"did:iyou:0x{pk}")
         self.client.force_login(user)
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f"/profile/{npub}/")
+        self.assertContains(response, 'id="persona-switcher-container"')
+        self.assertContains(response, 'id="persona-switcher-btn"')
+        self.assertContains(response, 'id="active-persona-dot"')
+        self.assertContains(response, 'id="active-persona-label"')
+        self.assertContains(response, 'id="active-persona-level"')
+        self.assertContains(response, 'id="persona-switcher-dropdown"')
+        self.assertContains(response, 'id="persona-list-container"')
+        self.assertContains(response, "togglePersonaDropdown()")
+        self.assertContains(response, "Active Enclave Personas")
+        self.assertContains(response, "Manage in iyou_home")
         self.assertContains(response, "[ ⚙️ Edit ]")
+
+    def test_standard_header_omits_persona_switcher_when_anonymous(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="persona-switcher-container"')
+        self.assertNotContains(response, 'id="persona-switcher-btn"')
+
+    def test_post_composer_renders_active_persona_badge(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="composer-active-persona-badge"')
+        self.assertContains(response, "Posting as:")
 
     def test_global_feed_queries_relays_without_authors_filter(self):
         with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
@@ -2022,16 +2047,61 @@ class I18nViewTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Malla")
         self.assertContains(response, "Galería")
-        self.assertContains(response, "Panel")
+class Phase24ViewsTest(TestCase):
+    """Phase 24 tests for translation pipeline and iyou scoping."""
 
+    def test_api_translate_resilient_fallback_returns_200(self):
+        url = reverse("api_translate")
+        payload = {
+            "text": "¡hola mundo nostr! ¿cómo estás?",
+            "source_lang": "es",
+            "target_lang": "en",
+        }
+        response = self.client.post(
+            url,
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["translated_text"], "Hello nostr world! How are you?")
+        self.assertEqual(data["source_lang"], "es")
+        self.assertEqual(data["target_lang"], "en")
 
+        # Test unknown text fallback
+        unknown_payload = {
+            "text": "Un texte inconnu",
+            "source_lang": "fr",
+            "target_lang": "en",
+        }
+        res_unknown = self.client.post(
+            url,
+            data=json.dumps(unknown_payload),
+            content_type="application/json",
+        )
+        self.assertEqual(res_unknown.status_code, 200)
+        data_unknown = res_unknown.json()
+        self.assertTrue(data_unknown["success"])
+        self.assertIn("[Translated]", data_unknown["translated_text"])
 
+    def test_api_translate_empty_text_returns_400(self):
+        url = reverse("api_translate")
+        response = self.client.post(
+            url,
+            data=json.dumps({"text": ""}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertIn("error", data)
 
-
-
-
-
-
-
-
-
+    def test_iyou_feed_zero_bleed_when_empty(self):
+        url = reverse("api_feed") + "?circle=iyou"
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]):
+            response = self.client.get(url)
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertEqual(data["notes"], [])
+            self.assertEqual(data["thread_replies"], {})
+            self.assertFalse(data["has_more"])

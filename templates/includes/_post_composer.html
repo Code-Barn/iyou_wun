@@ -1,7 +1,11 @@
 {% load i18n %}
 {% if user_pubkey %}
-<div class="border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 shadow-sm">
-    <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3 font-mono">{% trans "Post to Nostr" %}</h2>
+    <div class="flex items-center justify-between gap-2 mb-3">
+      <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-200 font-mono">{% trans "Post to Nostr" %}</h2>
+      <span id="composer-active-persona-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60">
+        {% if user_handle %}Posting as: @{{ user_handle }} (L1){% elif user_display_name %}Posting as: {{ user_display_name }} (L1){% else %}Posting as: Primary (L1){% endif %}
+      </span>
+    </div>
     <textarea id="postContent" class="w-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-lg p-3 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none overflow-x-hidden overflow-y-auto" rows="3" wrap="soft" placeholder="{% trans "What's on your mind?" %}"></textarea>
     <div id="quote-preview-dock" class="hidden mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
       <div class="flex items-center justify-between gap-2 mb-1.5">
@@ -15,6 +19,27 @@
         </div>
         <div id="quote-preview-media" class="hidden w-16 h-16 rounded-lg overflow-hidden bg-slate-900 shrink-0 border border-slate-200 dark:border-slate-800">
           <img id="quote-preview-media-img" src="" alt="Quoted media" class="w-full h-full object-cover" />
+        </div>
+      </div>
+    </div>
+    <!-- Media Attachment Preview Dock (Blossom BUD-01) -->
+    <div id="composer-media-preview-dock" class="hidden mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+      <div class="flex items-center justify-between gap-2 mb-1.5">
+        <span class="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex items-center gap-1">
+          <span>🌸</span> <span>Blossom Media Attached</span>
+        </span>
+        <button type="button" onclick="clearMediaAttachment()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 transition" title="Remove attachment">✕</button>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="w-16 h-16 rounded-lg overflow-hidden bg-slate-900 shrink-0 border border-slate-200 dark:border-slate-800 flex items-center justify-center">
+          <img id="composer-media-preview-img" src="" alt="Media preview" class="w-full h-full object-cover hidden" />
+          <video id="composer-media-preview-video" src="" class="w-full h-full object-cover hidden" muted playsinline></video>
+          <span id="composer-media-preview-icon" class="text-xl hidden">🎵</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div id="composer-media-filename" class="text-xs font-mono font-semibold text-slate-800 dark:text-slate-200 truncate"></div>
+          <div id="composer-media-hash" class="text-[10px] font-mono text-slate-400 truncate mt-0.5"></div>
+          <div id="composer-media-url" class="text-[10px] font-mono text-violet-500 truncate mt-0.5"></div>
         </div>
       </div>
     </div>

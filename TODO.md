@@ -124,9 +124,21 @@
     - Plain text search (e.g. `fiatjef`, `jack`) -> query local cache first; on miss, dispatch NIP-50 search query (`{"kinds": [0], "search": "<query>", "limit": 10}`) to `wss://purplepag.es` and `wss://relay.nostr.band`.
   - Render an interactive discovery dropdown popover displaying matching avatar, display name, handle, and 1-click `[ View ]` / `[ + Follow ]` actions.
 
+### Phase 24: iyou Circle Scoping, NSFW Hardening, Translation Fallback & Blossom BUD-01 Ingestion
+- [x] **24.1 Strict iyou Circle Scoping & Zero-Bleed Fallback:**
+  - `get_iyou_pubkeys()` extracts normalized 64-char hex pubkeys from all registered `UserLinkDeck` and local auth records.
+  - `FeedView`, `api_feed`, `fetch_text_notes()`, and `fetch_unified_feed()` enforce zero-bleed fallback returning empty lists when no registered ecosystem pubkeys match.
+  - `circle_feed_filter.js` strictly isolates the `iyou` circle with explicit empty-state messaging.
+- [x] **24.2 NSFW Filter & Sensitive Content Gate:**
+  - `detect_content_warning()` in `apps/core/nip10.py` detects expanded NIP-36 tags (`content-warning`, `nsfw`, `sensitive`, `nudity`, `l` ISO-3166-1 tags) and content hashtags (`#nsfw`, `#sensitive`, `#18+`, `#adult`).
+  - Flagged cards render with `data-has-cw="true"` and `.blur-me` filter on media attachments, fully hidden when `wun_nsfw_pref === 'hide'`.
+- [x] **24.3 Resilient Translation Engine (`POST /api/translate/`):**
+  - Multi-stage translation endpoint with cache checking (`trans:{source}:{target}:{hash}`), upstream service execution, and mock/offline fallback returning guaranteed HTTP 200 JSON.
+  - `translateNote()` in `feed_interactions.js` provides view toggle (`View Original` ⇄ `View Translation`) and warning toasts on connectivity issues.
+- [x] **24.4 Blossom BUD-01 Media Upload Pipeline:**
+  - Composer calculates in-memory SHA-256 (`crypto.subtle.digest`), performs `PUT` upload to Blossom server (`https://cdn.iyou.me/upload` with local fallback), renders thumbnail preview dock in `#composer-media-preview-dock`, and attaches NIP-94 tags to the signed note.
+- [x] **24.5 Tests:** `test_nip36_expanded_sensitive_tags_flagged_properly`, `test_iyou_circle_returns_empty_when_no_registered_pubkeys`, `test_api_translate_resilient_fallback_returns_200`, `test_iyou_feed_zero_bleed_when_empty` — **Done 2026-08-31**
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---
-
-
-

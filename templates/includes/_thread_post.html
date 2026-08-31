@@ -1,5 +1,10 @@
 {% load static i18n %}
-<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="{{ note.id }}" data-lang="{{ note.lang|default:'en' }}">
+<div class="flex items-start gap-3.5 sm:gap-4 relative group" 
+     data-note-card-id="{{ note.id }}" 
+     data-author-pubkey="{{ note.pubkey }}"
+     data-is-iyou="{{ note.is_iyou_native|yesno:'true,false' }}"
+     {% if note.has_content_warning %}data-has-cw="true" data-has-content-warning="true"{% endif %}
+     data-lang="{{ note.lang|default:'en' }}">
   <!-- Author Avatar -->
   <div class="shrink-0">
     {% if note.author_avatar %}

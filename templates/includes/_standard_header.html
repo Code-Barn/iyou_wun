@@ -21,15 +21,54 @@
           <span id="notification-unread-dot" class="hidden absolute top-1 right-1 w-2 h-2 bg-violet-500 rounded-full animate-pulse"></span>
         </button>
         <div class="flex items-center gap-2 font-mono">
-          <a href="{% if user_profile_url %}{{ user_profile_url }}{% elif user_npub %}{% url 'profile' npub=user_npub %}{% else %}{% url 'dashboard' %}{% endif %}"
-             class="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-300 hover:text-violet-600 dark:hover:text-violet-400 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 transition group shadow-sm"
-             title="View My Sovereign Profile">
-            <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" title="Sovereign Key Active"></span>
-            <span class="max-w-[120px] sm:max-w-[180px] truncate font-medium">
-              {% if user_handle %}@{{ user_handle }}{% else %}{{ user.username|default:request.user.username|truncatechars:18 }}{% endif %}
-            </span>
-            <span class="text-[10px] text-slate-400 group-hover:text-violet-400">↗</span>
-          </a>
+          <!-- Persona Quick-Switcher Container -->
+          <div class="relative inline-block text-left" id="persona-switcher-container">
+            <!-- Active Persona Trigger Button -->
+            <button 
+              type="button" 
+              id="persona-switcher-btn"
+              class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-xs font-mono focus:outline-none"
+              aria-expanded="false"
+              aria-haspopup="true"
+              onclick="togglePersonaDropdown()"
+            >
+              <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" id="active-persona-dot" title="Sovereign Key Active"></span>
+              <span class="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-[140px] sm:max-w-[180px]" id="active-persona-label">
+                {% if user_handle %}@{{ user_handle }}{% else %}{{ user.username|default:request.user.username|truncatechars:20 }}{% endif %}
+              </span>
+              <span class="text-[10px] px-1 py-0.5 rounded bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 font-bold" id="active-persona-level">
+                L1
+              </span>
+              <svg class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" id="persona-chevron" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <!-- Flyout Menu -->
+            <div 
+              id="persona-switcher-dropdown" 
+              class="hidden absolute right-0 mt-1.5 w-72 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-2xl z-50 p-1.5 text-xs font-mono divide-y divide-slate-100 dark:divide-slate-800"
+            >
+              <div class="px-2 py-1.5 text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center justify-between">
+                <span>Active Enclave Personas</span>
+                <span class="text-emerald-500 font-normal">Bridge Connected</span>
+              </div>
+
+              <!-- Persona List Target Container -->
+              <div class="py-1 space-y-1" id="persona-list-container">
+                <div class="px-2 py-2 text-slate-400 text-center text-[11px] animate-pulse">
+                  Querying local vault personas...
+                </div>
+              </div>
+
+              <!-- Enclave Shortcut Footer -->
+              <div class="pt-1.5 pb-0.5 px-2 flex items-center justify-between text-[11px] text-slate-400">
+                <span class="truncate">Manage in iyou_home</span>
+                <span class="text-violet-500">🔒 Enclave</span>
+              </div>
+            </div>
+          </div>
+
           <a href="{% url 'dashboard' %}" class="text-xs text-slate-400 hover:text-violet-400 hidden sm:inline transition" title="Edit Profile & Settings">
             [ ⚙️ Edit ]
           </a>

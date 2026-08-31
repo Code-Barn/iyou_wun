@@ -17,6 +17,7 @@
     var pendingNomination = null;
     var pendingReport = null;
     var quotedTarget = null;
+    var attachedMedia = null;
 
     window.pendingReply = null;
 
@@ -25,8 +26,9 @@
 
     async function postToNostr() {
         var content = document.getElementById("postContent");
-        if (!content || !content.value.trim()) {
-            showToast("Please enter some content to post.", true);
+        var text = content ? content.value.trim() : "";
+        if (!text && !attachedMedia) {
+            showToast("Please enter some content or attach media to post.", true);
             return;
         }
         var pk;
@@ -39,9 +41,16 @@
             tags.push(["q", quotedTarget.id, "wss://relay.iyou.me", quotedTarget.pubkey || ""]);
             if (quotedTarget.pubkey) tags.push(["p", quotedTarget.pubkey]);
         }
+        if (attachedMedia && attachedMedia.url) {
+            tags.push(["url", attachedMedia.url]);
+            if (attachedMedia.hash) tags.push(["x", attachedMedia.hash]);
+            if (attachedMedia.mimeType) tags.push(["m", attachedMedia.mimeType]);
+            if (attachedMedia.size) tags.push(["size", String(attachedMedia.size)]);
+        }
+        var kind = (attachedMedia && !text) ? 1063 : 1;
         var event = {
-            kind: 1,
-            content: content.value.trim(),
+            kind: kind,
+            content: text,
             pubkey: pk,
             created_at: Math.floor(Date.now() / 1000),
             tags: tags,
@@ -159,6 +168,7 @@
                 var editor = document.getElementById("postContent");
                 if (editor) editor.value = "";
                 clearQuoteAttachment();
+                clearMediaAttachment();
             });
         }
     }
@@ -1003,9 +1013,28 @@
         el.classList.remove("hidden");
     }
 
+    function clearMediaAttachment() {
+        attachedMedia = null;
+        var dock = document.getElementById("composer-media-preview-dock");
+        if (dock) dock.classList.add("hidden");
+        var previewImg = document.getElementById("composer-media-preview-img");
+        if (previewImg) { previewImg.src = ""; previewImg.classList.add("hidden"); }
+        var previewVid = document.getElementById("composer-media-preview-video");
+        if (previewVid) { previewVid.src = ""; previewVid.classList.add("hidden"); }
+        var previewIcon = document.getElementById("composer-media-preview-icon");
+        if (previewIcon) previewIcon.classList.add("hidden");
+        var fileInput = document.getElementById("composer-file-input");
+        if (fileInput) fileInput.value = "";
+        var mediaInput = document.getElementById("mediaInput");
+        if (mediaInput) mediaInput.value = "";
+        var status = document.getElementById("uploadStatus");
+        if (status) status.classList.add("hidden");
+    }
+    window.clearMediaAttachment = clearMediaAttachment;
+
     async function handleMediaSelected(file) {
         if (!file) return;
-        setUploadStatus("Hashing...");
+        setUploadStatus("Hashing file...");
         try {
             var arrayBuffer = await file.arrayBuffer();
             var hash = await sha256Hex(arrayBuffer);
@@ -1082,58 +1111,60 @@
                     } catch (proxyErr) {
                         console.warn("Server proxy upload also failed:", proxyErr);
                         uploadedUrl = baseUrl + "/" + hash;
-                        if (typeof showToast === "function") {
-                            showToast("Media upload offline; drafting event with hash.", true);
-                        }
                     }
                 }
             }
 
-            if (!uploadedUrl) {
-                uploadedUrl = baseUrl + "/" + hash;
-            }
+            var ext = file.name ? file.name.split('.').pop().toLowerCase() : '';
+            var canonicalUrl = "https://cdn.iyou.me/" + hash + (ext ? "." + ext : "");
+            var finalUrl = uploadedUrl || canonicalUrl;
+            var mime = file.type || "application/octet-stream";
 
-            setUploadStatus("Requesting signature...");
-            var pk;
-            try {
-                pk = await bridgeClient.getEffectivePubkey();
-            } catch (e) {
-                setUploadStatus(e.message);
-                setTimeout(function () {
-                    var el = document.getElementById("uploadStatus");
-                    if (el) el.classList.add("hidden");
-                }, 3000);
-                return;
-            }
-
-            bridgeClient.isProcessing = true;
-            var mimeType = file.type || "application/octet-stream";
-            var mimePrefix = "file";
-            if (mimeType.indexOf("image") !== -1) mimePrefix = "image";
-            else if (mimeType.indexOf("video") !== -1) mimePrefix = "video";
-            else if (mimeType.indexOf("audio") !== -1) mimePrefix = "audio";
-
-            var tags = [
-                ["url", uploadedUrl],
-                ["x", hash],
-                ["m", mimeType],
-            ];
-            if (file.size) {
-                tags.push(["size", String(file.size)]);
-            }
-
-            var event = {
-                kind: 1063,
-                content: "",
-                display_content: "",
-                pubkey: pk,
-                created_at: Math.floor(Date.now() / 1000),
-                tags: tags,
-                media_attachments: [
-                    { type: mimePrefix, url: uploadedUrl, hash: hash, mime: mimeType }
-                ]
+            attachedMedia = {
+                url: finalUrl,
+                hash: hash,
+                mimeType: mime,
+                size: file.size,
+                name: file.name
             };
-            bridgeClient.signEvent(event);
+
+            // Preview attachment in composer dock
+            var dock = document.getElementById("composer-media-preview-dock");
+            var previewImg = document.getElementById("composer-media-preview-img");
+            var previewVid = document.getElementById("composer-media-preview-video");
+            var previewIcon = document.getElementById("composer-media-preview-icon");
+            var nameEl = document.getElementById("composer-media-filename");
+            var hashEl = document.getElementById("composer-media-hash");
+            var urlEl = document.getElementById("composer-media-url");
+
+            if (nameEl) nameEl.textContent = file.name || "Media File";
+            if (hashEl) hashEl.textContent = "SHA-256: " + hash.slice(0, 16) + "...";
+            if (urlEl) urlEl.textContent = finalUrl;
+
+            var objectUrl = URL.createObjectURL(file);
+            if (mime.indexOf("image") !== -1 && previewImg) {
+                previewImg.src = objectUrl;
+                previewImg.classList.remove("hidden");
+                if (previewVid) previewVid.classList.add("hidden");
+                if (previewIcon) previewIcon.classList.add("hidden");
+            } else if (mime.indexOf("video") !== -1 && previewVid) {
+                previewVid.src = objectUrl;
+                previewVid.classList.remove("hidden");
+                if (previewImg) previewImg.classList.add("hidden");
+                if (previewIcon) previewIcon.classList.add("hidden");
+            } else if (previewIcon) {
+                previewIcon.textContent = mime.indexOf("audio") !== -1 ? "🎵" : "📄";
+                previewIcon.classList.remove("hidden");
+                if (previewImg) previewImg.classList.add("hidden");
+                if (previewVid) previewVid.classList.add("hidden");
+            }
+            if (dock) dock.classList.remove("hidden");
+
+            setUploadStatus("Media attached ready to post.");
+            setTimeout(function () {
+                var el = document.getElementById("uploadStatus");
+                if (el) el.classList.add("hidden");
+            }, 2500);
 
         } catch (err) {
             setUploadStatus("Error: " + err.message);
@@ -1680,6 +1711,20 @@
 
         if (!transBox || !transText || !bodyContent) return;
 
+        // If already translated, toggle between original and translated
+        if (transBox.getAttribute("data-translated") === "true") {
+            if (transBox.classList.contains("hidden")) {
+                bodyContent.classList.add("hidden");
+                transBox.classList.remove("hidden");
+                if (btn) btn.innerHTML = '<span>🌐 View Original</span>';
+            } else {
+                transBox.classList.add("hidden");
+                bodyContent.classList.remove("hidden");
+                if (btn) btn.innerHTML = '<span>🌐 View Translation</span>';
+            }
+            return;
+        }
+
         var originalText = bodyContent.innerText || bodyContent.textContent || "";
         if (!originalText.trim()) return;
 
@@ -1702,7 +1747,12 @@
             })
         })
         .then(function (res) {
-            if (!res.ok) throw new Error('Translation failed');
+            if (!res.ok) {
+                if (typeof showToast === 'function') {
+                    showToast('Translation service unavailable', 'warning');
+                }
+                throw new Error('Translation failed with HTTP ' + res.status);
+            }
             return res.json();
         })
         .then(function (data) {
@@ -1713,18 +1763,19 @@
                 }
                 bodyContent.classList.add('hidden');
                 transBox.classList.remove('hidden');
+                transBox.setAttribute("data-translated", "true");
                 if (btn) {
-                    btn.innerHTML = '<span>🌐 Translated</span>';
+                    btn.innerHTML = '<span>🌐 View Original</span>';
                 }
             } else {
+                if (typeof showToast === 'function') {
+                    showToast('Translation service unavailable', 'warning');
+                }
                 throw new Error((data && data.error) || 'Translation error');
             }
         })
         .catch(function (err) {
             console.error('Translation error:', err);
-            if (typeof showToast === 'function') {
-                showToast('Unable to translate note: ' + (err.message || 'Service unavailable'), 'error');
-            }
             if (btn) {
                 btn.innerHTML = prevBtnHtml;
             }
@@ -1738,6 +1789,7 @@
         var card = document.querySelector('[data-note-card-id="' + noteId + '"]') || document.querySelector('.feed-note-card[data-note-id="' + noteId + '"]');
         if (!card) return;
 
+        var btn = card.querySelector('.translate-btn[data-note-id="' + noteId + '"]') || card.querySelector('.translate-btn');
         var transBox = document.getElementById('translated-box-' + noteId);
         var bodyContent = card.querySelector('.note-body-content');
         if (!transBox || !bodyContent) return;
@@ -1745,9 +1797,11 @@
         if (bodyContent.classList.contains('hidden')) {
             bodyContent.classList.remove('hidden');
             transBox.classList.add('hidden');
+            if (btn) btn.innerHTML = '<span>🌐 View Translation</span>';
         } else {
             bodyContent.classList.add('hidden');
             transBox.classList.remove('hidden');
+            if (btn) btn.innerHTML = '<span>🌐 View Original</span>';
         }
     }
 
@@ -2094,6 +2148,19 @@
             }
         });
     }
+
+    // Persona Switcher & Composer Active Badge Listener
+    window.addEventListener('persona:changed', function (e) {
+        var profile = e.detail;
+        if (!profile) return;
+        var composerBadge = document.getElementById('composer-active-persona-badge');
+        if (composerBadge) {
+            var level = profile.level !== undefined ? profile.level : profile.derivation_index;
+            var levelStr = (level === 1) ? 'L1' : (level ? 'L' + level : 'L2');
+            var nameStr = profile.name || profile.profile_name || (profile.handle ? '@' + profile.handle : 'Primary');
+            composerBadge.textContent = 'Posting as: ' + nameStr + ' (' + levelStr + ')';
+        }
+    });
 
     // Jump to Top button visibility listener
     document.addEventListener('DOMContentLoaded', function() {

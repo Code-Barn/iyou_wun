@@ -90,13 +90,20 @@ def dashboard(request):
 
 
 def get_iyou_pubkeys():
-    """Extract public key hexes of registered UserLinkDeck creators and local users."""
-    iyou_users = list(
-        UserLinkDeck.objects.filter(is_public=True)
-        .exclude(user__username="")
-        .values_list("user__username", flat=True)
-    )
-    all_raw = set(iyou_users)
+    """Extract public key hexes of registered UserLinkDeck creators and local auth records."""
+    try:
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        deck_usernames = list(
+            UserLinkDeck.objects.exclude(user__username="").values_list("user__username", flat=True)
+        )
+        auth_usernames = list(
+            User.objects.exclude(username="").values_list("username", flat=True)
+        )
+        all_raw = set(deck_usernames) | set(auth_usernames)
+    except Exception:
+        all_raw = set()
+
     pubkeys = set()
     for u in all_raw:
         if not u:
@@ -272,7 +279,10 @@ class FeedView(TemplateView):
 
             if circle == "iyou":
                 iyou_pks = get_iyou_pubkeys()
-                feed_data = fetch_unified_feed(authors=iyou_pks, relay_urls=relays)
+                if not iyou_pks:
+                    feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
+                else:
+                    feed_data = fetch_unified_feed(authors=iyou_pks, relay_urls=relays)
             elif circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
                 if contacts:
@@ -565,10 +575,15 @@ def api_feed(request):
 
     if circle == "iyou":
         iyou_pks = get_iyou_pubkeys()
-        if iyou_pks:
-            filter_obj["authors"] = iyou_pks
-        else:
-            filter_obj["authors"] = CURATED_AUTHORS
+        if not iyou_pks:
+            return JsonResponse({
+                "notes": [],
+                "thread_replies": {},
+                "thread_reply_count": 0,
+                "oldest_timestamp": None,
+                "has_more": False,
+            })
+        filter_obj["authors"] = iyou_pks
     elif circle in ("following", "network") and user_pubkey:
         contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
         if contacts:
@@ -1107,6 +1122,9 @@ def fetch_media_assets(authors=None, limit=50, relay_urls=None):
 
 def fetch_text_notes(authors=None, limit=20, relay_urls=None):
     """Fetch Kind 1 & 1063 notes for given authors, with profile and media enrichment."""
+    if authors is not None and not authors:
+        return []
+
     filter_obj = {"kinds": [1, 1063], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
@@ -1794,6 +1812,9 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
     Phase 2: Fetch Kind 0 metadata for all unique pubkeys discovered.
     Returns a structured feed with author_name/author_avatar populated.
     """
+    if authors is not None and not authors:
+        return {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
+
     filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
@@ -3057,7 +3078,7 @@ class MediaUploadProxyView(View):
 
 @csrf_exempt
 def api_translate(request):
-    """Translate note content on-demand with caching and fallback simulation."""
+    """Translate note content on-demand with caching and resilient fallback simulation."""
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. POST required."}, status=405)
 
@@ -3114,6 +3135,8 @@ def api_translate(request):
             "¡hola mundo nostr! ¿cómo estás?": "Hello nostr world! How are you?",
             "hola mundo": "hello world",
             "buenos días": "good morning",
+            "buenas tardes": "good afternoon",
+            "buenas noches": "good evening",
             "muchas gracias": "thank you very much",
             "bonjour le monde": "hello world",
             "guten morgen": "good morning",
@@ -3123,10 +3146,13 @@ def api_translate(request):
         if lowered in translations_dict:
             translated_text = translations_dict[lowered]
         else:
-            translated_text = f"[Translated ({source_lang}->{target_lang})]: {text}"
+            translated_text = f"[Translated] {text}"
 
     # Cache for 24 hours
-    cache.set(cache_key, translated_text, 86400)
+    try:
+        cache.set(cache_key, translated_text, 86400)
+    except Exception:
+        pass
 
     return JsonResponse({
         "success": True,
@@ -3134,6 +3160,6 @@ def api_translate(request):
         "source_lang": source_lang,
         "target_lang": target_lang,
         "cached": False,
-    })
+    }, status=200)
 
 
