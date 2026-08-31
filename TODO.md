@@ -100,6 +100,30 @@
 - [x] **21.4 Composer quote attachment:** `_post_composer.html` adds a collapsible `#quote-preview-dock`; `feed_interactions.js` implements `openQuoteComposer()`, `clearQuoteAttachment()`, and appends NIP-18 `["q", …]` + `["p", …]` tags to the signed Kind 1 quote note.
 - [x] **21.5 Tests:** `test_nip18_quote_tag_parsing`, `test_quote_composer_attaches_nip18_tags`, `test_thread_post_renders_repost_dropdown_and_quote_card` — **Done 2026-08-30**
 
+### Phase 22: Global NIP-05 Verification & NIP-02 Contact Follow Pipeline
+- [x] **22.1 Public NIP-05 verification endpoint:** `nip05_well_known()` at `/.well-known/nostr.json` resolves `?name=<handle>` (UserLinkDeck handle / username → 64-hex pubkey), `?name=_` returns the platform root key, and omitting `name` returns all verified public handles (capped at 100); emits standard `names`/`relays` schema with `Access-Control-Allow-Origin: *`.
+- [x] **22.2 NIP-02 contact follow/unfollow API:** `api_contacts_follow()` (`POST /api/contacts/follow/`) loads the active user's latest Kind 3 from relays, adds/removes the `["p", target_pubkey, "wss://relay.iyou.me", petname]` tag, and returns a prepared unsigned Kind 3 event for client signing plus the refreshed contact summary.
+- [x] **22.3 Server-backed follow client:** `toggleFollowUser()` in `contact_manager.js` calls the API, signs the returned Kind 3 via the Signature Bridge (`bridgeClient.signEvent`/`connect`), broadcasts across the pool relays, updates the local contact cache, toggles `[ + Follow ]` ⇄ `[ ✓ Following ]` UI, and toasts `Followed/Unfollowed @<target>`; all `[data-follow-target]` buttons now route through this pipeline. Kebab menu gains a state-aware `➕ Follow @author` / `➖ Unfollow @author` row.
+- [x] **22.4 Tests & tracking:** `ApiContactsFollowTests` (Kind 3 payload prep, follow append, unfollow removal, anonymous/invalid rejection) + `NIP05EndpointTests` root `_` and all-handles cases; Phase 22 codified in TODO.md — **Done 2026-08-31**
+
+### Phase 23: Global Discovery, NIP-05 Handle Routing & Sovereign Identity Badging
+- [ ] **23.1 Universal Profile Identifier Resolver (`/profile/<identifier>`):**
+  - Update `ProfileView` and route regex to resolve `npub1...`, 64-character hex, and `handle@domain.com` (NIP-05 identifier).
+  - Implement async/background NIP-05 lookup to fetch `https://<domain>/.well-known/nostr.json?name=<handle>` and resolve pubkey hex.
+  - Auto-decorate NIP-05 handles in note cards and metadata rows as clickable profile links.
+- [ ] **23.2 Sovereign Enclave vs. Global Mesh Badging:**
+  - Decorate authors in `_thread_post.html`, `profile.html`, and `feed_interactions.js`:
+    - `[ ⚡ iyou ]`: Native sovereign peer registered in `UserLinkDeck` with active local enclave support.
+    - `[ 🌐 Mesh ]`: External Nostr network peer discovered via public relay firehose.
+    - `[ 🏷️ NIP-05 ]`: Verified external identifier badge.
+  - Add active transport badge inside `#floating-chat-dock` (`Transport: ⚡ iyou Enclave` vs `Transport: 🌐 Nostr Relays`).
+- [ ] **23.3 Global Directory Search & NIP-50 Fallback (`purplepag.es` Indexing):**
+  - Enhance `#feed-search-input` triage logic:
+    - Bech32 string (`npub1`, `note1`, `nevent1`) -> immediate redirect.
+    - NIP-05 address (`user@domain.com`) -> resolve and route to profile.
+    - Plain text search (e.g. `fiatjef`, `jack`) -> query local cache first; on miss, dispatch NIP-50 search query (`{"kinds": [0], "search": "<query>", "limit": 10}`) to `wss://purplepag.es` and `wss://relay.nostr.band`.
+  - Render an interactive discovery dropdown popover displaying matching avatar, display name, handle, and 1-click `[ View ]` / `[ + Follow ]` actions.
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

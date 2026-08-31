@@ -29,6 +29,7 @@ urlpatterns = [
     path('api/search/', views.api_search, name='api_search'),
     path('api/translate/', views.api_translate, name='api_translate'),
     path('api/chat/session/', views.api_chat_session, name='api_chat_session'),
+    path('api/contacts/follow/', views.api_contacts_follow, name='api_contacts_follow'),
     path('api/profile/save/', views.api_save_profile, name='api_save_profile'),
     path('api/vote', views.api_cast_vote, name='api_cast_vote'),
 

@@ -514,6 +514,119 @@
         }
     }
 
+    /**
+     * Server-backed follow/unfollow (Phase 22). Prepares the unsigned NIP-02
+     * Kind 3 contact-list event via POST /api/contacts/follow/, signs it through
+     * the Signature Bridge, broadcasts it across the active pool relays, and
+     * updates local cache + button state.
+     */
+    async function toggleFollowUser(targetPubkey, targetName) {
+        if (!targetPubkey) {
+            notifyToast("Target public key missing.", true);
+            return;
+        }
+        const cleanTarget = normalizePubkey(targetPubkey);
+        const myPubkey = await getCurrentUserPubkey();
+        if (!myPubkey) {
+            notifyToast("Sign in with a sovereign key to follow contacts.", true);
+            return;
+        }
+        if (cleanTarget === myPubkey) {
+            notifyToast("Cannot follow own profile.", true);
+            return;
+        }
+
+        const isCurrentlyFollowing = currentContactList.some(
+            tag => tag[0] === "p" && tag[1] && normalizePubkey(tag[1]) === cleanTarget
+        );
+        const action = isCurrentlyFollowing ? "unfollow" : "follow";
+
+        setButtonLoadingState(cleanTarget, true);
+
+        let payload;
+        try {
+            const resp = await fetch("/api/contacts/follow/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": (global.csrfToken || (document.querySelector('[name=csrfmiddlewaretoken]') || {}).value) || "",
+                },
+                credentials: "same-origin",
+                body: JSON.stringify({
+                    target_pubkey: cleanTarget,
+                    action: action,
+                    target_name: targetName || "",
+                }),
+            });
+            payload = await resp.json().catch(function () { return {}; });
+            if (!resp.ok || !payload.success) {
+                throw new Error(payload.error || "Follow action failed.");
+            }
+        } catch (err) {
+            setButtonLoadingState(cleanTarget, false);
+            notifyToast("Follow action failed: " + err.message, "error");
+            return;
+        }
+
+        const unsigned = payload.event;
+        if (!unsigned) {
+            setButtonLoadingState(cleanTarget, false);
+            notifyToast("Server did not return a contact event to sign.", "error");
+            return;
+        }
+
+        const bridge = global.bridgeClient;
+        const freshlySignedTags = (unsigned.tags || []).filter(t => Array.isArray(t) && t[0] === "p" && t[1]);
+
+        function finalize() {
+            currentContactList = freshlySignedTags;
+            targetFollowsCache.delete(cleanTarget);
+            setButtonLoadingState(cleanTarget, false);
+            updateButtonsForTarget(cleanTarget);
+            const who = targetName ? "@" + targetName : "contact";
+            if (action === "follow") notifyToast("Followed " + who, "success");
+            else notifyToast("Unfollowed " + who, "info");
+            if (typeof global.dispatchEvent === "function") {
+                try {
+                    global.dispatchEvent(new CustomEvent("contactsUpdated", { detail: { contacts: currentContactList } }));
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        // Prefer the Signature Bridge connect() + signEvent() flow, falling back
+        // to the direct bridge WebSocket signer when that API is unavailable.
+        if (bridge && typeof bridge.signEvent === "function" && typeof bridge.connect === "function") {
+            const onSigned = function (signedEvent) {
+                if (!signedEvent || signedEvent.kind !== 3) return;
+                Promise.resolve().then(function () {
+                    if (typeof bridge.broadcastToRelays === "function") {
+                        bridge.broadcastToRelays(signedEvent, null, function () {
+                            currentContactEvent = signedEvent;
+                            finalize();
+                        });
+                    } else {
+                        broadcastContactEvent(signedEvent).then(function () {
+                            currentContactEvent = signedEvent;
+                            finalize();
+                        });
+                    }
+                });
+            };
+            bridge.connect(onSigned);
+            bridge.signEvent(unsigned);
+        } else {
+            try {
+                const signedEvent = await requestSignatureFromBridge(unsigned);
+                await broadcastContactEvent(signedEvent);
+                currentContactEvent = signedEvent;
+                finalize();
+            } catch (err) {
+                setButtonLoadingState(cleanTarget, false);
+                notifyToast("Follow failed to sign: " + err.message, "error");
+            }
+        }
+    }
+
     // ---------- DOM Rendering & Binding ----------
 
     function setButtonLoadingState(targetPubkey, isLoading) {
@@ -529,7 +642,9 @@
             const label = btn.querySelector(".btn-label");
 
             if (isLoading) {
-                btn.className = BUTTON_STYLES.loading.classes;
+                if (!(btn.dataset && btn.dataset.followMenu === "true")) {
+                    btn.className = BUTTON_STYLES.loading.classes;
+                }
                 if (spinner) spinner.classList.remove("hidden");
                 if (label) label.textContent = "Signing...";
             } else {
@@ -554,8 +669,11 @@
     function applyButtonState(btn, state) {
         if (!btn) return;
         const config = BUTTON_STYLES[state] || BUTTON_STYLES.none;
+        const isMenuRow = btn.dataset && btn.dataset.followMenu === "true";
 
-        btn.className = config.classes;
+        if (!isMenuRow) {
+            btn.className = config.classes;
+        }
         btn.setAttribute("data-relationship-state", state);
         btn.setAttribute("aria-label", config.ariaLabel);
 
@@ -563,6 +681,20 @@
         const spinner = btn.querySelector(".btn-spinner");
 
         if (spinner) spinner.classList.add("hidden");
+
+        if (isMenuRow) {
+            const who = btn.getAttribute("data-follow-petname") || "author";
+            const menuLabel = (state === "following")
+                ? "➖ Unfollow @" + who
+                : "➕ Follow @" + who;
+            if (label) {
+                label.textContent = menuLabel;
+            } else {
+                btn.textContent = menuLabel;
+            }
+            return;
+        }
+
         if (label) {
             label.textContent = config.label;
         } else {
@@ -601,7 +733,7 @@
                 btn.addEventListener("click", async function (e) {
                     e.preventDefault();
                     e.stopPropagation();
-                    await toggleFollow(target, petname);
+                    await toggleFollowUser(target, petname);
                 });
             }
 
@@ -642,6 +774,7 @@
     const contactManager = {
         init: initContactManager,
         toggleFollow: toggleFollow,
+        toggleFollowUser: toggleFollowUser,
         checkRelationship: checkRelationship,
         isFollowing: isFollowing,
         isMutualFriend: isMutualFriend,
@@ -656,6 +789,7 @@
     global.contactManager = contactManager;
     global.ContactManager = contactManager;
     global.toggleFollow = toggleFollow;
+    global.toggleFollowUser = toggleFollowUser;
     global.checkRelationship = checkRelationship;
     global.scanFollowButtons = bindFollowButtons;
 

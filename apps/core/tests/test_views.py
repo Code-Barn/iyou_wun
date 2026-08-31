@@ -1690,6 +1690,114 @@ class NIP05EndpointTests(TestCase):
         self.assertEqual(data["relays"], {})
         self.assertEqual(data["nip46"], {})
 
+    def test_nip05_root_underscore_returns_platform_key(self):
+        from apps.core.views import get_public_key_hex, get_node_signing_key
+
+        response = self.client.get("/.well-known/nostr.json?name=_")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+        data = response.json()
+        self.assertEqual(data["names"]["_"], get_public_key_hex(get_node_signing_key()))
+        self.assertIn(data["names"]["_"], data["relays"])
+
+    def test_nip05_without_name_returns_all_public_handles(self):
+        user = User.objects.create_user(
+            username="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        )
+        UserLinkDeck.objects.create(user=user, handle="audrey", is_public=True)
+
+        response = self.client.get("/.well-known/nostr.json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+        data = response.json()
+        self.assertIn("audrey", data["names"])
+        self.assertEqual(
+            data["names"]["audrey"],
+            "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+        )
+
+
+class ApiContactsFollowTests(TestCase):
+    ME = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+    TARGET = "b1c6d3f8a2e94c705d2a97c13b6f4e283ad0f19c64e8b527a3d7f6c0e12ab845"
+    EXISTING = "c43a9e7d1f2b4805a6e3c9d0f7b1a2456e8c0d3f4a7b9c2e5d1f0a3b6c4d8e1f"
+
+    def setUp(self):
+        self.user = User.objects.create_user(username=self.ME)
+        self.client.force_login(self.user)
+
+    def _post(self, **payload):
+        return self.client.post(
+            "/api/contacts/follow/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_api_contacts_follow_prepares_kind_3_payload(self):
+        existing = {
+            "eid_old": {
+                "id": "eid_old",
+                "kind": 3,
+                "pubkey": self.ME,
+                "created_at": 100,
+                "tags": [["p", self.EXISTING, "wss://relay.iyou.me", "maria"]],
+                "content": "",
+            }
+        }
+        with patch("apps.core.views.relay_req", return_value=existing):
+            resp = self._post(
+                target_pubkey=self.TARGET,
+                action="follow",
+                target_name="Alice",
+            )
+
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["action"], "follow")
+        event = data["event"]
+        # NIP-02 Kind 3 contact list event
+        self.assertEqual(event["kind"], 3)
+        self.assertEqual(event["pubkey"], self.ME)
+        # Preserved the pre-existing contact AND appended the new follow tag
+        self.assertIn(["p", self.EXISTING, "wss://relay.iyou.me", "maria"], event["tags"])
+        self.assertIn([self.TARGET, "wss://relay.iyou.me", "Alice"],
+                      [t[1:] for t in event["tags"] if t[0] == "p"])
+        self.assertEqual(data["contacts_count"], 2)
+
+    def test_api_contacts_follow_unfollow_removes_tag(self):
+        existing = {
+            "eid_old": {
+                "id": "eid_old",
+                "kind": 3,
+                "pubkey": self.ME,
+                "created_at": 100,
+                "tags": [
+                    ["p", self.TARGET, "wss://relay.iyou.me", "alice"],
+                    ["p", self.EXISTING, "wss://relay.iyou.me", "maria"],
+                ],
+                "content": "",
+            }
+        }
+        with patch("apps.core.views.relay_req", return_value=existing):
+            resp = self._post(target_pubkey=self.TARGET, action="unfollow")
+
+        self.assertEqual(resp.status_code, 200)
+        event = resp.json()["event"]
+        tags = [t for t in event["tags"] if t[0] == "p"]
+        self.assertEqual([t[1] for t in tags], [self.EXISTING])
+        self.assertEqual(resp.json()["contacts_count"], 1)
+
+    def test_api_contacts_follow_rejects_anonymous_and_invalid(self):
+        self.client.logout()
+        resp = self._post(target_pubkey=self.TARGET, action="follow")
+        self.assertEqual(resp.status_code, 302)  # @login_required redirect for browser clients
+
+        self.client.force_login(self.user)
+        bad = self._post(target_pubkey="not-a-pubkey", action="follow")
+        self.assertEqual(bad.status_code, 400)
+        self.assertFalse(bad.json()["success"])
+
 
 class ProfileComposerTests(TestCase):
     PUBKEY_OWNER = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"

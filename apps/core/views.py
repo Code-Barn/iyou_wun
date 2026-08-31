@@ -1781,6 +1781,99 @@ def fetch_contact_pubkeys(user_pubkey, relay_urls=None):
     return []
 
 
+def _fetch_latest_kind3_tags(user_pubkey, relay_urls=None):
+    """Fetch the newest Kind 3 event tags for a user across relays, or []."""
+    events = relay_req({"kinds": [3], "authors": [user_pubkey], "limit": 5}, relay_urls=relay_urls)
+    latest = None
+    for e in events.values():
+        if not isinstance(e, dict):
+            continue
+        created = e.get("created_at") or 0
+        if latest is None or created > (latest.get("created_at") or 0):
+            latest = e
+    if not latest:
+        return []
+    return [t for t in latest.get("tags", []) if isinstance(t, list) and t]
+
+
+@login_required
+@csrf_exempt
+def api_contacts_follow(request):
+    """Prepare an unsigned NIP-02 Kind 3 contact-list event for follow/unfollow.
+
+    POST JSON: {"target_pubkey": "<hex>", "action": "follow"|"unfollow",
+                "target_name": "<petname>" (optional)}
+    Returns the prepared unsigned Kind 3 event (for client signing) plus the
+    refreshed contact list summary.
+    """
+    if request.method != "POST":
+        return JsonResponse({"success": False, "error": "POST required"}, status=405)
+
+    pubkey_hex = did_to_pubkey(request.user.username) or ""
+    if not pubkey_hex:
+        return JsonResponse(
+            {"success": False, "error": "Unable to derive a Nostr pubkey for this account."},
+            status=400,
+        )
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except json.JSONDecodeError:
+        return HttpResponseBadRequest(json.dumps({"success": False, "error": "invalid JSON"}))
+
+    target_pubkey = (data.get("target_pubkey") or "").strip().lower()
+    action = (data.get("action") or "").strip().lower()
+    target_name = (data.get("target_name") or data.get("petname") or "").strip()
+
+    if not re.match(r"^[0-9a-fA-F]{64}$", target_pubkey):
+        return JsonResponse(
+            {"success": False, "error": "A 64-character target_pubkey hex is required."},
+            status=400,
+        )
+    if action not in ("follow", "unfollow"):
+        return JsonResponse(
+            {"success": False, "error": "action must be 'follow' or 'unfollow'."},
+            status=400,
+        )
+    if target_pubkey == pubkey_hex:
+        return JsonResponse(
+            {"success": False, "error": "Cannot follow your own profile."}, status=400
+        )
+
+    tags = _fetch_latest_kind3_tags(pubkey_hex)
+
+    def _is_tagging(t):
+        return bool(t and t[0] == "p" and len(t) > 1 and t[1].lower() == target_pubkey)
+
+    is_already = any(_is_tagging(t) for t in tags)
+    if action == "follow":
+        if not is_already:
+            tags.append(["p", target_pubkey, "wss://relay.iyou.me", target_name or ""])
+    else:  # unfollow
+        tags = [t for t in tags if not _is_tagging(t)]
+
+    unsigned_event = {
+        "kind": 3,
+        "pubkey": pubkey_hex,
+        "created_at": int(time.time()),
+        "tags": tags,
+        "content": "",
+    }
+
+    contact_pubkeys = [t[1] for t in tags if t and t[0] == "p" and len(t) > 1]
+    return JsonResponse(
+        {
+            "success": True,
+            "action": action,
+            "target_pubkey": target_pubkey,
+            "already_following": is_already if action == "follow" else True,
+            "event": unsigned_event,
+            "contacts": contact_pubkeys,
+            "contacts_count": len(contact_pubkeys),
+        }
+    )
+
+
 NOTIFICATION_KINDS = [1, 6, 7, 9735]
 NOTIFICATION_CATEGORY_LABELS = {
     "mentions": "Mentions / Replies",
@@ -2662,16 +2755,46 @@ def did_to_npub(did):
     return None
 
 
+def _resolve_deck_pubkey(deck):
+    """Resolve a UserLinkDeck to its 64-char Nostr public key hex, or None."""
+    username = (deck.user.username if deck.user else "") or ""
+    if re.match(r"^[0-9a-fA-F]{64}$", username):
+        return username.lower()
+    if username.startswith("did:"):
+        return did_to_pubkey(username)
+    if username.startswith("npub1"):
+        return npub_to_hex(username)
+    return None
+
+
+NIP05_RELAYS = ["wss://relay.iyou.me", "wss://nos.lol", "wss://relay.damus.io"]
+
+
 def nip05_well_known(request):
     """NIP-05 identity verification document, served at /.well-known/nostr.json.
 
     External clients (Damus, Primal, Amethyst) query this to confirm that a
     handle maps to a public key. Intentionally public: no login required.
+
+    Accepts an optional `name` query parameter:
+      - `?name=<handle>`   -> resolve a single verified handle to a pubkey.
+      - `?name=_`          -> return the primary root identity / platform key.
+      - (no name)          -> return all verified public handles (capped at 100).
     """
     name = request.GET.get("name", "").strip().lower()
     payload = {"names": {}, "relays": {}, "nip46": {}}
 
-    if name:
+    def _store(handle, pubkey_hex):
+        if not pubkey_hex or handle in payload["names"]:
+            return
+        payload["names"][handle] = pubkey_hex
+        payload["relays"][pubkey_hex] = list(NIP05_RELAYS)
+
+    if name == "_":
+        # Primary root identity / platform administrator key.
+        root_pubkey = get_public_key_hex(get_node_signing_key())
+        _store("_", root_pubkey)
+    elif name:
         deck = (
             UserLinkDeck.objects.filter(is_public=True)
             .filter(Q(handle__iexact=name) | Q(user__username__iexact=name))
@@ -2679,23 +2802,15 @@ def nip05_well_known(request):
             .first()
         )
         if deck:
-            username = deck.user.username or ""
-            if re.match(r"^[0-9a-fA-F]{64}$", username):
-                pubkey_hex = username.lower()
-            elif username.startswith("did:"):
-                pubkey_hex = did_to_pubkey(username)
-            elif username.startswith("npub1"):
-                pubkey_hex = npub_to_hex(username)
-            else:
-                pubkey_hex = None
-
-            if pubkey_hex:
-                payload["names"][name] = pubkey_hex
-                payload["relays"][pubkey_hex] = [
-                    "wss://relay.iyou.me",
-                    "wss://nos.lol",
-                    "wss://relay.damus.io",
-                ]
+            _store(name, _resolve_deck_pubkey(deck))
+    else:
+        # No name -> return all verified public handles (capped at 100).
+        for deck in (
+            UserLinkDeck.objects.filter(is_public=True)
+            .select_related("user")
+            .order_by("handle")[:100]
+        ):
+            _store(deck.handle, _resolve_deck_pubkey(deck))
 
     response = JsonResponse(payload)
     response["Access-Control-Allow-Origin"] = "*"
