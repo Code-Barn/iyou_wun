@@ -1,0 +1,40 @@
+<!-- Floating Chat Messenger System -->
+<div id="floating-chat-root" class="fixed bottom-0 right-20 z-40 flex items-end gap-3 pointer-events-none font-mono">
+  
+  <!-- Active Docked Chat Windows Container -->
+  <div id="docked-chat-windows" class="flex flex-row-reverse items-end gap-3 pointer-events-auto"></div>
+
+  <!-- Collapsed Master Dock Trigger -->
+  <div class="relative pointer-events-auto">
+    <!-- Master Contact Roster Popover (Hidden by default) -->
+    <div id="chat-roster-popover" class="hidden absolute bottom-12 right-0 w-72 max-h-96 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-t-2xl shadow-2xl overflow-hidden flex flex-col transition-all">
+      <div class="px-3.5 py-2.5 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
+        <span class="text-xs font-bold text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
+          <span>💬</span> <span>Direct Messages</span>
+        </span>
+        <button type="button" onclick="toggleChatRoster()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs">✕</button>
+      </div>
+      <div id="chat-roster-list" class="p-2 space-y-1 overflow-y-auto max-h-72 text-xs">
+        <div class="text-center py-6 text-slate-400 text-[11px]">
+          Connecting to peer enclave...
+        </div>
+      </div>
+      <div class="p-2 bg-slate-50 dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 text-center">
+        <a href="{% url 'chat' %}" class="text-[11px] text-violet-600 dark:text-violet-400 hover:underline">
+          Open Full Chat View →
+        </a>
+      </div>
+    </div>
+
+    <!-- Dock Button Pill -->
+    <button id="floating-chat-toggle-btn" 
+            type="button" 
+            onclick="toggleChatRoster()"
+            class="h-10 px-3.5 rounded-t-xl bg-violet-600 hover:bg-violet-500 text-white shadow-xl flex items-center gap-2 text-xs font-semibold transition active:scale-95 border-t border-x border-violet-400/30">
+      <span class="text-sm">💬</span>
+      <span class="hidden sm:inline">Messaging</span>
+      <span id="floating-chat-unread-badge" class="hidden px-1.5 py-0.2 rounded-full bg-emerald-400 text-slate-950 text-[10px] font-bold">0</span>
+    </button>
+  </div>
+
+</div>

@@ -113,6 +113,8 @@
     {% include "includes/_toast_container.html" %}
     {% if user.is_authenticated %}
       {% include "includes/_notification_drawer.html" %}
+      {% include "includes/_floating_chat_dock.html" %}
+      <script src="{% static 'js/floating_chat.js' %}"></script>
     {% endif %}
 
     <!-- Floating Jump to Top Action Button -->

@@ -859,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**341 total across 7 test modules**; ruff clean):
+Tests cover (**343 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -868,13 +868,13 @@ Tests cover (**341 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (109 tests)
+### `test_views.py` (111 tests)
 - `HomeViewTest` — root redirect to /feed (1)
-- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification, jump-to-top button render (8)
+- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification, jump-to-top button render, floating chat dock render (9)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
 - `ChatViewTest` — anonymous redirect, Converse init + lifecycle plugin, `?peer=` auto-join & peer_target context, nav links (14)
 - `GalleryViewTest` — media heading, nav links, tab context (4 — public-read)
-- `ProfileViewTest` — invalid npub error, valid render, hybrid local DB baseline fallback, direct message button (5)
+- `ProfileViewTest` — invalid npub error, valid render, hybrid local DB baseline fallback, direct message button, anonymous floating chat omission (6)
 - `DashboardProfileTest` — profile section, publish, handle vs display name persistence (7)
 - `MediaUploadProxyViewTest` — Blossom proxy behavior incl. dynamic endpoint resolution (6)
 - `FeedViewTrustLensContractTest` — Level0/0.5/1 trust pill contract (6)

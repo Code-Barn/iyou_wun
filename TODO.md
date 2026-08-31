@@ -73,12 +73,12 @@
     - Wire smooth in-place text replacement with a `[ Translated from <Source> — View Original ]` revert toggle — **Done 2026-08-30**
 
 ### Phase 18: Floating Dock Messenger & Live Peer Chat Overlay
-- [ ] **18.1 Minimized Floating Chat Dock:**
-  - Anchor a fixed bottom-right dock trigger (`#floating-chat-dock`) across all views with unread counter badges and contact roster popover.
-- [ ] **18.2 Multi-Window Docked Chat Panes:**
-  - Support minimized/expanded bottom conversation windows for active 1-on-1 peer chats without leaving `/feed` or `/gallery`.
-- [ ] **18.3 In-Feed Message Trigger Integration:**
-  - Wire `[ 💬 Message ]` buttons on note cards and profile headers to open a docked bottom chat pane rather than forcing full-page navigation to `/chat`.
+- [x] **18.1 Minimized Floating Chat Dock:**
+  - Anchor a fixed bottom-right dock trigger (`#floating-chat-dock` / `#floating-chat-root`) across all views with unread counter badges and contact roster popover — **Done 2026-08-30**
+- [x] **18.2 Multi-Window Docked Chat Panes:**
+  - Support minimized/expanded bottom conversation windows for active 1-on-1 peer chats without leaving `/feed` or `/gallery` — **Done 2026-08-30**
+- [x] **18.3 In-Feed Message Trigger Integration:**
+  - Wire `[ 💬 Message ]` buttons on note cards and profile headers to open a docked bottom chat pane rather than forcing full-page navigation to `/chat` — **Done 2026-08-30**
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

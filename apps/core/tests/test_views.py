@@ -101,6 +101,16 @@ class DashboardViewTest(TestCase):
         self.assertContains(response, 'id="jump-to-top-btn"')
         self.assertContains(response, 'aria-label="Jump to top"')
 
+    def test_base_template_renders_floating_chat_dock_for_authenticated_users(self):
+        user = User.objects.create_user(username="did:iyou:0xdockchatuser")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="floating-chat-root"')
+        self.assertContains(response, 'id="floating-chat-toggle-btn"')
+        self.assertContains(response, 'id="chat-roster-popover"')
+        self.assertContains(response, "floating_chat.js")
+
 
 class JwksConnectivityTest(TestCase):
     """Pings the IdP's JWKS endpoint to verify connectivity.
@@ -360,8 +370,16 @@ class ProfileViewTest(TestCase):
             response = self.client.get(reverse("profile", kwargs={"npub": npub}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f"/chat?peer={npub}")
-        self.assertContains(response, "💬 Message")
+        self.assertContains(response, f"openDockedChat('{npub}'")
+        self.assertContains(response, "💬")
+        self.assertContains(response, "Message")
+
+    def test_base_template_omits_floating_chat_dock_for_anonymous_users(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="floating-chat-root"')
+        self.assertNotContains(response, "floating_chat.js")
 
 
 class DashboardProfileTest(TestCase):

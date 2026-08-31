@@ -69,9 +69,12 @@
             <span class="btn-spinner hidden animate-spin">⏳</span>
             <span class="btn-label">+ Follow</span>
           </button>
-          <a href="{% url 'chat' %}?peer={{ target_npub }}" class="px-3 py-1.5 bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-md hover:bg-slate-800 text-slate-100 rounded-lg text-xs font-mono transition shadow-lg border border-white/20" title="Direct Message">
-            💬 Message
-          </a>
+          <button type="button" 
+                  onclick="openDockedChat('{{ profile.npub|default:target_npub }}', '{{ profile.name|default:target_npub|escapejs }}', '{{ profile.picture|default:''|escapejs }}')"
+                  class="px-3 py-1.5 bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-md hover:bg-slate-800 text-slate-100 rounded-lg text-xs font-mono transition shadow-lg border border-white/20 flex items-center gap-1" 
+                  title="Direct Message">
+            <span>💬</span> <span>Message</span>
+          </button>
           <button type="button" class="p-1.5 bg-slate-900/80 dark:bg-slate-900/80 backdrop-blur-md hover:bg-slate-800 text-slate-100 rounded-lg text-xs transition shadow-lg border border-white/20" onclick="setEnclavePetname('{{ target_pubkey_hex }}', '{{ profile.name|default:''|escapejs }}')" title="Set Enclave Petname">
             🛡️
           </button>
