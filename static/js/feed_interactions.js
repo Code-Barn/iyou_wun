@@ -16,6 +16,7 @@
     var pendingRepost = null;
     var pendingNomination = null;
     var pendingReport = null;
+    var quotedTarget = null;
 
     window.pendingReply = null;
 
@@ -33,12 +34,17 @@
         catch (e) { showToast(e.message, true); return; }
         setButtonLoading(true);
         bridgeClient.isProcessing = true;
+        var tags = [];
+        if (quotedTarget && quotedTarget.id) {
+            tags.push(["q", quotedTarget.id, "wss://relay.iyou.me", quotedTarget.pubkey || ""]);
+            if (quotedTarget.pubkey) tags.push(["p", quotedTarget.pubkey]);
+        }
         var event = {
             kind: 1,
             content: content.value.trim(),
             pubkey: pk,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [],
+            tags: tags,
         };
         bridgeClient.signEvent(event);
     }
@@ -150,6 +156,9 @@
                     showToast("Failed to broadcast to all relays. Event may not be visible.", true);
                 }
                 bridgeClient.resetPostState();
+                var editor = document.getElementById("postContent");
+                if (editor) editor.value = "";
+                clearQuoteAttachment();
             });
         }
     }
@@ -438,30 +447,46 @@
 
         var mediaHtml = "";
         if (mediaAttachments && mediaAttachments.length > 0) {
-            mediaHtml = '<div class="mt-3 space-y-2">';
-            mediaAttachments.forEach(function (media) {
-                if (!media || !media.url) return;
-                var mUrl = escapeAttr(media.url);
-                if (media.type === "image") {
-                    mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/20 max-h-[500px]">' +
-                        '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" onclick="openImageModal(\'' + mUrl + '\')" />' +
-                        '</div>';
-                } else if (media.type === "video") {
-                    mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-h-[500px]">' +
-                        '<video src="' + mUrl + '" controls playsinline preload="metadata" class="w-full max-h-[500px]"></video>' +
-                        '</div>';
-                } else if (media.type === "audio") {
-                    mediaHtml += '<div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center gap-3">' +
-                        '<span class="text-xl">🎵</span>' +
-                        '<audio src="' + mUrl + '" controls class="w-full"></audio>' +
-                        '</div>';
-                } else if (media.url) {
-                    mediaHtml += '<div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60">' +
-                        '<a href="' + mUrl + '" target="_blank" rel="noopener noreferrer" class="text-indigo-600 dark:text-violet-400 hover:underline break-all text-xs font-mono">📎 ' + escapeHtml(media.url) + '</a>' +
-                        '</div>';
-                }
-            });
-            mediaHtml += '</div>';
+            var imageAttachments = mediaAttachments.filter(function (m) { return m && m.type === "image"; });
+            if (imageAttachments.length > 4) {
+                mediaHtml = '<div class="mt-3 grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/10">';
+                imageAttachments.slice(0, 4).forEach(function (media, idx) {
+                    if (!media || !media.url) return;
+                    var mUrl = escapeAttr(media.url);
+                    mediaHtml += '<div class="relative aspect-square overflow-hidden cursor-pointer">' +
+                        '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-200" onclick="openImageModal(\'' + mUrl + '\')" />';
+                    if (idx === 3) {
+                        mediaHtml += '<div class="absolute inset-0 bg-black/60 flex items-center justify-center"><span class="text-white font-mono font-bold text-2xl">+' + (imageAttachments.length - 4) + '</span></div>';
+                    }
+                    mediaHtml += '</div>';
+                });
+                mediaHtml += '</div>';
+            } else {
+                mediaHtml = '<div class="mt-3 space-y-2">';
+                mediaAttachments.forEach(function (media) {
+                    if (!media || !media.url) return;
+                    var mUrl = escapeAttr(media.url);
+                    if (media.type === "image") {
+                        mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/20 max-h-[500px]">' +
+                            '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" onclick="openImageModal(\'' + mUrl + '\')" />' +
+                            '</div>';
+                    } else if (media.type === "video") {
+                        mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-h-[500px]">' +
+                            '<video src="' + mUrl + '" controls playsinline preload="metadata" class="w-full max-h-[500px]"></video>' +
+                            '</div>';
+                    } else if (media.type === "audio") {
+                        mediaHtml += '<div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60 flex items-center gap-3">' +
+                            '<span class="text-xl">🎵</span>' +
+                            '<audio src="' + mUrl + '" controls class="w-full"></audio>' +
+                            '</div>';
+                    } else if (media.url) {
+                        mediaHtml += '<div class="p-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950/60">' +
+                            '<a href="' + mUrl + '" target="_blank" rel="noopener noreferrer" class="text-indigo-600 dark:text-violet-400 hover:underline break-all text-xs font-mono">📎 ' + escapeHtml(media.url) + '</a>' +
+                            '</div>';
+                    }
+                });
+                mediaHtml += '</div>';
+            }
         }
 
         var avatarHtml = authorAvatar ?
@@ -486,7 +511,14 @@
             replyingToHtml = '<div class="text-xs font-mono text-slate-400 dark:text-slate-500 mb-1 flex items-center gap-1"><span>↳ Replying to</span> <a href="' + replyLink + '" class="text-violet-600 dark:text-violet-400 hover:underline">@' + escapeHtml(displayTarget) + '</a></div>';
         }
 
-        var contentAndMediaHtml = (displayContent ? '<div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words select-text pt-0.5">' + escapeHtml(displayContent) + '</div>' : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? '<div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words select-text pt-0.5">' + escapeHtml(noteContent) + '</div>' : ''));
+        var clampedContent = function (text) {
+            return '<div class="note-content-wrapper relative" data-clamped="false">' +
+                '<div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words max-h-60 overflow-hidden transition-all duration-300">' + text + '</div>' +
+                '<button type="button" class="expand-note-btn hidden mt-1 text-xs font-mono text-violet-600 dark:text-violet-400 hover:underline font-semibold" onclick="toggleNoteClamp(this)">Show more ▾</button>' +
+                '</div>';
+        };
+
+        var contentAndMediaHtml = (displayContent ? clampedContent(escapeHtml(displayContent)) : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? clampedContent(escapeHtml(noteContent)) : ''));
         contentAndMediaHtml += mediaHtml;
 
         var ICON_REPLY = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>';
@@ -517,7 +549,7 @@
             '</div></div></div>';
 
         var translateBtnHtml = (note.lang && note.lang !== 'en') ?
-            '<button type="button" class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1" data-note-id="' + escapeAttr(noteId) + '" data-source-lang="' + escapeAttr(note.lang) + '" onclick="translateNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.lang) + '\', \'en\')"><span>🌐 Translate</span></button>' : '';
+            '<button type="button" class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1 mr-2" data-note-id="' + escapeAttr(noteId) + '" data-source-lang="' + escapeAttr(note.lang) + '" onclick="translateNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.lang) + '\', \'en\')"><span>🌐 Translate</span></button>' : '';
 
         var translatedBoxHtml = '<div id="translated-box-' + escapeAttr(noteId) + '" class="hidden mt-2 p-2.5 rounded-lg bg-violet-50/50 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-800/40 text-sm sm:text-[15px] leading-relaxed">' +
             '<div class="text-[10px] font-mono text-violet-600 dark:text-violet-400 font-semibold mb-1 flex items-center justify-between">' +
@@ -584,6 +616,41 @@
             blurEl.classList.remove("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
         }
         btn.classList.add("hidden");
+    }
+
+    // ---------- "Read More" Post Clamping ----------
+
+    function checkAndApplyClamping(scope) {
+        var rootEl = scope || document;
+        var wrappers = rootEl.querySelectorAll ? rootEl.querySelectorAll('.note-body-content') : [];
+        wrappers.forEach(function (body) {
+            var wrapper = body.closest ? body.closest('.note-content-wrapper') : null;
+            if (!wrapper) return;
+            var btn = wrapper.querySelector('.expand-note-btn');
+            if (!btn) return;
+            if (wrapper.getAttribute('data-clamped') !== 'true' && body.scrollHeight > body.clientHeight + 20) {
+                btn.classList.remove('hidden');
+                wrapper.setAttribute('data-clamped', 'true');
+            }
+        });
+    }
+
+    function toggleNoteClamp(btn) {
+        if (!btn) return;
+        var wrapper = btn.closest('.note-content-wrapper');
+        if (!wrapper) return;
+        var body = wrapper.querySelector('.note-body-content');
+        if (!body) return;
+        var isClamped = wrapper.getAttribute('data-clamped') === 'true';
+        if (isClamped) {
+            body.classList.remove('max-h-60');
+            btn.textContent = 'Show less ▴';
+            wrapper.setAttribute('data-clamped', 'false');
+        } else {
+            body.classList.add('max-h-60');
+            btn.textContent = 'Show more ▾';
+            wrapper.setAttribute('data-clamped', 'true');
+        }
     }
 
     // ---------- Optimistic Feed Insert ----------
@@ -658,6 +725,8 @@
         if (window.trustLens && typeof window.trustLens.scan === "function") {
             window.trustLens.scan(container);
         }
+
+        checkAndApplyClamping(wrapper);
 
         var postContent = document.getElementById("postContent");
         if (postContent) postContent.value = "";
@@ -734,6 +803,7 @@
             }
 
             container.appendChild(wrapper);
+            checkAndApplyClamping(wrapper);
 
             if (note.kind === 30023) {
                 var newForm = wrapper.querySelector(".poll-vote-form");
@@ -1276,6 +1346,63 @@
         bridgeClient.signEvent(event);
     }
 
+    function toggleRepostDropdown(noteId) {
+        var menu = document.getElementById("repost-menu-" + noteId);
+        if (!menu) return;
+        var isHidden = menu.classList.contains("hidden");
+        document.querySelectorAll(".repost-menu-container [id^='repost-menu-']").forEach(function (m) {
+            m.classList.add("hidden");
+        });
+        if (isHidden) menu.classList.remove("hidden");
+    }
+
+    function openQuoteComposer(noteId, pubkey, authorName, snippet, mediaUrl) {
+        quotedTarget = { id: noteId, pubkey: pubkey || "" };
+        var dock = document.getElementById("quote-preview-dock");
+        if (!dock) return;
+        dock.classList.remove("hidden");
+        var authorEl = document.getElementById("quote-preview-author");
+        if (authorEl) authorEl.textContent = "@" + (authorName || (pubkey ? pubkey.slice(0, 12) + "…" : "user"));
+        var snippetEl = document.getElementById("quote-preview-snippet");
+        if (snippetEl) snippetEl.textContent = snippet || "";
+        var mediaWrap = document.getElementById("quote-preview-media");
+        var mediaImg = document.getElementById("quote-preview-media-img");
+        if (mediaUrl && mediaImg) {
+            mediaImg.src = mediaUrl;
+            if (mediaWrap) mediaWrap.classList.remove("hidden");
+        } else if (mediaWrap) {
+            mediaWrap.classList.add("hidden");
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        var editor = document.getElementById("postContent");
+        if (editor) { editor.focus(); editor.scrollIntoView({ behavior: "smooth", block: "center" }); }
+    }
+
+    function clearQuoteAttachment() {
+        quotedTarget = null;
+        var dock = document.getElementById("quote-preview-dock");
+        if (dock) dock.classList.add("hidden");
+        var mediaWrap = document.getElementById("quote-preview-media");
+        if (mediaWrap) mediaWrap.classList.add("hidden");
+    }
+
+    document.addEventListener("click", function (e) {
+        var isInside = false;
+        var el = e.target;
+        while (el) {
+            if (el.classList && (el.classList.contains("repost-menu-container") || el.id && el.id.indexOf("repost-menu-") === 0)) {
+                isInside = true;
+                break;
+            }
+            el = el.parentNode;
+        }
+        if (!isInside) {
+            document.querySelectorAll(".repost-menu-container [id^='repost-menu-']").forEach(function (m) {
+                m.classList.add("hidden");
+            });
+        }
+    });
+
     function suggestToDev(noteId, authorPubkey, snippet) {
         var url = "https://dev.iyou.me/suggest?event_id=" + encodeURIComponent(noteId || "") +
             "&author=" + encodeURIComponent(authorPubkey || "") +
@@ -1637,6 +1764,8 @@
     window.appendReplyToThread = appendReplyToThread;
     window.addNoteToFeed = addNoteToFeed;
     window.revealContentWarning = revealContentWarning;
+    window.checkAndApplyClamping = checkAndApplyClamping;
+    window.toggleNoteClamp = toggleNoteClamp;
     window.appendNoteToFeed = appendNoteToFeed;
     window.loadMoreNotes = loadMoreNotes;
     window.getBlossomBaseUrl = getBlossomBaseUrl;
@@ -1645,6 +1774,9 @@
     window.toggleKebabMenu = toggleKebabMenu;
     window.likeNote = likeNote;
     window.repostNote = repostNote;
+    window.toggleRepostDropdown = toggleRepostDropdown;
+    window.openQuoteComposer = openQuoteComposer;
+    window.clearQuoteAttachment = clearQuoteAttachment;
     window.suggestToDev = suggestToDev;
     window.nominatePostOfTheDay = nominatePostOfTheDay;
     window.setEnclavePetname = setEnclavePetname;
@@ -1741,6 +1873,9 @@
 
     // Jump to Top button visibility listener
     document.addEventListener('DOMContentLoaded', function() {
+        // Apply "Read More" clamping to server-rendered note bodies
+        checkAndApplyClamping(document);
+
         var topBtn = document.getElementById('jump-to-top-btn');
         if (topBtn) {
             window.addEventListener('scroll', function() {

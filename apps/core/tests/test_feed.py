@@ -954,6 +954,52 @@ class AttachSocialCountsTests(TestCase):
         self.assertEqual(p3, "last_parent")
         self.assertEqual(mentions3, ["first_root", "middle_mention", "last_parent"])
 
+    def test_nip18_quote_tag_parsing(self):
+        from apps.core.nip10 import parse_nip18_quote_tags
+
+        quoted_id = "ab" * 32
+        quoted_pubkey = "cd" * 32
+
+        # NIP-18 ["q", event_id, relay, pubkey]
+        qid, qpk = parse_nip18_quote_tags(
+            [["q", quoted_id, "wss://relay.iyou.me", quoted_pubkey]]
+        )
+        self.assertEqual(qid, quoted_id)
+        self.assertEqual(qpk, quoted_pubkey)
+
+        # No q tag → empty
+        qid2, qpk2 = parse_nip18_quote_tags([["e", "some_thread"]], content="just text")
+        self.assertEqual(qid2, "")
+        self.assertEqual(qpk2, "")
+
+        # NIP-27 nostr:note1 URI in content
+        import bech32
+        eid_bytes = bytes.fromhex("ab" * 32)
+        note_uri = "nostr:" + bech32.bech32_encode(
+            "note", bech32.convertbits(eid_bytes, 8, 5)
+        )
+        qid3, _ = parse_nip18_quote_tags([], content="see here " + note_uri + " for context")
+        self.assertEqual(qid3, "ab" * 32)
+
+    def test_quote_composer_attaches_nip18_tags(self):
+        # Mirrors the tag payload the JS composer builds for a quote repost.
+        quoted_id = "22cd" * 16
+        quoted_pubkey = "33ef" * 16
+        tags = [
+            ["q", quoted_id, "wss://relay.iyou.me", quoted_pubkey],
+            ["p", quoted_pubkey],
+        ]
+
+        from apps.core.nip10 import parse_nip18_quote_tags
+
+        qid, qpk = parse_nip18_quote_tags(tags)
+        # NIP-18 q-tag must be well-formed and round-trip the quoted reference
+        self.assertEqual(qid, quoted_id)
+        self.assertEqual(qpk, quoted_pubkey)
+        self.assertEqual(tags[0][0], "q")
+        self.assertEqual(tags[0][2], "wss://relay.iyou.me")
+        self.assertEqual(tags[1][0], "p")
+
     def test_fetch_thread_includes_indexing_fallback_relays_for_ancestors(self):
         from apps.core.views import fetch_thread
 
@@ -1030,6 +1076,36 @@ class AttachSocialCountsTests(TestCase):
         self.assertIn("nostr", iyou_names)
         self.assertIn("bitcoin", iyou_names)
         self.assertNotIn("wine", iyou_names)
+
+    def test_enrich_image_grid_caps_deck_at_four_and_counts_total(self):
+        from apps.core.views import enrich_image_grid
+
+        note = {
+            "id": "grid_note",
+            "media_attachments": [
+                {"type": "image", "url": f"https://cdn.iyou.me/g{i}.png"}
+                for i in range(6)
+            ],
+        }
+        enrich_image_grid(note)
+        self.assertEqual(note["image_attachments_total"], 6)
+        self.assertEqual(len(note["image_attachments"]), 4)
+
+        # Non-images are excluded from the grid
+        mixed = {
+            "media_attachments": [
+                {"type": "image", "url": "https://cdn.iyou.me/a.png"},
+                {"type": "video", "url": "https://cdn.iyou.me/v.mp4"},
+                {"type": "image", "url": "https://cdn.iyou.me/b.png"},
+                {"type": "image", "url": "https://cdn.iyou.me/c.png"},
+                {"type": "image", "url": "https://cdn.iyou.me/d.png"},
+                {"type": "image", "url": "https://cdn.iyou.me/e.png"},
+            ],
+        }
+        enrich_image_grid(mixed)
+        self.assertEqual(mixed["image_attachments_total"], 5)
+        self.assertEqual(len(mixed["image_attachments"]), 4)
+        self.assertTrue(all(m["type"] == "image" for m in mixed["image_attachments"]))
 
 
 class FeedModerationContractTest(TestCase):

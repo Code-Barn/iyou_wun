@@ -111,6 +111,29 @@ class DashboardViewTest(TestCase):
         self.assertContains(response, 'id="chat-roster-popover"')
         self.assertContains(response, "floating_chat.js")
 
+    def test_floating_chat_dock_rendered_on_feed_and_dashboard(self):
+        user = User.objects.create_user(username="did:iyou:0xdockfeedgal")
+        self.client.force_login(user)
+
+        # Authenticated Feed + Dashboard (relay_req patched to stay hermetic)
+        with patch("apps.core.views.relay_req", return_value={}):
+            feed_response = self.client.get(reverse("feed"))
+            dashboard_response = self.client.get(reverse("dashboard"))
+        self.assertEqual(feed_response.status_code, 200)
+        self.assertContains(feed_response, 'id="floating-chat-root"')
+        self.assertContains(feed_response, "floating_chat.js")
+        self.assertEqual(dashboard_response.status_code, 200)
+        self.assertContains(dashboard_response, 'id="floating-chat-root"')
+        self.assertContains(dashboard_response, "floating_chat.js")
+
+    def test_floating_chat_dock_omitted_on_chat_view(self):
+        user = User.objects.create_user(username="did:iyou:0xdockchatomit")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'id="floating-chat-root"')
+        self.assertNotContains(response, "floating_chat.js")
+
     def test_dashboard_renders_moderation_management_roster(self):
         user = User.objects.create_user(username="did:iyou:0xmodroster")
         self.client.force_login(user)
@@ -963,7 +986,42 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "@Alice In Chains")
         # Separate parent note link
         self.assertContains(response, 'href="/feed?thread=parent_note_123"')
-        self.assertContains(response, "[ parent note ↗ ]")
+        self.assertContains(response, "[parent ↗]")
+        # Parent and root links are NOT duplicated (single deduplicated subheader)
+        self.assertEqual(response.content.decode().count("↳ Replying to"), 1)
+
+    def test_thread_post_renders_single_deduplicated_reply_subheader(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        reply_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        root_npub = hex_to_npub(root_pk)
+
+        k0_event = make_event("k0_dedup_root", 0, pubkey=root_pk, content=json.dumps({
+            "name": "Alice Root",
+            "display_name": "Alice In Chains",
+        }))
+        reply_event = make_event(
+            "dedup_child_1",
+            1,
+            pubkey=reply_pk,
+            content="A deduplicated reply",
+            tags=[
+                ["e", "dedup_parent_999", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ],
+        )
+
+        with patch("apps.core.views.relay_req", return_value={"dedup_child_1": reply_event, "k0_dedup_root": k0_event}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Exactly one "↳ Replying to" attribution block is rendered per reply note
+        self.assertEqual(content.count("↳ Replying to"), 1)
+        # A single parent note link ([parent ↗]) is rendered, not duplicated as a sub-subheader
+        self.assertEqual(content.count("[parent ↗]"), 1)
+        self.assertContains(response, "dedup_parent_999")
+        self.assertContains(response, f'href="/profile/{root_npub}/"')
+        self.assertContains(response, "@Alice In Chains")
 
     def test_thread_header_renders_jump_to_root_link_when_reply(self):
         root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
@@ -1111,6 +1169,65 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, '<video src="https://cdn.iyou.me/video.mp4"')
         self.assertContains(response, "Check this out:")
 
+    def test_feed_renders_multi_image_grid_with_more_badge(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        grid_urls = "\n".join(f"https://cdn.iyou.me/grid{_i}.png" for _i in range(5))
+        event = make_event("multi_img_1", 1, pubkey=pk, content=f"Gallery note:\n{grid_urls}")
+
+        with patch("apps.core.views.relay_req", return_value={"multi_img_1": event}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "grid grid-cols-2")
+        # 2x2 deck with a +N badge on the 4th image
+        self.assertContains(response, ">+1</span>")
+
+    def test_thread_post_renders_note_content_clamp_wrapper(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        event = make_event("clamp_note_1", 1, pubkey=pk, content="A long note that should be clamped")
+
+        with patch("apps.core.views.relay_req", return_value={"clamp_note_1": event}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'class="note-content-wrapper relative"')
+        self.assertContains(response, 'class="expand-note-btn hidden')
+        self.assertContains(response, "Show more")
+
+    def test_thread_post_renders_repost_dropdown_and_quote_card(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        quoted_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        quoted_id = "quoted_event_id_1234567890abcdef1234567890abcdef"
+        root_note = make_event(
+            "quote_root_1", 1, pubkey=root_pk,
+            content="My hot take on the quoted post",
+            tags=[["q", quoted_id, "wss://relay.iyou.me", quoted_pk]],
+        )
+        quoted_event = make_event(
+            quoted_id, 1, pubkey=quoted_pk,
+            content="The original note that was quoted",
+            tags=[],
+        )
+
+        relay_data = {
+            "quote_root_1": root_note,
+            quoted_id: quoted_event,
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_data):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Repost / Quote toggle dropdown renders
+        self.assertIn("repost-menu-container", content)
+        self.assertIn('id="repost-menu-quote_root_1"', content)
+        self.assertIn("Quote Note", content)
+        self.assertIn("openQuoteComposer", content)
+        # Embedded quote card partial renders with quoted content + navigation
+        self.assertIn("quoted-note-embed", content)
+        self.assertIn("The original note that was quoted", content)
+        self.assertIn("?thread=quoted_event_id_1234567890abcdef1234567890abcdef", content)
+
     def test_trending_topics_renders_scope_switcher(self):
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("feed"))
@@ -1122,6 +1239,52 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, 'id="trending-tab-global"')
         self.assertContains(response, 'id="trending-iyou-list"')
         self.assertContains(response, 'id="trending-global-list"')
+
+    def test_trending_topics_global_and_iyou_lists_bound_correctly(self):
+        from django.contrib.auth import get_user_model
+        from apps.core.models import UserLinkDeck
+        from apps.core.views import did_to_pubkey
+
+        User = get_user_model()
+        alice_did = "did:key:z6Mkalice_bound1"
+        user_alice, _ = User.objects.get_or_create(username=alice_did)
+        UserLinkDeck.objects.get_or_create(user=user_alice, handle="alice", display_name="Alice")
+
+        alice_pk = did_to_pubkey(alice_did)
+        self.assertIsNotNone(alice_pk)
+        bob_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+
+        relay_events = {
+            "bound_iyou_note": make_event(
+                "bound_iyou_note", 1, pubkey=alice_pk,
+                content="alice #alice_iyou tag", tags=[["t", "alice_iyou"]],
+            ),
+            "bound_global_note": make_event(
+                "bound_global_note", 1, pubkey=bob_pk,
+                content="bob #bob_global tag", tags=[["t", "bob_global"]],
+            ),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+
+        iyou_marker = content.index('id="trending-iyou-list"')
+        global_marker = content.index('id="trending-global-list"')
+        if iyou_marker < global_marker:
+            iyou_block = content[iyou_marker:global_marker]
+            global_block = content[global_marker:]
+        else:
+            global_block = content[global_marker:iyou_marker]
+            iyou_block = content[iyou_marker:]
+
+        # The iyou list renders iyou-scoped tags (from LinkDeck authors) only
+        self.assertIn("#alice_iyou", iyou_block)
+        self.assertNotIn("#bob_global", iyou_block)
+        # The global list renders the full incoming batch tags (both authors)
+        self.assertIn("#alice_iyou", global_block)
+        self.assertIn("#bob_global", global_block)
 
     def test_layer2_nav_renders_nsfw_shield_toggle(self):
         with patch("apps.core.views.relay_req", return_value={}):

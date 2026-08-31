@@ -44,10 +44,10 @@
   import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js';
 
   document.addEventListener("DOMContentLoaded", function() {
-    const wsUrl = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";
-    const jid = "{{ user_jid|default:'' }}";
-    const password = "{{ xmpp_token|default:'' }}";
-    const xmppDomain = "{{ xmpp_domain|default:'iyou.me' }}";
+    const wsFallback = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";
+    const xmppDomainFallback = "{{ xmpp_domain|default:'iyou.me' }}";
+    const templateJid = "{{ user_jid|default:'' }}";
+    const templateToken = "{{ xmpp_token|default:'' }}";
 
     function dismissLoadingSpinner() {
       const loader = document.getElementById('chat-loading-overlay');
@@ -56,64 +56,106 @@
       if (wrap) wrap.classList.remove('hidden');
     }
 
-    const urlParams = new URLSearchParams(window.location.search);
-    const peerParam = window.peerTarget || urlParams.get('peer');
-    const autoJoinChats = peerParam ? [peerParam.includes('@') ? peerParam : `${peerParam}@${xmppDomain}`] : [];
+    // 6-second safety net: never leave the spinner stuck.
+    const lockupTimer = setTimeout(function () {
+      dismissLoadingSpinner();
+      showOfflineRoster();
+    }, 6000);
 
-    // Register lifecycle plugin for clean event hooks
-    converse.plugins.add('iyou-lifecycle', {
-      initialize: function () {
-        const _converse = this._converse;
-        _converse.api.listen.on('connected', dismissLoadingSpinner);
-        _converse.api.listen.on('statusInitialized', dismissLoadingSpinner);
-      }
-    });
+    function showOfflineRoster() {
+      const wrap = document.getElementById('conversejs-wrap');
+      if (!wrap) return;
+      try { window.converse && window.converse.api && window.converse.api.shutdown(); } catch (e) {}
+      wrap.innerHTML = `
+        <div class="p-6">
+          <div class="mb-3 text-xs font-bold text-slate-700 dark:text-slate-200">Offline Contact Roster (Nostr DM Relay Bridge)</div>
+          <div id="chat-offline-roster" class="space-y-2">
+            <div class="text-center py-6 text-slate-400 text-[11px] font-mono">XMPP WebSocket unavailable — signing in via NIP-04 relay bridge...</div>
+          </div>
+          <div class="mt-4 p-3 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 font-mono">
+            Direct messages are still deliverable over the sovereign Nostr relay mesh while the XMPP session is offline.
+          </div>
+        </div>
+      `;
+    }
 
-    if (peerParam) {
-      converse.plugins.add('auto-open-peer', {
+    function bindChat(session) {
+      clearTimeout(lockupTimer);
+      const wsUrl = (session && session.ws_url) || wsFallback;
+      const jid = (session && session.jid) || templateJid;
+      const password = (session && session.token) || templateToken;
+      const xmppDomain = (session && session.domain) || xmppDomainFallback;
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const peerParam = window.peerTarget || urlParams.get('peer');
+      const autoJoinChats = peerParam ? [peerParam.includes('@') ? peerParam : `${peerParam}@${xmppDomain}`] : [];
+
+      converse.plugins.add('iyou-lifecycle', {
         initialize: function () {
           const _converse = this._converse;
-          const targetJid = peerParam.includes('@') ? peerParam : `${peerParam}@${xmppDomain}`;
-          _converse.api.waitUntil('chatsInitialized').then(() => {
-            _converse.api.chats.open(targetJid);
-          });
+          _converse.api.listen.on('connected', dismissLoadingSpinner);
+          _converse.api.listen.on('statusInitialized', dismissLoadingSpinner);
         }
       });
+
+      if (peerParam) {
+        converse.plugins.add('auto-open-peer', {
+          initialize: function () {
+            const _converse = this._converse;
+            const targetJid = peerParam.includes('@') ? peerParam : `${peerParam}@${xmppDomain}`;
+            _converse.api.waitUntil('chatsInitialized').then(() => {
+              _converse.api.chats.open(targetJid);
+            });
+          }
+        });
+      }
+
+      try {
+        converse.initialize({
+          bosh_service_url: undefined,
+          websocket_url: wsUrl || undefined,
+          authentication: jid ? 'login' : 'anonymous',
+          jid: jid || undefined,
+          password: password || undefined,
+          domain: xmppDomain || undefined,
+          view_mode: 'embedded',
+          root: document.getElementById('conversejs'),
+          show_controlbox_by_default: true,
+          discover_connection_methods: false,
+          allow_non_roster_messaging: true,
+          allow_muc: true,
+          allow_registration: false,
+          auto_away: 0,
+          auto_reconnect: true,
+          keepalive: true,
+          persistent_store: 'local',
+          singleton: false,
+          auto_join_private_chats: autoJoinChats,
+          theme: document.documentElement.classList.contains('dark') ? 'dracula' : 'concord',
+          whitelisted_plugins: peerParam ? ['iyou-lifecycle', 'auto-open-peer'] : ['iyou-lifecycle']
+        }).then(function() {
+          setTimeout(dismissLoadingSpinner, 1000);
+        }).catch(function(err) {
+          console.error("Converse initialize error:", err);
+          dismissLoadingSpinner();
+          showOfflineRoster();
+        });
+      } catch (err) {
+        console.error("Converse bootstrap error:", err);
+        dismissLoadingSpinner();
+        showOfflineRoster();
+      }
     }
 
-    try {
-      converse.initialize({
-        bosh_service_url: undefined,
-        websocket_url: wsUrl || undefined,
-        authentication: jid ? 'login' : 'anonymous',
-        jid: jid || undefined,
-        password: password || undefined,
-        view_mode: 'embedded',
-        root: document.getElementById('conversejs'),
-        show_controlbox_by_default: true,
-        discover_connection_methods: false,
-        allow_non_roster_messaging: true,
-        allow_muc: true,
-        allow_registration: false,
-        auto_away: 0,
-        auto_reconnect: true,
-        keepalive: true,
-        persistent_store: 'local',
-        singleton: false,
-        auto_join_private_chats: autoJoinChats,
-        theme: document.documentElement.classList.contains('dark') ? 'dracula' : 'concord',
-        whitelisted_plugins: peerParam ? ['iyou-lifecycle', 'auto-open-peer'] : ['iyou-lifecycle']
-      }).then(function() {
-        // Fallback safety unhide after promise resolves
-        setTimeout(dismissLoadingSpinner, 1000);
-      }).catch(function(err) {
-        console.error("Converse initialize error:", err);
-        dismissLoadingSpinner();
+    // Resolve the authenticated XMPP session before initializing Converse.
+    fetch('/api/chat/session/', { credentials: 'same-origin' })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        bindChat(data && data.success === false ? null : (data || null));
+      })
+      .catch(function () {
+        bindChat(null);
       });
-    } catch (err) {
-      console.error("Converse bootstrap error:", err);
-      dismissLoadingSpinner();
-    }
   });
 </script>
 {% endblock %}

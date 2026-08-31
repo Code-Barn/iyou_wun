@@ -12,6 +12,20 @@
   }
 }
 
+@layer components {
+  .note-body-content {
+    transition: max-height 0.3s ease-in-out;
+  }
+
+  .expand-note-btn {
+    -webkit-appearance: none;
+    appearance: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+}
+
 html, body {
   min-height: 100%;
 }

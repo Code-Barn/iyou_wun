@@ -207,6 +207,19 @@ def calculate_trending_tags(notes, scope="global"):
     return top_tags
 
 
+def enrich_image_grid(note):
+    """Attach image grid metadata to a note for 2x2 deck rendering.
+
+    Adds:
+      - note["image_attachments"]: list of up to 4 image attachment dicts
+      - note["image_attachments_total"]: total number of image attachments
+    """
+    images = [m for m in (note.get("media_attachments") or []) if m.get("type") == "image"]
+    note["image_attachments"] = images[:4]
+    note["image_attachments_total"] = len(images)
+    return note
+
+
 class FeedView(TemplateView):
     template_name = "feed.html"
 
@@ -240,6 +253,17 @@ class FeedView(TemplateView):
             context["thread_replies"] = thread_data.get("replies", {})
             context["thread_reply_count"] = thread_data.get("total_replies", 0)
             context["oldest_timestamp"] = None
+
+            _root = context["thread_root"]
+            if _root:
+                enrich_image_grid(_root)
+                for _r in (_root.get("replies") or []):
+                    enrich_image_grid(_r)
+            for _a in context["ancestors"]:
+                enrich_image_grid(_a)
+            for _replies in (thread_data.get("replies") or {}).values():
+                for _r in _replies:
+                    enrich_image_grid(_r)
         else:
             circle = self.request.GET.get("circle") or self.request.GET.get("mode") or "global"
             context["feed_mode"] = circle
@@ -278,6 +302,12 @@ class FeedView(TemplateView):
             context["thread_replies"] = feed_data["replies"]
             context["thread_reply_count"] = feed_data["total_replies"]
             context["oldest_timestamp"] = min(timestamps) if timestamps else None
+
+            for _n in notes:
+                enrich_image_grid(_n)
+            for _replies in (feed_data.get("replies") or {}).values():
+                for _r in _replies:
+                    enrich_image_grid(_r)
 
         creators_qs = (
             UserLinkDeck.objects.filter(is_public=True)
@@ -363,6 +393,51 @@ class ChatView(LoginRequiredMixin, TemplateView):
         return context
 
 
+
+
+def api_chat_session(request):
+    """Return an authenticated XMPP session bootstrap payload (JID, WS/BOSH URLs, pubkey hex)."""
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"success": False, "error": "Authentication required."}, status=401
+        )
+
+    pubkey_hex = did_to_pubkey(request.user.username) or ""
+
+    level = getattr(settings, "WUN_USER_LEVEL", "2")
+    if level == "1":
+        xmpp_domain = "iyou.me"
+        xmpp_ws_url = "wss://xmpp.iyou.me:5222/xmpp-websocket"
+    else:
+        xmpp_domain = getattr(settings, "XMPP_DOMAIN", "127.0.0.1")
+        xmpp_ws_url = getattr(
+            settings,
+            "XMPP_WS_URL",
+            "wss://home.iyou.me:5222/xmpp-websocket",
+        )
+
+    jid = f"{pubkey_hex}@{xmpp_domain}" if pubkey_hex else ""
+
+    token = request.session.get("xmpp_token")
+    if not token:
+        token = request.session.get("_auth_user_hash")
+        if not token:
+            token = hashlib.sha256(
+                (pubkey_hex or request.user.username or str(time.time())).encode()
+            ).hexdigest()
+        request.session["xmpp_token"] = token
+
+    return JsonResponse(
+        {
+            "success": True,
+            "jid": jid,
+            "ws_url": xmpp_ws_url,
+            "bosh_url": getattr(settings, "XMPP_BOSH_URL", ""),
+            "domain": xmpp_domain,
+            "pubkey_hex": pubkey_hex,
+            "token": token,
+        }
+    )
 
 
 @login_required
@@ -541,6 +616,7 @@ def api_feed(request):
                 profiles[pk] = {}
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays)
     feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays)
 
 
@@ -574,12 +650,32 @@ def api_feed(request):
         result["author_avatar"] = note.get("author_avatar") or ""
         result["display_content"] = note.get("display_content", note.get("content", ""))
         result["media_attachments"] = [dict(m) for m in note.get("media_attachments", [])]
+        result["image_attachments"] = [dict(m) for m in note.get("image_attachments", [])]
+        result["image_attachments_total"] = note.get("image_attachments_total", 0)
         result["media_url"] = note.get("media_url") or note.get("file_url") or ""
         result["mime_type"] = note.get("mime_type") or ""
         result["parent_id"] = note.get("parent_id") or ""
         result["reply_to_name"] = note.get("reply_to_name") or ""
         result["reply_to_npub"] = note.get("reply_to_npub") or ""
         result["repost_count"] = note.get("repost_count", 0)
+        result["quoted_id"] = note.get("quoted_id") or ""
+        quoted_note = note.get("quoted_note") or {}
+        if quoted_note:
+            result["quoted_note"] = {
+                "id": quoted_note.get("id") or quoted_note.get("quoted_id") or "",
+                "pubkey": quoted_note.get("pubkey") or "",
+                "npub": quoted_note.get("npub") or "",
+                "author_name": quoted_note.get("author_name") or "",
+                "author_avatar": quoted_note.get("author_avatar") or "",
+                "author_handle": quoted_note.get("author_handle") or "",
+                "content": quoted_note.get("content") or "",
+                "display_content": quoted_note.get("display_content") or quoted_note.get("content") or "",
+                "media_url": quoted_note.get("media_url") or (quoted_note.get("media_attachments") or [{}])[0].get("url") or "",
+                "media_attachments": [dict(m) for m in quoted_note.get("media_attachments", [])],
+                "created_at_formatted": quoted_note.get("created_at_formatted") or "",
+            }
+        else:
+            result["quoted_note"] = {}
 
         result["has_content_warning"] = bool(note.get("has_content_warning", False))
         result["warning_reason"] = note.get("warning_reason") or ""
@@ -1172,6 +1268,8 @@ def fetch_thread(thread_id, relay_urls=None):
     thread_root["replies"] = direct_replies
     thread_root["reply_count"] = len(direct_replies)
 
+    attach_quoted_notes([thread_root] + ancestors + direct_replies, relay_urls=relay_urls)
+
     return {
         "thread_root": thread_root,
         "ancestors": ancestors,
@@ -1560,8 +1658,81 @@ def attach_reaction_counts(notes, relay_urls=None):
     return attach_social_counts(notes, relay_urls=relay_urls)
 
 
-def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
+def attach_quoted_notes(roots, relay_urls=None):
+    """Batch-fetch NIP-18/NIP-27 quoted events and attach enriched `quoted_note` to each root.
 
+    Notes with a `quoted_id` get their referenced event fetched (and profile
+    enriched) so templates can render a compact nested quote card. Roots whose
+    quoted event is unreachable are left with an empty `quoted_note` dict.
+    """
+    from .nip10 import _enrich_root, extract_media_from_note
+
+    def _ts_to_dt(ts):
+        from datetime import datetime
+        if isinstance(ts, datetime):
+            return ts
+        return datetime.fromtimestamp(ts or 0)
+
+    quoted_ids = set()
+    for n in roots:
+        qid = (n.get("quoted_id") or "").strip()
+        if qid:
+            quoted_ids.add(qid)
+
+    if not quoted_ids:
+        for n in roots:
+            n.setdefault("quoted_note", {})
+        return roots
+
+    try:
+        raw_quoted = relay_req({"ids": list(quoted_ids), "limit": len(quoted_ids)}, relay_urls=relay_urls) or {}
+    except Exception:
+        raw_quoted = {}
+
+    if isinstance(raw_quoted, list):
+        raw_quoted = {e.get("id", ""): e for e in raw_quoted if isinstance(e, dict) and e.get("id")}
+
+    authors = set()
+    for e in raw_quoted.values():
+        pk = e.get("pubkey")
+        if pk:
+            authors.add(pk)
+
+    profiles = {}
+    if authors:
+        try:
+            profile_events = relay_req({"kinds": [0], "authors": list(authors)[:100]}, relay_urls=relay_urls) or {}
+        except Exception:
+            profile_events = {}
+        for e in profile_events.values():
+            pk = e.get("pubkey", "")
+            try:
+                profiles[pk] = json.loads(e.get("content", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                profiles.setdefault(pk, {})
+
+    quoted_map = {}
+    for eid, e in raw_quoted.items():
+        if eid not in quoted_ids:
+            continue
+        quoted = _enrich_root(e, e.get("kind"), profiles, _ts_to_dt)
+        quoted = extract_media_from_note(quoted)
+        dt = quoted.get("created_at")
+        quoted["created_at_formatted"] = dt.strftime("%b %d, %H:%M") if isinstance(dt, datetime) else ""
+        quoted["author_handle"] = (profiles.get(e.get("pubkey")) or {}).get("name", "")
+        quoted["id"] = eid
+        quoted["npub"] = quoted.get("npub") or hex_to_npub(e.get("pubkey")) if e.get("pubkey") else ""
+        quoted["display_content"] = quoted.get("display_content", quoted.get("content", ""))[:400]
+        quoted_map[eid] = quoted
+
+    for n in roots:
+        qid = (n.get("quoted_id") or "").strip()
+        n["quoted_note"] = quoted_map.get(qid, {})
+
+    return roots
+
+
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
     Phase 1: Fetch kinds [1, 7, 1063, 1111] with optional authors filter.
@@ -1596,7 +1767,9 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
             except (json.JSONDecodeError, TypeError):
                 profiles.setdefault(pk, {})
 
-    return process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data = process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relay_urls)
+    return feed_data
 
 
 def fetch_contact_pubkeys(user_pubkey, relay_urls=None):

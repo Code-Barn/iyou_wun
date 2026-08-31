@@ -18,25 +18,22 @@
 
   <!-- Note Body Container -->
   <div class="flex-1 min-w-0">
-    <!-- Replying to attribution -->
+    <!-- Replying to attribution (top-level header bar) -->
     {% if note.parent_id or note.reply_to_pubkey %}
-    <div class="text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5 flex-wrap">
+    <div class="text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1 flex items-center gap-1.5 flex-wrap">
       <span>↳ Replying to</span>
       {% if note.reply_to_npub or note.reply_to_name %}
-      <a href="{% url 'profile' npub=note.reply_to_npub|default:note.npub %}" 
-         class="text-violet-600 dark:text-violet-400 hover:underline font-semibold">
+      <a href="{% url 'profile' npub=note.reply_to_npub|default:note.npub %}" class="text-violet-600 dark:text-violet-400 hover:underline font-semibold">
         @{{ note.reply_to_name|default:note.reply_to_npub|truncatechars:16 }}
       </a>
       {% endif %}
-      <a href="{% url 'feed' %}?thread={{ note.parent_id|default:note.id }}" 
-         class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-         title="Jump to parent thread">
+      {% if note.parent_id and note.id != note.parent_id %}
+      <a href="{% url 'feed' %}?thread={{ note.parent_id }}" class="text-slate-400 hover:text-violet-500 hover:underline inline-flex items-center gap-0.5" title="Go to parent note">
         [parent ↗]
       </a>
-      {% if note.root_id and note.root_id != note.parent_id %}
-      <a href="{% url 'feed' %}?thread={{ note.root_id }}" 
-         class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors"
-         title="Jump to root conversation">
+      {% endif %}
+      {% if note.root_id and note.root_id != note.id and note.root_id != note.parent_id %}
+      <a href="{% url 'feed' %}?thread={{ note.root_id }}" class="text-slate-400 hover:text-violet-500 hover:underline inline-flex items-center gap-0.5" title="Jump to root post">
         [root ⇈]
       </a>
       {% endif %}
@@ -62,7 +59,7 @@
       <div class="flex items-center gap-2">
         {% if note.lang and note.lang != 'en' %}
         <button type="button" 
-                class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1"
+                class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1 mr-2"
                 data-note-id="{{ note.id }}"
                 data-source-lang="{{ note.lang }}"
                 onclick="translateNote('{{ note.id }}', '{{ note.lang }}', 'en')">
@@ -122,27 +119,6 @@
       </div>
     </div>
 
-    <!-- Replying to Subheader (if reply) -->
-    {% if note.parent_id or note.reply_to_pubkey %}
-    <div class="text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5 flex-wrap">
-      <span>↳ Replying to</span>
-      {% if note.reply_to_npub or note.reply_to_name %}
-      <a href="{% url 'profile' npub=note.reply_to_npub|default:note.npub %}" 
-         class="text-violet-600 dark:text-violet-400 hover:underline font-semibold">
-        @{{ note.reply_to_name|default:note.reply_to_npub|truncatechars:16 }}
-      </a>
-      {% endif %}
-      {% if note.parent_id and note.id != note.parent_id %}
-      <span class="text-slate-400 dark:text-slate-600">·</span>
-      <a href="{% url 'feed' %}?thread={{ note.parent_id }}" 
-         class="text-slate-400 dark:text-slate-500 hover:text-violet-500 hover:underline inline-flex items-center gap-0.5"
-         title="Go to parent note">
-        <span>[ parent note ↗ ]</span>
-      </a>
-      {% endif %}
-    </div>
-    {% endif %}
-
     <!-- Content + Media (NIP-36 shield if flagged) -->
     {% if note.has_content_warning %}
     <div class="content-warning-shield relative rounded-xl border border-amber-200 dark:border-amber-900/70 overflow-hidden mb-3">
@@ -150,7 +126,14 @@
     {% endif %}
 
     {% if note.display_content or note.content %}
-    <div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words select-text pt-0.5">{{ note.display_content|default:note.content|linebreaksbr|safe }}</div>
+    <div class="note-content-wrapper relative" data-clamped="false">
+      <div class="note-body-content text-sm sm:text-[15px] text-slate-800 dark:text-slate-100 font-normal leading-relaxed break-words max-h-60 overflow-hidden transition-all duration-300">{{ note.display_content|default:note.content|linebreaksbr|safe }}</div>
+      <button type="button"
+              class="expand-note-btn hidden mt-1 text-xs font-mono text-violet-600 dark:text-violet-400 hover:underline font-semibold"
+              onclick="toggleNoteClamp(this)">
+        {% trans "Show more" %} ▾
+      </button>
+    </div>
     {% endif %}
 
     <div id="translated-box-{{ note.id }}" class="hidden mt-2 p-2.5 rounded-lg bg-violet-50/50 dark:bg-violet-950/30 border border-violet-200/60 dark:border-violet-800/40 text-sm sm:text-[15px] leading-relaxed">
@@ -164,6 +147,23 @@
     </div>
 
     {% if note.media_attachments %}
+    {% if note.image_attachments_total > 4 %}
+    <div class="mt-3 grid grid-cols-2 gap-1.5 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/10">
+      {% for media in note.image_attachments %}
+      <div class="relative aspect-square overflow-hidden cursor-pointer" onclick="openImageModal('{{ media.url }}')">
+        <img src="{{ media.url }}"
+             alt="{{ media.alt|default:'Attached visual' }}"
+             loading="lazy"
+             class="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-200" />
+        {% if forloop.counter == 4 and note.image_attachments_total > 4 %}
+        <div class="absolute inset-0 bg-black/60 flex items-center justify-center">
+          <span class="text-white font-mono font-bold text-2xl">+{{ note.image_attachments_total|add:"-4" }}</span>
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
     <div class="mt-3 space-y-2">
       {% for media in note.media_attachments %}
         {% if media.type == 'image' %}
@@ -194,6 +194,7 @@
         {% endif %}
       {% endfor %}
     </div>
+    {% endif %}
     {% elif note.kind == 1063 and note.media_url %}
     <div class="mt-2.5 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-800 max-h-96 bg-gray-100 dark:bg-slate-900">
       <img src="{{ note.media_url|default:note.file_url }}" alt="{{ note.alt_text|default:'Media attachment' }}" class="w-full h-full object-contain max-h-96" loading="lazy" />
@@ -210,6 +211,11 @@
     </div>
     {% endif %}
 
+
+    <!-- NIP-18 / NIP-27 Quoted Note Embed -->
+    {% if note.quoted_note.id %}
+    {% include "includes/_quote_card.html" with quoted=note.quoted_note %}
+    {% endif %}
 
     <!-- Kind 30023 Poll Rendering (if present) -->
     {% if note.kind == 30023 and note.poll_options %}
@@ -254,11 +260,23 @@
         </span>
       </button>
 
-      <!-- 2. Repost / Boost -->
-      <button type="button" class="action-btn-repost group/repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote('{{ note.id }}', '{{ note.pubkey }}')">
-        <span class="action-svg w-3.5 h-3.5 shrink-0"><svg class="w-3.5 h-3.5 transition-transform duration-500 group-hover/repost:rotate-180" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg></span>
-        <span class="action-count repost-count-label">{% if note.repost_count %}{{ note.repost_count }}{% else %}{% trans "Repost" %}{% endif %}</span>
-      </button>
+      <!-- 2. Repost / Quote Toggle -->
+      <div class="relative inline-block repost-menu-container">
+        <button type="button"
+                class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50"
+                onclick="toggleRepostDropdown('{{ note.id }}')">
+          <span>🔁</span>
+          <span class="action-count repost-count-label">{% if note.repost_count %}{{ note.repost_count }}{% else %}{% trans "Repost" %}{% endif %}</span>
+        </button>
+        <div id="repost-menu-{{ note.id }}" class="hidden absolute left-0 bottom-8 z-30 w-36 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1 text-xs font-mono">
+          <button type="button" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg flex items-center gap-2" onclick="repostNote('{{ note.id }}', '{{ note.pubkey }}')">
+            <span>🔁</span> <span>{% trans "Repost" %}</span>
+          </button>
+          <button type="button" class="w-full text-left px-2.5 py-1.5 hover:bg-violet-50 dark:hover:bg-violet-950/60 text-violet-600 dark:text-violet-400 rounded-lg flex items-center gap-2" onclick="openQuoteComposer('{{ note.id }}', '{{ note.pubkey }}', '{{ note.author_name|default:note.npub|escapejs }}', '{{ note.display_content|default:note.content|truncatechars:120|escapejs }}', '{{ note.media_url|default:''|escapejs }}')">
+            <span>💬</span> <span>{% trans "Quote Note" %}</span>
+          </button>
+        </div>
+      </div>
 
       <!-- 3. Like / Heart -->
       <button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-500 transition-colors px-2 py-1 rounded hover:bg-pink-50 dark:hover:bg-pink-950/40" onclick="likeNote('{{ note.id }}', '{{ note.pubkey }}')">

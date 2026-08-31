@@ -86,12 +86,19 @@
   - Add client-side moderation management card under `/dashboard#settings` with dynamic item removal and list clearing (`[ Unmute ]`, `[ Unblock ]`, `[ Unhide ]`) — **Done 2026-08-30**
 
 ### Phase 20: XMPP / Converse.js Live Provisioning & Floating Messenger Sync
-- [ ] **20.1 Prosody Account Provisioning & Token Exchange:**
-  - Implement `/api/chat/auth/` backend endpoint to verify authenticated DID session and provision/return ephemeral BOSH/WebSocket credentials for Prosody XMPP daemon.
+- [x] **20.1 Prosody Account Provisioning & Token Exchange:**
+  - Implement `/api/chat/session/` backend endpoint to verify authenticated DID session, derive canonical JID from pubkey hex, resolve WS/BOSH URLs, and return/reuse an ephemeral `xmpp_token` for the XMPP session.
 - [ ] **20.2 Converse.js Headless Binding to Floating Chat:**
-  - Bind Converse.js headless connection events directly to `#floating-chat-root` and active `#docked-chat-windows` for bi-directional live delivery across all views.
-- [ ] **20.3 Fallback NIP-04/NIP-17 Nostr DM Transport:**
-  - Implement encrypted direct message fallback over Nostr relays when peer XMPP JID is offline or unreachable.
+  - Bind Converse.js headless connection events directly to `#floating-chat-root` and active `#docked-chat-windows` for bi-directional live delivery across all views. *(In progress: chat.html now fetches `/api/chat/session/` before `converse.initialize()`, passes `jid`/`websocket_url`/`domain`, and falls back to an offline roster + Nostr bridge after 6s; floating_chat.js adds a background XMPP WebSocket listener + unread badge + live bubble dispatch.)*
+- [x] **20.3 Fallback NIP-04/NIP-17 Nostr DM Transport:**
+  - Implement encrypted direct message fallback over Nostr relays when peer XMPP JID is offline or unreachable — `sendDockedMessage` dispatches JIDs over XMPP and npub/hex peers over a signed Kind 4 NIP-04 event via `window.bridgeClient`.
+
+### Phase 21: NIP-18 / NIP-27 Quote Repost Engine & Embedded Preview Cards
+- [x] **21.1 NIP-18/NIP-27 quote tag parsing & enrichment:** `parse_nip18_quote_tags()` extracts `["q", event_id, relay, pubkey]` tags plus `nostr:note1…`/`nostr:nevent1…` URIs in content; `enrich()`/`_enrich_root()` expose `quoted_id`/`quoted_pubkey`; `attach_quoted_notes()` batch-fetches quoted events and attaches enriched `quoted_note` in `fetch_unified_feed()`, `api_feed()`, and `fetch_thread()`.
+- [x] **21.2 Embedded quoted card partial:** `templates/includes/_quote_card.html` renders a compact nested quote embed (author, handle, timestamp, truncated text, media thumbnail) and is included by `_thread_post.html` when `note.quoted_note` is present.
+- [x] **21.3 Repost / Quote toggle menu:** `_thread_post.html` replaces the static Repost button with a `toggleRepostDropdown()` menu providing Repost & Quote Note actions.
+- [x] **21.4 Composer quote attachment:** `_post_composer.html` adds a collapsible `#quote-preview-dock`; `feed_interactions.js` implements `openQuoteComposer()`, `clearQuoteAttachment()`, and appends NIP-18 `["q", …]` + `["p", …]` tags to the signed Kind 1 quote note.
+- [x] **21.5 Tests:** `test_nip18_quote_tag_parsing`, `test_quote_composer_attaches_nip18_tags`, `test_thread_post_renders_repost_dropdown_and_quote_card` — **Done 2026-08-30**
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

@@ -1,13 +1,268 @@
 /**
  * floating_chat.js — Floating Dock Messenger Controller
+ * Multi-protocol transport: XMPP (JID) + Nostr NIP-04 (npub / hex).
  */
 (function() {
   const activeWindows = new Map(); // peerId -> { element, isMinimized }
+  const UNREAD_BADGE = 'floating-chat-unread-badge';
+  let chatSession = null; // { jid, ws_url, bosh_url, domain, pubkey_hex, token }
+  let xmppSocket = null;  // background XMPP WebSocket (when reachable)
+
+  function incrementUnreadBadge() {
+    const badge = document.getElementById(UNREAD_BADGE);
+    if (!badge) return;
+    const current = parseInt(badge.textContent, 10) || 0;
+    badge.textContent = current + 1;
+    badge.classList.remove('hidden');
+  }
+
+  function clearUnreadBadge() {
+    const badge = document.getElementById(UNREAD_BADGE);
+    if (!badge) return;
+    badge.textContent = 0;
+    badge.classList.add('hidden');
+  }
+
+  function buildOutgoingBubble(text) {
+    const msgBubble = document.createElement('div');
+    msgBubble.className = 'flex justify-end';
+    msgBubble.innerHTML = `
+      <div class="bg-violet-600 text-white rounded-lg px-2.5 py-1 max-w-[85%] break-words text-[11px]">
+        ${text}
+      </div>
+    `;
+    return msgBubble;
+  }
+
+  function appendMessage(win, bubble) {
+    const messages = win.element.querySelector('.docked-chat-messages');
+    if (messages) {
+      messages.appendChild(bubble);
+      messages.scrollTop = messages.scrollHeight;
+    }
+  }
+
+  function resolvePeerTarget(peerId) {
+    if (!peerId) return null;
+    if (peerId.indexOf('@') !== -1) {
+      return { type: 'xmpp', jid: peerId };
+    }
+    const npubHex = peerId.replace(/^npub1/, '');
+    if (/^[0-9a-fA-F]{64}$/.test(peerId)) {
+      return { type: 'nostr', hex: peerId.toLowerCase() };
+    }
+    if (/^npub1[0-9a-z]+$/i.test(peerId)) {
+      return { type: 'nostr', hex: npubHex, npub: peerId };
+    }
+    return null;
+  }
+
+  function sendViaXmpp(jid, text) {
+    if (xmppSocket && xmppSocket.readyState === WebSocket.OPEN && window.Strophe) {
+      try {
+        const msg = window.Strophe.xmlHtmlNode(`<message to="${jid}" type="chat"><body>${window.Strophe.xmlEscape?.(text) || text}</body></message>`);
+        window.Strophe.send(msg);
+        return true;
+      } catch (err) {
+        console.error("XMPP send error:", err);
+      }
+    }
+    return false;
+  }
+
+  function sendViaNostr(peerHex, text, onDone) {
+    const bridge = window.bridgeClient;
+    if (!bridge || typeof bridge.signEvent !== 'function') {
+      if (onDone) onDone(false);
+      return;
+    }
+
+    const encrypt = (typeof bridge.nip04_encrypt === 'function')
+      ? bridge.nip04_encrypt
+      : typeof window.nip04_encrypt === 'function' ? window.nip04_encrypt : null;
+
+    const now = Math.floor(Date.now() / 1000);
+    const build = function (content) {
+      const event = {
+        kind: 4,
+        created_at: now,
+        tags: [['p', peerHex]],
+        content: content,
+      };
+      bridge.signEvent(event);
+    };
+
+    if (encrypt) {
+      try {
+        const result = encrypt(peerHex, text);
+        Promise.resolve(result).then(function (encrypted) {
+          build(encrypted || text);
+        }).catch(function () { build(text); });
+      } catch (err) {
+        build(text);
+      }
+    } else {
+      build(text);
+    }
+
+    bridge.connect(function (signedEvent) {
+      if (!signedEvent || signedEvent.kind !== 4) return;
+      if (typeof bridge.broadcastToRelays === 'function') {
+        bridge.broadcastToRelays(signedEvent, null, function (local, global) {
+          if (onDone) onDone(local || global);
+        });
+      } else if (onDone) {
+        onDone(true);
+      }
+    });
+  }
+
+  function sendDockedMessage(event, peerId) {
+    event.preventDefault();
+    const win = activeWindows.get(peerId);
+    if (!win) return;
+    const input = win.element.querySelector('.docked-chat-input');
+    const text = input ? input.value.trim() : '';
+    if (!text) return;
+
+    // Optimistic outgoing bubble with sent timestamp.
+    const sentAt = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const bubble = document.createElement('div');
+    bubble.className = 'flex justify-end';
+    bubble.innerHTML = `
+      <div class="max-w-[85%]">
+        <div class="bg-violet-600 text-white rounded-lg px-2.5 py-1 break-words text-[11px]">${text}</div>
+        <div class="text-right text-[9px] text-slate-400 mt-0.5">${sentAt}</div>
+      </div>
+    `;
+    appendMessage(win, bubble);
+
+    if (input) input.value = '';
+
+    const target = resolvePeerTarget(peerId);
+    if (!target) {
+      if (window.showToast) window.showToast('Unsupported peer target', 'error');
+      return;
+    }
+
+    if (target.type === 'xmpp') {
+      const ok = sendViaXmpp(target.jid, text);
+      if (window.showToast) window.showToast(ok ? 'Sent via XMPP mesh' : 'XMPP offline — queued locally', ok ? 'info' : 'warn');
+      return;
+    }
+
+    sendViaNostr(target.hex, text, function (ok) {
+      if (window.showToast) {
+        window.showToast(ok ? 'Signed & dispatched to relays' : 'Broadcast pending (offline)', ok ? 'info' : 'warn');
+      }
+    });
+  }
+
+  function dispatchIncomingMessage(peerId, text, fromSelf) {
+    if (fromSelf) return;
+    const win = activeWindows.get(peerId);
+    if (win && !win.isMinimized && win.element.classList.contains('hidden') === false) {
+      const bubble = document.createElement('div');
+      bubble.className = 'flex justify-start';
+      bubble.innerHTML = `
+        <div class="bg-slate-200 dark:bg-slate-700 text-slate-800 dark:text-slate-100 rounded-lg px-2.5 py-1 max-w-[85%] break-words text-[11px]">${text}</div>
+      `;
+      appendMessage(win, bubble);
+      playChirp();
+    } else {
+      incrementUnreadBadge();
+    }
+  }
+
+  function playChirp() {
+    try {
+      const ctx = window.AudioContext || window.webkitAudioContext;
+      if (!ctx) return;
+      const audio = new ctx();
+      const osc = audio.createOscillator();
+      const gain = audio.createGain();
+      osc.connect(gain);
+      gain.connect(audio.destination);
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.05, audio.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + 0.15);
+      osc.start();
+      osc.stop(audio.currentTime + 0.16);
+    } catch (err) { /* audio unavailable */ }
+  }
+
+  function initIncomingListeners() {
+    // Nostr kind 4 DM listener (relay pool events, when available).
+    if (window.relayPool && typeof window.relayPool.on === 'function') {
+      try {
+        window.relayPool.on('event', function (ev) {
+          if (!ev || ev.kind !== 4 || !chatSession) return;
+          const sender = (ev.tags || []).find(function (t) { return t[0] === 'p'; });
+          if (!sender) return;
+          const fromSelf = ev.pubkey === chatSession.pubkey_hex;
+          if (fromSelf) return;
+          let content = ev.content;
+          if (window.nip04_decrypt) {
+            try {
+              const dec = window.nip04_decrypt(ev.pubkey, ev.content);
+              if (dec && dec !== ev.content) content = dec;
+            } catch (err) { /* leave encrypted */ }
+          }
+          dispatchIncomingMessage(sender[1], content, false);
+        });
+      } catch (err) { /* relay pool handler not attachable */ }
+    }
+  }
+
+  function initXmppSocket() {
+    if (!chatSession || !chatSession.ws_url) return;
+    const WS = window.WebSocket;
+    if (!WS || !window.Strophe) return;
+    try {
+      xmppSocket = new WS(chatSession.ws_url);
+      xmppSocket.onopen = function () {
+        const conn = window.Strophe.connection(chatSession.jid);
+        window.Strophe.send = function (stanza) {
+          if (xmppSocket && xmppSocket.readyState === WS.OPEN) {
+            xmppSocket.send(new XMLSerializer().serializeToString(stanza));
+          }
+        };
+        xmppSocket.onmessage = function (evt) {
+          try {
+            const xml = new DOMParser().parseFromString(evt.data, 'text/xml');
+            const body = xml.getElementsByTagName('body')[0];
+            if (!body) return;
+            const message = body.parentNode; // <message>
+            const from = message.getAttribute ? message.getAttribute('from') || '' : '';
+            const text = body.textContent || '';
+            const clean = from.split('/')[0];
+            dispatchIncomingMessage(clean, text, false);
+          } catch (err) { /* non-message stanza */ }
+        };
+      };
+      xmppSocket.onerror = function () { /* fall back to Nostr-only */ };
+    } catch (err) { xmppSocket = null; }
+  }
+
+  function initChatSession() {
+    if (!window.__iknowyou_user_authenticated__) return;
+    fetch('/api/chat/session/', { credentials: 'same-origin' })
+      .then(function (res) { return res.json(); })
+      .then(function (data) {
+        if (!data || data.success === false) return;
+        chatSession = data;
+        window.chatSession = data;
+        initXmppSocket();
+        initIncomingListeners();
+      })
+      .catch(function () { /* offline — Nostr bridge still usable */ });
+  }
 
   function toggleChatRoster() {
     const popover = document.getElementById('chat-roster-popover');
     if (popover) {
       popover.classList.toggle('hidden');
+      if (!popover.classList.contains('hidden')) clearUnreadBadge();
     }
   }
 
@@ -97,29 +352,19 @@
     }
   }
 
-  function sendDockedMessage(event, peerId) {
-    event.preventDefault();
-    const win = activeWindows.get(peerId);
-    if (!win) return;
-    const input = win.element.querySelector('.docked-chat-input');
-    const text = input ? input.value.trim() : '';
-    if (!text) return;
-
-    const messages = win.element.querySelector('.docked-chat-messages');
-    if (messages) {
-      const msgBubble = document.createElement('div');
-      msgBubble.className = 'flex justify-end';
-      msgBubble.innerHTML = `
-        <div class="bg-violet-600 text-white rounded-lg px-2.5 py-1 max-w-[85%] break-words text-[11px]">
-          ${text}
-        </div>
-      `;
-      messages.appendChild(msgBubble);
-      messages.scrollTop = messages.scrollHeight;
+  function onReady() {
+    const authed = (typeof window.userPubkey !== 'undefined' && window.userPubkey)
+      || document.body.getAttribute('data-authenticated') === 'true'
+      || (window.__iknowyou_user_authenticated__ === true);
+    if (authed) {
+      initChatSession();
     }
+  }
 
-    if (input) input.value = '';
-    if (window.showToast) window.showToast('Message dispatched to mesh', 'info');
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', onReady);
+  } else {
+    onReady();
   }
 
   window.toggleChatRoster = toggleChatRoster;
@@ -127,4 +372,5 @@
   window.toggleMinimizeChat = toggleMinimizeChat;
   window.closeDockedChat = closeDockedChat;
   window.sendDockedMessage = sendDockedMessage;
+  window.chatDispatchIncoming = dispatchIncomingMessage;
 })();

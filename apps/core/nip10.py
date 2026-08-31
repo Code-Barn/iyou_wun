@@ -16,6 +16,8 @@
 import json
 import re
 
+import bech32
+
 IMAGE_EXT_REGEX = re.compile(r"https?://[^\s<>\"]+?\.(?:png|jpg|jpeg|gif|webp|svg)(?:\?[^\s<>\"]*)?", re.IGNORECASE)
 VIDEO_EXT_REGEX = re.compile(r"https?://[^\s<>\"]+?\.(?:mp4|webm|mov|m4v)(?:\?[^\s<>\"]*)?", re.IGNORECASE)
 AUDIO_EXT_REGEX = re.compile(r"https?://[^\s<>\"]+?\.(?:mp3|ogg|wav|m4a|flac)(?:\?[^\s<>\"]*)?", re.IGNORECASE)
@@ -364,6 +366,99 @@ def parse_nip10_tags(tags):
     return root_id, parent_id, reply_marker, mention_ids, reply_to_pubkey
 
 
+NOSTR_NOTE_URI_REGEX = re.compile(r"nostr:(note1|nevent1)[0-9a-z]+", re.IGNORECASE)
+
+
+def decode_nostr_uri(uri):
+    """Decode a NIP-27 `nostr:note1...` / `nostr:nevent1...` URI into (event_id, pubkey).
+
+    Returns (event_id_hex, pubkey_hex). Either may be "" when not present.
+    """
+    if not uri:
+        return "", ""
+    clean = uri.strip()
+    for prefix in ("nostr:", "nostr://"):
+        if clean.startswith(prefix):
+            clean = clean[len(prefix):]
+            break
+
+    hrp, data = None, None
+    try:
+        hrp, data = bech32.bech32_decode(clean)
+    except Exception:
+        return "", ""
+
+    if data is None:
+        return "", ""
+    try:
+        decoded = bech32.convertbits(data, 5, 8, False)
+        if decoded is None:
+            return "", ""
+        payload = bytes(decoded)
+    except Exception:
+        return "", ""
+
+    if hrp == "note":
+        # note1 encodes exactly the 32-byte event id.
+        if len(payload) >= 32:
+            return payload[:32].hex(), ""
+        return payload.hex(), ""
+
+    if hrp == "nevent":
+        # TLV format: type(1) | length(1) | value ; 0=event id, 1=pubkey, 2=relay
+        event_hex = ""
+        pubkey_hex = ""
+        idx = 0
+        while idx < len(payload):
+            if idx + 2 > len(payload):
+                break
+            t = payload[idx]
+            length = payload[idx + 1]
+            idx += 2
+            value = payload[idx: idx + length]
+            idx += length
+            if t == 0:
+                event_hex = value.hex()
+            elif t == 1:
+                pubkey_hex = value.hex()
+        return event_hex, pubkey_hex
+
+    return "", ""
+
+
+def parse_nip18_quote_tags(tags, content=""):
+    """Extract a NIP-18 / NIP-27 quoted event reference.
+
+    Checks for a `["q", "<event_id>", "<relay>", "<pubkey>"]` tag as well as
+    `nostr:note1...` / `nostr:nevent1...` URIs embedded in the content.
+
+    Returns (quoted_event_id, quoted_pubkey).
+    """
+    quoted_event_id = ""
+    quoted_pubkey = ""
+
+    for tag in tags or []:
+        if not tag:
+            continue
+        if tag[0] == "q" and len(tag) > 1 and str(tag[1]).strip():
+            quoted_event_id = str(tag[1]).strip()
+            if len(tag) > 3 and tag[3]:
+                quoted_pubkey = str(tag[3]).strip()
+            elif len(tag) > 2 and tag[2] and len(str(tag[2])) == 64 and all(c in "0123456789abcdefABCDEF" for c in str(tag[2])):
+                quoted_pubkey = str(tag[2]).strip()
+            break
+
+    if not quoted_event_id:
+        for m in NOSTR_NOTE_URI_REGEX.finditer(content or ""):
+            eid, pk = decode_nostr_uri(m.group(0))
+            if eid:
+                quoted_event_id = eid
+                quoted_pubkey = pk
+                break
+
+    return quoted_event_id, quoted_pubkey
+
+
 def resolve_ancestor_ids(event):
     """Extract all unique 'e' tag ids in tag order.
 
@@ -430,6 +525,8 @@ def build_thread_tree(raw_events, profiles=None):
         reply_prof = profiles.get(reply_to_pubkey, {}) if reply_to_pubkey else {}
         reply_name = reply_prof.get("display_name") or reply_prof.get("name") or ""
 
+        quoted_event_id, quoted_pubkey = parse_nip18_quote_tags(tags, e.get("content", ""))
+
         note = {
             "id": e.get("id", ""),
             "kind": e.get("kind"),
@@ -450,6 +547,8 @@ def build_thread_tree(raw_events, profiles=None):
             "reply_to_pubkey": reply_to_pubkey or "",
             "reply_to_npub": reply_npub,
             "reply_to_name": reply_name,
+            "quoted_id": quoted_event_id or "",
+            "quoted_pubkey": quoted_pubkey or "",
             "reply_count": 0,
             "reactions": [],
             "replies": [],
@@ -564,6 +663,8 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
     reply_prof = profiles.get(reply_to_pubkey, {}) if reply_to_pubkey else {}
     reply_name = reply_prof.get("display_name") or reply_prof.get("name") or ""
 
+    quoted_event_id, quoted_pubkey = parse_nip18_quote_tags(tags, e.get("content", ""))
+
     note = {
         "id": e.get("id", ""),
         "kind": kind,
@@ -584,6 +685,8 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "reply_to_pubkey": reply_to_pubkey or "",
         "reply_to_npub": reply_npub,
         "reply_to_name": reply_name,
+        "quoted_id": quoted_event_id or "",
+        "quoted_pubkey": quoted_pubkey or "",
         "reply_count": 0,
         "reactions": [],
         "replies": [],
