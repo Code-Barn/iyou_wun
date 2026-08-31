@@ -255,6 +255,53 @@
           </div>
         </div>
       </div>
+
+      <!-- Card 2: Client-Side Moderation & Muted Accounts Roster -->
+      <div id="moderation-roster-container" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
+        <div>
+          <h2 class="text-sm font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200 font-mono">
+            Client-Side Moderation &amp; Muted Accounts
+          </h2>
+          <p class="text-xs text-slate-400 font-mono mt-0.5">
+            Locally muted and blocked pubkeys stored in your sovereign enclave.
+          </p>
+        </div>
+
+        <div class="space-y-4 text-xs font-mono">
+          <!-- Muted Accounts Section -->
+          <div>
+            <div class="flex items-center justify-between pb-1 mb-2 border-b border-slate-100 dark:border-slate-800">
+              <span class="font-semibold text-slate-700 dark:text-slate-300">🔇 Muted Accounts (<span id="muted-count">0</span>)</span>
+              <button type="button" onclick="clearAllMuted()" class="text-[11px] text-slate-400 hover:text-rose-500 transition">Clear All</button>
+            </div>
+            <div id="muted-accounts-list" class="space-y-1.5 max-h-40 overflow-y-auto">
+              <p class="text-slate-400 text-[11px] italic py-1">No muted accounts.</p>
+            </div>
+          </div>
+
+          <!-- Blocked Accounts Section -->
+          <div>
+            <div class="flex items-center justify-between pb-1 mb-2 border-b border-slate-100 dark:border-slate-800">
+              <span class="font-semibold text-slate-700 dark:text-slate-300">🚫 Blocked Accounts (<span id="blocked-count">0</span>)</span>
+              <button type="button" onclick="clearAllBlocked()" class="text-[11px] text-slate-400 hover:text-rose-500 transition">Clear All</button>
+            </div>
+            <div id="blocked-accounts-list" class="space-y-1.5 max-h-40 overflow-y-auto">
+              <p class="text-slate-400 text-[11px] italic py-1">No blocked accounts.</p>
+            </div>
+          </div>
+
+          <!-- Hidden Notes Section -->
+          <div>
+            <div class="flex items-center justify-between pb-1 mb-2 border-b border-slate-100 dark:border-slate-800">
+              <span class="font-semibold text-slate-700 dark:text-slate-300">🙈 Hidden Notes (<span id="hidden-notes-count">0</span>)</span>
+              <button type="button" onclick="clearAllHiddenNotes()" class="text-[11px] text-slate-400 hover:text-rose-500 transition">Clear All</button>
+            </div>
+            <div id="hidden-notes-list" class="space-y-1.5 max-h-32 overflow-y-auto">
+              <p class="text-slate-400 text-[11px] italic py-1">No hidden notes.</p>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- TAB 4: Account & Key Info -->
@@ -750,11 +797,129 @@
     }
   }
 
+  // --- Client-Side Moderation & Mute Roster ---
+  function getModerationArray(key) {
+    try {
+      var raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function setModerationArray(key, arr) {
+    try {
+      localStorage.setItem(key, JSON.stringify(arr));
+    } catch (e) {}
+  }
+
+  function renderModerationRoster() {
+    var muted = getModerationArray("wun_muted_pubkeys");
+    var blocked = getModerationArray("wun_blocked_pubkeys");
+    var hidden = getModerationArray("wun_hidden_notes");
+
+    var mutedCount = document.getElementById("muted-count");
+    var blockedCount = document.getElementById("blocked-count");
+    var hiddenCount = document.getElementById("hidden-notes-count");
+
+    if (mutedCount) mutedCount.textContent = muted.length;
+    if (blockedCount) blockedCount.textContent = blocked.length;
+    if (hiddenCount) hiddenCount.textContent = hidden.length;
+
+    var mutedList = document.getElementById("muted-accounts-list");
+    if (mutedList) {
+      if (muted.length === 0) {
+        mutedList.innerHTML = '<p class="text-slate-400 text-[11px] italic py-1">No muted accounts.</p>';
+      } else {
+        mutedList.innerHTML = "";
+        muted.forEach(function(pk) {
+          var item = document.createElement("div");
+          item.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5";
+          item.innerHTML = '<span class="font-mono text-xs text-slate-700 dark:text-slate-300 truncate max-w-[240px] sm:max-w-md">' + escapeHtml(pk) + '</span>' +
+            '<button type="button" onclick="unmutePubkey(\'' + escapeAttr(pk) + '\')" class="text-xs text-violet-600 dark:text-violet-400 hover:underline font-mono ml-2">Unmute</button>';
+          mutedList.appendChild(item);
+        });
+      }
+    }
+
+    var blockedList = document.getElementById("blocked-accounts-list");
+    if (blockedList) {
+      if (blocked.length === 0) {
+        blockedList.innerHTML = '<p class="text-slate-400 text-[11px] italic py-1">No blocked accounts.</p>';
+      } else {
+        blockedList.innerHTML = "";
+        blocked.forEach(function(pk) {
+          var item = document.createElement("div");
+          item.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5";
+          item.innerHTML = '<span class="font-mono text-xs text-slate-700 dark:text-slate-300 truncate max-w-[240px] sm:max-w-md">' + escapeHtml(pk) + '</span>' +
+            '<button type="button" onclick="unblockPubkey(\'' + escapeAttr(pk) + '\')" class="text-xs text-rose-600 dark:text-rose-400 hover:underline font-mono ml-2">Unblock</button>';
+          blockedList.appendChild(item);
+        });
+      }
+    }
+
+    var hiddenList = document.getElementById("hidden-notes-list");
+    if (hiddenList) {
+      if (hidden.length === 0) {
+        hiddenList.innerHTML = '<p class="text-slate-400 text-[11px] italic py-1">No hidden notes.</p>';
+      } else {
+        hiddenList.innerHTML = "";
+        hidden.forEach(function(noteId) {
+          var item = document.createElement("div");
+          item.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-1.5";
+          item.innerHTML = '<span class="font-mono text-xs text-slate-700 dark:text-slate-300 truncate max-w-[240px] sm:max-w-md">Note: ' + escapeHtml(noteId) + '</span>' +
+            '<button type="button" onclick="unhideNote(\'' + escapeAttr(noteId) + '\')" class="text-xs text-violet-600 dark:text-violet-400 hover:underline font-mono ml-2">Unhide</button>';
+          hiddenList.appendChild(item);
+        });
+      }
+    }
+  }
+
+  function unmutePubkey(pk) {
+    var muted = getModerationArray("wun_muted_pubkeys").filter(function(k) { return k !== pk; });
+    setModerationArray("wun_muted_pubkeys", muted);
+    renderModerationRoster();
+    if (typeof showToast === "function") showToast("Account unmuted", "info");
+  }
+
+  function unblockPubkey(pk) {
+    var blocked = getModerationArray("wun_blocked_pubkeys").filter(function(k) { return k !== pk; });
+    setModerationArray("wun_blocked_pubkeys", blocked);
+    renderModerationRoster();
+    if (typeof showToast === "function") showToast("Account unblocked", "info");
+  }
+
+  function unhideNote(noteId) {
+    var hidden = getModerationArray("wun_hidden_notes").filter(function(id) { return id !== noteId; });
+    setModerationArray("wun_hidden_notes", hidden);
+    renderModerationRoster();
+    if (typeof showToast === "function") showToast("Note unhidden", "info");
+  }
+
+  function clearAllMuted() {
+    setModerationArray("wun_muted_pubkeys", []);
+    renderModerationRoster();
+    if (typeof showToast === "function") showToast("Mute list cleared", "info");
+  }
+
+  function clearAllBlocked() {
+    setModerationArray("wun_blocked_pubkeys", []);
+    renderModerationRoster();
+    if (typeof showToast === "function") showToast("Block list cleared", "info");
+  }
+
+  function clearAllHiddenNotes() {
+    setModerationArray("wun_hidden_notes", []);
+    renderModerationRoster();
+    if (typeof showToast === "function") showToast("Hidden notes cleared", "info");
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var initialTab = (window.location.hash ? window.location.hash.replace("#", "") : "") || localStorage.getItem("wun_dashboard_active_tab") || "profile";
     switchTab(initialTab);
     loadRelays();
     loadFeedHygienePreferences();
+    renderModerationRoster();
     updatePreview();
     if (typeof initDeckManager === "function") { initDeckManager(); }
   });

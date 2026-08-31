@@ -104,8 +104,18 @@
               🔗 Copy Event ID / Link
             </button>
             <div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>
+            <button type="button" class="w-full text-left px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2" onclick="hideNote('{{ note.id }}')">
+              🙈 {% trans "Hide this Note" %}
+            </button>
+            <button type="button" class="w-full text-left px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2" onclick="muteAuthor('{{ note.pubkey }}', '{{ note.author_name|default:note.npub|escapejs }}')">
+              🔇 {% trans "Mute @" %}{{ note.author_name|default:note.npub|truncatechars:12 }}
+            </button>
+            <button type="button" class="w-full text-left px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center gap-2" onclick="blockAuthor('{{ note.pubkey }}', '{{ note.author_name|default:note.npub|escapejs }}')">
+              🚫 {% trans "Block @" %}{{ note.author_name|default:note.npub|truncatechars:12 }}
+            </button>
+            <div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>
             <button type="button" class="w-full text-left px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center gap-2" onclick="openReportModal('{{ note.id }}', '{{ note.pubkey }}')">
-              🚩 Report / Flag Note
+              🚩 {% trans "Report / Flag Note" %}
             </button>
           </div>
         </div>

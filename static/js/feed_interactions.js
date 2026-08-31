@@ -552,6 +552,12 @@
             '<div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>' +
             '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="viewRawEventJson(\'' + escapeAttr(noteId) + '\')">📄 View Raw JSON</button>' +
             '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="copyNotePermalink(\'' + escapeAttr(noteId) + '\')">🔗 Copy Event ID / Link</button>' +
+            '<div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>' +
+            '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2" onclick="hideNote(\'' + escapeAttr(noteId) + '\')">🙈 Hide this Note</button>' +
+            '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center gap-2" onclick="muteAuthor(\'' + escapeAttr(pubkey) + '\', \'' + escapeAttr(authorName || npub || '') + '\')">🔇 Mute @' + escapeHtml((authorName || npub || '').slice(0, 12)) + '</button>' +
+            '<button type="button" class="w-full text-left px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center gap-2" onclick="blockAuthor(\'' + escapeAttr(pubkey) + '\', \'' + escapeAttr(authorName || npub || '') + '\')">🚫 Block @' + escapeHtml((authorName || npub || '').slice(0, 12)) + '</button>' +
+            '<div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>' +
+            '<button type="button" class="w-full text-left px-3 py-1.5 text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 flex items-center gap-2" onclick="openReportModal(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')">🚩 Report / Flag Note</button>' +
             '</div></div></div></div>' +
             replyingToHtml +
             contentAndMediaHtml +
@@ -1654,6 +1660,81 @@
     window.closePollModal = closePollModal;
     window.addPollOption = addPollOption;
     window.removeOption = removeOption;
+    // ---------- Self-Moderation Actions (Hide, Mute, Block) ----------
+
+    function getStorageArray(key) {
+        try {
+            var raw = localStorage.getItem(key);
+            return raw ? JSON.parse(raw) : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function setStorageArray(key, arr) {
+        try {
+            localStorage.setItem(key, JSON.stringify(arr));
+        } catch (e) {
+            console.error("Failed to save to localStorage:", e);
+        }
+    }
+
+    function hideNote(noteId) {
+        if (!noteId) return;
+        var hiddenNotes = getStorageArray("wun_hidden_notes");
+        if (!hiddenNotes.includes(noteId)) {
+            hiddenNotes.push(noteId);
+            setStorageArray("wun_hidden_notes", hiddenNotes);
+        }
+        var cards = document.querySelectorAll('.feed-note-card[data-note-card-id="' + CSS.escape(noteId) + '"], [data-note-id="' + CSS.escape(noteId) + '"]');
+        cards.forEach(function(card) {
+            card.remove();
+        });
+        if (typeof showToast === "function") {
+            showToast("Note hidden from feed", "info");
+        }
+    }
+
+    function muteAuthor(pubkey, authorName) {
+        if (!pubkey) return;
+        var muted = getStorageArray("wun_muted_pubkeys");
+        if (!muted.includes(pubkey)) {
+            muted.push(pubkey);
+            setStorageArray("wun_muted_pubkeys", muted);
+        }
+        var cards = document.querySelectorAll('.feed-note-card[data-pubkey="' + CSS.escape(pubkey) + '"], .feed-note-card[data-author-pubkey="' + CSS.escape(pubkey) + '"]');
+        cards.forEach(function(card) {
+            card.remove();
+        });
+        var label = authorName ? "@" + authorName : "Author";
+        if (typeof showToast === "function") {
+            showToast("Muted " + label, "info");
+        }
+    }
+
+    function blockAuthor(pubkey, authorName) {
+        if (!pubkey) return;
+        var blocked = getStorageArray("wun_blocked_pubkeys");
+        if (!blocked.includes(pubkey)) {
+            blocked.push(pubkey);
+            setStorageArray("wun_blocked_pubkeys", blocked);
+        }
+        var cards = document.querySelectorAll('.feed-note-card[data-pubkey="' + CSS.escape(pubkey) + '"], .feed-note-card[data-author-pubkey="' + CSS.escape(pubkey) + '"]');
+        cards.forEach(function(card) {
+            card.remove();
+        });
+        if (typeof closeDockedChat === "function") {
+            closeDockedChat(pubkey);
+        }
+        var label = authorName ? "@" + authorName : "Author";
+        if (typeof showToast === "function") {
+            showToast("Blocked " + label, "warning");
+        }
+    }
+
+    window.hideNote = hideNote;
+    window.muteAuthor = muteAuthor;
+    window.blockAuthor = blockAuthor;
     window.createPoll = createPoll;
     window.translateNote = translateNote;
     window.toggleOriginalNote = toggleOriginalNote;

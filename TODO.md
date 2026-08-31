@@ -77,8 +77,21 @@
   - Anchor a fixed bottom-right dock trigger (`#floating-chat-dock` / `#floating-chat-root`) across all views with unread counter badges and contact roster popover — **Done 2026-08-30**
 - [x] **18.2 Multi-Window Docked Chat Panes:**
   - Support minimized/expanded bottom conversation windows for active 1-on-1 peer chats without leaving `/feed` or `/gallery` — **Done 2026-08-30**
-- [x] **18.3 In-Feed Message Trigger Integration:**
-  - Wire `[ 💬 Message ]` buttons on note cards and profile headers to open a docked bottom chat pane rather than forcing full-page navigation to `/chat` — **Done 2026-08-30**
+### Phase 19: Client-Side Self-Moderation & Mute Lists
+- [x] **19.1 Kebab Dropdown Moderation Actions:**
+  - Add `[ 🙈 Hide this Note ]`, `[ 🔇 Mute @author ]`, and `[ 🚫 Block @author ]` actions inside card kebab menus across `_thread_post.html` and `feed_interactions.js` — **Done 2026-08-30**
+- [x] **19.2 Real-Time Stream Filtration:**
+  - Enhance `circle_feed_filter.js` to dynamically filter out hidden notes, muted pubkeys, and blocked pubkeys stored in `localStorage` — **Done 2026-08-30**
+- [x] **19.3 Dashboard Moderation Management Roster:**
+  - Add client-side moderation management card under `/dashboard#settings` with dynamic item removal and list clearing (`[ Unmute ]`, `[ Unblock ]`, `[ Unhide ]`) — **Done 2026-08-30**
+
+### Phase 20: XMPP / Converse.js Live Provisioning & Floating Messenger Sync
+- [ ] **20.1 Prosody Account Provisioning & Token Exchange:**
+  - Implement `/api/chat/auth/` backend endpoint to verify authenticated DID session and provision/return ephemeral BOSH/WebSocket credentials for Prosody XMPP daemon.
+- [ ] **20.2 Converse.js Headless Binding to Floating Chat:**
+  - Bind Converse.js headless connection events directly to `#floating-chat-root` and active `#docked-chat-windows` for bi-directional live delivery across all views.
+- [ ] **20.3 Fallback NIP-04/NIP-17 Nostr DM Transport:**
+  - Implement encrypted direct message fallback over Nostr relays when peer XMPP JID is offline or unreachable.
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

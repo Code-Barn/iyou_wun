@@ -1032,6 +1032,26 @@ class AttachSocialCountsTests(TestCase):
         self.assertNotIn("wine", iyou_names)
 
 
+class FeedModerationContractTest(TestCase):
+    """Verifies that feed notes carry author and id metadata required for self-moderation."""
+
+    def test_feed_notes_contain_moderation_identifiers(self):
+        events = {
+            "mod1": make_event(
+                "mod1",
+                1,
+                pubkey="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+                content="Self-moderation target post",
+            ),
+        }
+        res = process_into_feed(events)
+        self.assertEqual(len(res["roots"]), 1)
+        root = res["roots"][0]
+        self.assertEqual(root["id"], "mod1")
+        self.assertEqual(root["pubkey"], "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d")
+        self.assertTrue(root["npub"].startswith("npub1"))
+
+
 
 
 

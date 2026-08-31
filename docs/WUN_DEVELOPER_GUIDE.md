@@ -859,7 +859,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-Tests cover (**343 total across 7 test modules**; ruff clean):
+Tests cover (**347 total across 7 test modules**; ruff clean):
 
 ### `test_auth.py` (20 tests)
 - `MyOIDCAuthenticationBackendTest` — DID-based user creation (5)
@@ -868,9 +868,9 @@ Tests cover (**343 total across 7 test modules**; ruff clean):
 - `OIDCBackendEnforcementTest` — OIDC backend registered, LOGIN_URL points to IdP (3)
 - `OIDCLogoutViewTest` — PKCE logout accepts GET + POST and redirects to IdP (3)
 
-### `test_views.py` (111 tests)
+### `test_views.py` (114 tests)
 - `HomeViewTest` — root redirect to /feed (1)
-- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification, jump-to-top button render, floating chat dock render (9)
+- `DashboardViewTest` — anonymous redirect to IdP, authenticated DID display, logout link, stream language filter selector, feed hygiene controls verification, jump-to-top button render, floating chat dock render, client-side moderation management roster & empty states (11)
 - `JwksConnectivityTest` — JWKS discovery/connectivity (1)
 - `ChatViewTest` — anonymous redirect, Converse init + lifecycle plugin, `?peer=` auto-join & peer_target context, nav links (14)
 - `GalleryViewTest` — media heading, nav links, tab context (4 — public-read)
@@ -879,7 +879,7 @@ Tests cover (**343 total across 7 test modules**; ruff clean):
 - `MediaUploadProxyViewTest` — Blossom proxy behavior incl. dynamic endpoint resolution (6)
 - `FeedViewTrustLensContractTest` — Level0/0.5/1 trust pill contract (6)
 - `FeedViewTwoTierToolbarTest` — two-tier nav toolbar, circle scope badge, live tag search (5)
-- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions, Open Graph metadata, NIP-56 report actions, separate subheader links & jump to root conversation, scoped trending switcher & NSFW shield toggle, [ ⚡ iyou ] circle filter pill & LinkDeck author scoping, data-lang card decoration, on-demand note translation endpoint (`/api/translate/`) & inline UI trigger button (19)
+- `FeedModernizationAndExternalAttributionTest` — inline media, hero threading, action bar, cursor pagination, batch reply + like counts, kebab actions (including hide/mute/block self-moderation), Open Graph metadata, NIP-56 report actions, separate subheader links & jump to root conversation, scoped trending switcher & NSFW shield toggle, [ ⚡ iyou ] circle filter pill & LinkDeck author scoping, data-lang card decoration, on-demand note translation endpoint (`/api/translate/`) & inline UI trigger button (20)
 - `SearchAPITests` — `/api/search/` JSON schema, handle/name/hashtag filtering, nav dropdown DOM, toast container (4)
 - `CyberGritErrorViewTests` — branded cyber-grit 404 & 500 error views, route disconnected / internal transmission fault copy, socket retry (18)
 - `NotificationViewTests` — authenticated bell toggle, slide-out drawer markup, `/notifications` ledger tabs (Mentions/Reactions/Zaps) (4)
@@ -887,12 +887,13 @@ Tests cover (**343 total across 7 test modules**; ruff clean):
 - `ProfileComposerTests` — profile view quick note composer rendering and submission (2)
 - `I18nViewTest` — `/i18n/setlanguage/` cookie dispatch & Spanish feed UI translation (2)
 
-### `test_feed.py` (65 tests)
+### `test_feed.py` (66 tests)
 - `ProcessIntoFeedTest` — kind routing, reaction grouping/dedup, sovereignty flag, profile enrichment, sort/truncation, malformed events, poll extraction + scope tags + vote grouping, multi-relay dedup, NIP-10 tree builder, positional/unmarked tag parsing, batch reply counts, **batch Kind-7 reaction counts** (50)
 - `RelayPoolAndFailoverTests` — `relay_req` failover on primary down, all-relays-down → `{}`, NIP-65 (Kind 10002) relay parsing, empty-pubkey guard, unified-feed relay-outage grace, federated ancestor fallback relays (6)
 - `FeedSanitizerTests` — XSS sanitization, HTML stripping, URI scheme filtering, auto-linkification, roster telemetry & hex concatenation noise pruning, NIP-01/heuristic language detection (5)
 - `AttachSocialCountsTests` — social reaction and reply count aggregation across relay responses, scoped trending tags stream calculation (3)
 - `FeedRelayHealthWidgetLayoutTest` — relay health indicator widget layout and dynamic state rendering (2)
+- `FeedModerationContractTest` — feed notes carry author and id metadata required for self-moderation (1)
 
 ### `test_gallery.py` (32 tests)
 - `CategorizeMediaTest` — MIME grouping, NIP-94 extraction, duration/blurhash/blossom_hash, mixed media, wildcards (21)
@@ -920,6 +921,52 @@ Tests cover (**343 total across 7 test modules**; ruff clean):
 - `VerifyChallengeAPITests` + `VerifyConfirmSwapTests` — POA challenge/confirm + discriminator swap (16)
 - `VerifiedBadgeRenderingTests` — verified badges on deck card/profile hero (4)
 
+
+---
+
+## §14: Decentralized Moderation & Safety Architecture
+
+iyou_wun implements a multi-tier sovereign moderation architecture that balances network openness with user-controlled feed hygiene:
+
+1. **NIP-36 Sensitive Content & Content Warnings (`["content-warning", "..."]`):**
+   - Media and text cards flagged with NIP-36 tags are enclosed in a `.content-warning-shield` overlay.
+   - Users can toggle their shield mode via `#nsfw-filter-toggle` in the top nav or `/dashboard#settings`:
+     - `BLUR`: Blurs media with a 1-click reveal overlay [Default].
+     - `SHOW`: Bypasses all blurs and renders media inline.
+     - `HIDE`: Completely hides flagged posts from the stream.
+
+2. **Client-Side Self-Moderation Actions (`hideNote`, `muteAuthor`, `blockAuthor`):**
+   - Located inside the kebab dropdown menu (`•••`) of every note card:
+     - **Hide Note (`hideNote(noteId)`):** Hides specific note instances locally; persists note ID to `localStorage.wun_hidden_notes`.
+     - **Mute Author (`muteAuthor(pubkey, authorName)`):** Suppresses all notes from the author across the active session and future loads; persists to `localStorage.wun_muted_pubkeys`.
+     - **Block Author (`blockAuthor(pubkey, authorName)`):** Suppresses notes and terminates/closes any open docked chat pane; persists to `localStorage.wun_blocked_pubkeys`.
+   - **Dashboard Roster (`/dashboard#settings`):** Renders interactive rosters for Muted Accounts, Blocked Accounts, and Hidden Notes with one-click `[ Unmute ]`, `[ Unblock ]`, `[ Unhide ]`, and `[ Clear All ]` operations.
+
+3. **NIP-56 Moderation Reports (`["report", ...]` / Kind 1984):**
+   - Users can flag abusive or spam notes via the `🚩 Report / Flag Note` modal.
+   - Submits structured NIP-56 reporting events directly to relays for federated operator processing.
+
+---
+
+## §15: Chat & Instant Messaging State (Known Debt)
+
+iyou_wun integrates both a dedicated `/chat` full-page view and a persistent `#floating-chat-root` dock messenger across all views.
+
+### Architectural Blueprint:
+- **Presentation Layer:**
+  - `templates/chat.html`: Embedded Converse.js full-screen client.
+  - `templates/includes/_floating_chat_dock.html` + `static/js/floating_chat.js`: Multi-window bottom conversation docks for 1-on-1 chats.
+  - Profile & Note Card Triggers: `[ 💬 Message ]` buttons invoke `openDockedChat(peerNpub, authorName, avatar)`.
+
+### Known Technical Debt & Phase 20 Roadmap:
+1. **Prosody Credential Handshake (`/api/chat/auth/`):**
+   - Currently, Converse.js connects to a standard websocket/BOSH endpoint (`/http-bind/` or `wss://chat.iyou.me`).
+   - Phase 20 will implement `/api/chat/auth/` to exchange authenticated DID session tokens for ephemeral Prosody SASL/BOSH tokens automatically.
+2. **Headless Converse.js Dock Binding:**
+   - Active docked chat windows in `floating_chat.js` currently simulate message dispatch and receive local mock bubbles.
+   - Phase 20 will bind `converse.plugins.add` hooks directly into `floating_chat.js` to dispatch and receive live XMPP stanzas headless.
+3. **NIP-04/NIP-17 Nostr DM Fallback Transport:**
+   - For peers without an active XMPP JID, provide seamless fallback encryption over Nostr relays.
 
 ---
 

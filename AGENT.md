@@ -112,7 +112,7 @@ uv run python manage.py test apps.core
 uv run ruff check .
 ```
 
-343 unit tests across 7 modules: `test_auth` (20), `test_views` (111), `test_feed` (65), `test_deck` (85), `test_gallery` (32), `test_issuance` (20), `test_contacts` (10). Ruff: clean.
+347 unit tests across 7 modules: `test_auth` (20), `test_views` (114), `test_feed` (66), `test_deck` (85), `test_gallery` (32), `test_issuance` (20), `test_contacts` (10). Ruff: clean.
 
 
 ---

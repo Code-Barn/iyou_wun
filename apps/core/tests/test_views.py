@@ -111,6 +111,26 @@ class DashboardViewTest(TestCase):
         self.assertContains(response, 'id="chat-roster-popover"')
         self.assertContains(response, "floating_chat.js")
 
+    def test_dashboard_renders_moderation_management_roster(self):
+        user = User.objects.create_user(username="did:iyou:0xmodroster")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="moderation-roster-container"')
+        self.assertContains(response, 'id="muted-accounts-list"')
+        self.assertContains(response, 'id="blocked-accounts-list"')
+        self.assertContains(response, 'id="hidden-notes-list"')
+        self.assertContains(response, "Client-Side Moderation &amp; Muted Accounts")
+
+    def test_dashboard_renders_moderation_empty_placeholders(self):
+        user = User.objects.create_user(username="did:iyou:0xmodempty")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "No muted accounts.")
+        self.assertContains(response, "No blocked accounts.")
+        self.assertContains(response, "No hidden notes.")
+
 
 class JwksConnectivityTest(TestCase):
     """Pings the IdP's JWKS endpoint to verify connectivity.
@@ -733,6 +753,21 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "Set Enclave Petname")
         self.assertContains(response, "View Raw JSON")
         self.assertContains(response, "Copy Event ID / Link")
+
+    def test_kebab_menu_contains_self_moderation_actions(self):
+        relay_events = {
+            "kebab_mod_note": make_event("kebab_mod_note", 1, content="Testing moderation actions in kebab!"),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "hideNote('kebab_mod_note')")
+        self.assertContains(response, "muteAuthor(")
+        self.assertContains(response, "blockAuthor(")
+        self.assertContains(response, "Hide this Note")
+        self.assertContains(response, "Mute @")
+        self.assertContains(response, "Block @")
 
     def test_inline_reply_composer_rendered_and_no_legacy_reply_triggers(self):
         relay_events = {

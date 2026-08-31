@@ -218,13 +218,30 @@
         var nsfwPref = "blur";
         var streamLang = "all";
         var noisePref = true;
+        var hiddenNotes = [];
+        var mutedPubkeys = [];
+        var blockedPubkeys = [];
         try {
             nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
             streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
             var rawNoise = localStorage.getItem("wun_noise_pref");
             noisePref = (rawNoise !== "false" && rawNoise !== "disabled");
+            var rawHidden = localStorage.getItem("wun_hidden_notes");
+            if (rawHidden) hiddenNotes = JSON.parse(rawHidden);
+            var rawMuted = localStorage.getItem("wun_muted_pubkeys");
+            if (rawMuted) mutedPubkeys = JSON.parse(rawMuted);
+            var rawBlocked = localStorage.getItem("wun_blocked_pubkeys");
+            if (rawBlocked) blockedPubkeys = JSON.parse(rawBlocked);
         } catch (e) {}
-        return { nsfwPref: nsfwPref, streamLang: streamLang, langPref: streamLang, noisePref: noisePref };
+        return {
+            nsfwPref: nsfwPref,
+            streamLang: streamLang,
+            langPref: streamLang,
+            noisePref: noisePref,
+            hiddenNotes: hiddenNotes,
+            mutedPubkeys: mutedPubkeys,
+            blockedPubkeys: blockedPubkeys
+        };
     }
 
     function checkSafetyAndHygieneMatch(card, data) {
@@ -232,6 +249,33 @@
         var nsfwPref = prefs.nsfwPref;
         var streamLang = prefs.streamLang;
         var noisePref = prefs.noisePref;
+        var hiddenNotes = prefs.hiddenNotes;
+        var mutedPubkeys = prefs.mutedPubkeys;
+        var blockedPubkeys = prefs.blockedPubkeys;
+
+        // 0. Self-Moderation: Hidden Notes, Muted & Blocked Pubkeys
+        var noteId = (card.dataset && (card.dataset.noteCardId || card.dataset.noteId)) ||
+                     card.getAttribute("data-note-card-id") ||
+                     card.getAttribute("data-note-id") ||
+                     (data && data.root && (data.root.dataset && (data.root.dataset.noteCardId || data.root.dataset.noteId)));
+        if (noteId && hiddenNotes.includes(noteId)) {
+            return false;
+        }
+
+        var pubkey = (data && data.pubkey) ||
+                     (card.dataset && (card.dataset.pubkey || card.dataset.authorPubkey)) ||
+                     card.getAttribute("data-pubkey") ||
+                     card.getAttribute("data-author-pubkey") || "";
+        pubkey = normalizeKey(pubkey);
+
+        if (pubkey) {
+            if (mutedPubkeys.some(function(k) { return normalizeKey(k) === pubkey; })) {
+                return false;
+            }
+            if (blockedPubkeys.some(function(k) { return normalizeKey(k) === pubkey; })) {
+                return false;
+            }
+        }
 
         // 1. Noise Gate Check
         if (noisePref && (
@@ -395,8 +439,9 @@
             const data = getCardNoteData(card);
             const matchCircle = checkCircleMatch(activeCircle, data.pubkey, data.did, card);
             const matchSearch = checkSearchMatch(activeSearchQuery, data);
+            const matchSafety = checkSafetyAndHygieneMatch(card, data);
 
-            const isVisible = matchCircle && matchSearch;
+            const isVisible = matchCircle && matchSearch && matchSafety;
             if (isVisible) {
                 card.style.display = "";
                 card.classList.remove("hidden");
