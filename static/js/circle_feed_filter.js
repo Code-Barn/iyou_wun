@@ -394,6 +394,14 @@
             if (card.id === "circle-empty-state") return;
             const data = getCardNoteData(card);
 
+            // 0. Empty & Discovery Beacon Check
+            const bodyText = (card.querySelector('.note-body-content')?.textContent || '').trim();
+            const hasMedia = card.querySelector('img, video, audio') !== null;
+            if (!bodyText && !hasMedia) {
+                card.classList.add('sr-hidden');
+                return;
+            }
+
             const matchCircle = checkCircleMatch(activeCircle, data.pubkey, data.did, card);
             const matchSearch = checkSearchMatch(activeSearchQuery, data);
             const matchSafety = checkSafetyAndHygieneMatch(card, data);

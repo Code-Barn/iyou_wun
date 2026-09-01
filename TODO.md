@@ -150,6 +150,23 @@
   - `#gallery-pagination-sentinel` with IntersectionObserver loading more media cards and re-hydrating Plyr/audio players without page reloads.
 - [x] **25.4 Tests:** `test_gallery_view_renders_plyr_and_categorized_decks`, `test_api_gallery_cursor_pagination` — **Done 2026-08-31**
 
+### Phase 26: Feed Sanitization, Empty Note Suppression & P2P Discovery Noise Gate
+- [x] **26.1 Ingestion Sanitization & Renderability Guard (`apps/core/nip10.py`):**
+  - Implemented `is_renderable_note(event: dict) -> bool` to suppress empty discovery beacons (miasma-peer, p2p-beacons, relay-ping, node-discovery) and blank Kind 1 events without attached media.
+  - Media tags (imeta, url, image, thumb) allow empty content to pass through.
+- [x] **26.2 Server-Side Filtering in Pipeline Functions (`apps/core/views.py`):**
+  - Added `is_renderable_note` filtering in `fetch_unified_feed()`, `api_feed()`, and `fetch_thread()` before building thread trees.
+  - Also integrated into `process_into_feed()` for comprehensive coverage.
+- [x] **26.3 Client-Side Sequential Filtering & Build Guard:**
+  - Added empty/non-renderable content check in `circle_feed_filter.js` `applyFilters()` to hide cards without body text or media.
+  - Added `isRenderableNote()` guard in `feed_interactions.js` `buildCardHtml()` to prevent rendering of non-renderable notes.
+- [x] **26.4 Unit Tests (`apps/core/tests/test_feed.py`):**
+  - `test_is_renderable_note_drops_empty_content_without_media`: Asserts notes with empty content and no media tags return False.
+  - `test_is_renderable_note_allows_empty_content_with_media_tag`: Asserts notes with empty content but media tags return True.
+  - `test_is_renderable_note_drops_p2p_discovery_beacons`: Asserts notes with P2P discovery tags return False.
+  - `test_fetch_unified_feed_omits_non_renderable_events`: Verifies filtering in the feed pipeline.
+- [x] **26.5 TODO.md Updated:** Documented Phase 26 implementation — **Done 2026-08-31**
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

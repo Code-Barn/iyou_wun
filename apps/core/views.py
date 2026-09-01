@@ -595,6 +595,13 @@ def api_feed(request):
 
     raw_events = relay_req(filter_obj, relay_urls=relays)
 
+    # Filter out non-renderable events (empty notes, P2P discovery beacons)
+    from .nip10 import is_renderable_note
+    if isinstance(raw_events, dict):
+        raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
+    elif isinstance(raw_events, list):
+        raw_events = [e for e in raw_events if is_renderable_note(e)]
+
     # Multi-relay event deduplication by ID
     deduped_events = {}
     if isinstance(raw_events, dict):
@@ -1266,6 +1273,10 @@ def fetch_thread(thread_id, relay_urls=None):
 
     combined = {**pool, **descendants_raw}
 
+    # Filter out non-renderable events (empty notes, P2P discovery beacons)
+    from .nip10 import is_renderable_note
+    combined = {eid: e for eid, e in combined.items() if is_renderable_note(e)}
+
     pubkeys = set()
     for e in combined.values():
         pk = e.get("pubkey")
@@ -1496,8 +1507,14 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     if profiles is None:
         profiles = {}
 
-    from .nip10 import build_thread_tree, sanitize_event_content
+    from .nip10 import build_thread_tree, sanitize_event_content, is_renderable_note
     from datetime import datetime
+
+    # Filter out non-renderable events (empty notes, P2P discovery beacons)
+    if isinstance(raw_events, dict):
+        raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
+    elif isinstance(raw_events, list):
+        raw_events = [e for e in raw_events if is_renderable_note(e)]
 
     # Normalize and deduplicate input raw_events
     if isinstance(raw_events, list):
@@ -1829,6 +1846,10 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
         filter_obj["authors"] = authors
 
     raw_events = relay_req(filter_obj, relay_urls=relay_urls)
+
+    # Filter out non-renderable events (empty notes, P2P discovery beacons)
+    from .nip10 import is_renderable_note
+    raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
 
     pubkeys = set()
     for e in raw_events.values():

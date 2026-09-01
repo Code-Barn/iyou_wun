@@ -21,6 +21,35 @@
 
     window.pendingReply = null;
 
+    // ---------- Renderability Check ----------
+
+    function isRenderableNote(note) {
+        if (!note) return false;
+        var content = (note.content || "").trim();
+        var tags = note.tags || [];
+
+        // Suppress P2P mesh discovery tags and multiaddr beacons
+        var p2pTags = ["miasma-peer", "p2p-beacon", "relay-ping", "node-discovery"];
+        for (var i = 0; i < tags.length; i++) {
+            var tag = tags[i];
+            if (!Array.isArray(tag) || tag.length < 2) continue;
+            if (tag[0] === "t" && p2pTags.indexOf(tag[1].toLowerCase()) !== -1) return false;
+            if (["multiaddr", "peer_addr", "peer_id"].indexOf(tag[0]) !== -1) return false;
+        }
+
+        // If content is present, it is renderable
+        if (content) return true;
+
+        // If content is empty, check if media tags exist (NIP-94 / imeta / image URLs)
+        for (var j = 0; j < tags.length; j++) {
+            var t = tags[j];
+            if (Array.isArray(t) && t.length >= 2 && ["imeta", "url", "image", "thumb"].indexOf(t[0]) !== -1) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     // ---------- Post (Kind 1) ----------
 
@@ -469,6 +498,9 @@
 
     function buildCardHtml(note) {
         if (!note) return "";
+        if (!isRenderableNote(note)) {
+            return '';
+        }
         var noteId = note.id || "";
         var pubkey = note.pubkey || note.pubkey_hex || "";
         var npub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "You");

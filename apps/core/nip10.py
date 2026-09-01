@@ -211,6 +211,42 @@ PORTUGUESE_WORDS = {
 }
 
 
+def is_renderable_note(event: dict) -> bool:
+    """
+    Determines if a Kind 1 note contains human-renderable content or media.
+    Suppresses empty discovery beacons (e.g. miasma-peer, p2p-beacons) and
+    blank Kind 1 events that lack attached media.
+    """
+    if not isinstance(event, dict):
+        return False
+
+    content = (event.get("content") or "").strip()
+    tags = event.get("tags") or []
+
+    # Suppress P2P mesh discovery tags and multiaddr beacons
+    p2p_tags = {"miasma-peer", "p2p-beacon", "relay-ping", "node-discovery"}
+    for tag in tags:
+        if not isinstance(tag, (list, tuple)) or len(tag) < 2:
+            continue
+        if tag[0] == "t" and tag[1].lower() in p2p_tags:
+            return False
+        if tag[0] in ("multiaddr", "peer_addr", "peer_id"):
+            return False
+
+    # If content is present, it is renderable
+    if content:
+        return True
+
+    # If content is empty, check if media tags exist (NIP-94 / imeta / image URLs)
+    has_media_tag = any(
+        isinstance(t, (list, tuple))
+        and len(t) >= 2
+        and t[0] in ("imeta", "url", "image", "thumb")
+        for t in tags
+    )
+    return has_media_tag
+
+
 def detect_language(event_or_content):
     """Detect language ISO 639-1 code from NIP-01 ["lang", "<code>"] tags, script heuristics, or stop-words.
 

@@ -1257,3 +1257,76 @@ class FeedPhase24Test(TestCase):
         self.assertContains(response, "Public relay note test")
         self.assertNotContains(response, "🌐 Mesh")
 
+
+class IsRenderableNoteTest(TestCase):
+    """Phase 26: Feed Sanitization & P2P Discovery Noise Gate Tests."""
+
+    def test_is_renderable_note_drops_empty_content_without_media(self):
+        """Notes with content: "" and no media tags return False."""
+        from ..nip10 import is_renderable_note
+        event = {"id": "e1", "kind": 1, "content": "", "tags": []}
+        self.assertFalse(is_renderable_note(event))
+
+    def test_is_renderable_note_allows_empty_content_with_media_tag(self):
+        """Notes with content: "" but [["imeta", ...]] return True."""
+        from ..nip10 import is_renderable_note
+        event = {"id": "e1", "kind": 1, "content": "", "tags": [["imeta", "url", "https://example.com/image.png"]]}
+        self.assertTrue(is_renderable_note(event))
+
+    def test_is_renderable_note_drops_p2p_discovery_beacons(self):
+        """Notes with ["t", "miasma-peer"] or ["multiaddr", "..."] return False even if non-empty."""
+        from ..nip10 import is_renderable_note
+        # Test miasma-peer tag
+        event1 = {"id": "e1", "kind": 1, "content": "Discovery beacon", "tags": [["t", "miasma-peer"]]}
+        self.assertFalse(is_renderable_note(event1))
+        # Test p2p-beacon tag
+        event2 = {"id": "e2", "kind": 1, "content": "Another beacon", "tags": [["t", "p2p-beacon"]]}
+        self.assertFalse(is_renderable_note(event2))
+        # Test relay-ping tag
+        event3 = {"id": "e3", "kind": 1, "content": "Ping", "tags": [["t", "relay-ping"]]}
+        self.assertFalse(is_renderable_note(event3))
+        # Test node-discovery tag
+        event4 = {"id": "e4", "kind": 1, "content": "Node discovery", "tags": [["t", "node-discovery"]]}
+        self.assertFalse(is_renderable_note(event4))
+        # Test multiaddr tag
+        event5 = {"id": "e5", "kind": 1, "content": "Multiaddr", "tags": [["multiaddr", "/ip4/1.2.3.4/tcp/1234"]]}
+        self.assertFalse(is_renderable_note(event5))
+        # Test peer_addr tag
+        event6 = {"id": "e6", "kind": 1, "content": "Peer addr", "tags": [["peer_addr", "1.2.3.4"]]}
+        self.assertFalse(is_renderable_note(event6))
+        # Test peer_id tag
+        event7 = {"id": "e7", "kind": 1, "content": "Peer id", "tags": [["peer_id", "abc123"]]}
+        self.assertFalse(is_renderable_note(event7))
+
+    def test_fetch_unified_feed_omits_non_renderable_events(self):
+        """Simulates an incoming batch containing discovery events and verifies they are excluded."""
+        from ..views import fetch_unified_feed
+        from unittest.mock import patch
+        from .helpers import make_event
+
+        # Create a mix of renderable and non-renderable events
+        renderable_event = make_event("r1", 1, content="Hello world")
+        p2p_beacon_event = make_event("b1", 1, content="", tags=[["t", "miasma-peer"]])
+        empty_no_media_event = make_event("e1", 1, content="")
+        media_event = make_event("m1", 1, content="", tags=[["imeta", "url", "https://example.com/image.png"]])
+
+        # Mock relay_req to return our test events
+        test_events = {
+            "r1": renderable_event,
+            "b1": p2p_beacon_event,
+            "e1": empty_no_media_event,
+            "m1": media_event,
+        }
+
+        with patch("apps.core.views.relay_req", return_value=test_events):
+            feed_data = fetch_unified_feed(limit=50)
+
+        # Only renderable events should be in the feed
+        # renderable_event (r1) and media_event (m1) should be present
+        # p2p_beacon_event (b1) and empty_no_media_event (e1) should be filtered out
+        root_ids = [r["id"] for r in feed_data["roots"]]
+        self.assertIn("r1", root_ids)
+        self.assertIn("m1", root_ids)
+        self.assertNotIn("b1", root_ids)
+        self.assertNotIn("e1", root_ids)
+
