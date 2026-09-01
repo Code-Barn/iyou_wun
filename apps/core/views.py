@@ -3180,7 +3180,14 @@ class MediaUploadProxyView(View):
 
 @csrf_exempt
 def api_translate(request):
-    """Translate note content on-demand with caching and resilient fallback simulation."""
+    """Translate note content on-demand with caching and resilient fallback.
+    
+    POST /api/translate/ with JSON payload:
+    {"text": "<string>", "source_lang": "<lang>", "target_lang": "en"}
+    
+    Sanitizes input, limits to 1000 characters, uses external translation
+    service with 4-second timeout, and provides resilient fallback.
+    """
     if request.method != "POST":
         return JsonResponse({"error": "Method not allowed. POST required."}, status=405)
 
@@ -3193,8 +3200,12 @@ def api_translate(request):
     source_lang = (data.get("source_lang") or "auto").strip().lower()
     target_lang = (data.get("target_lang") or "en").strip().lower()
 
+    # Sanitize input and limit max length to 1000 characters
     if not text:
         return JsonResponse({"error": "Missing text to translate."}, status=400)
+    
+    if len(text) > 1000:
+        return JsonResponse({"error": "Text exceeds maximum length of 1000 characters."}, status=400)
 
     # 1. Cache Check
     text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -3225,7 +3236,7 @@ def api_translate(request):
                 data=req_data,
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=4) as resp:
                 res = json.loads(resp.read().decode("utf-8"))
                 translated_text = res.get("translatedText")
         except Exception as e:
@@ -3248,7 +3259,7 @@ def api_translate(request):
         if lowered in translations_dict:
             translated_text = translations_dict[lowered]
         else:
-            translated_text = f"[Translated] {text}"
+            translated_text = "[Translation unavailable - network timeout]"
 
     # Cache for 24 hours
     try:

@@ -73,11 +73,10 @@
       <div class="flex items-center gap-2">
         {% if note.lang and note.lang != 'en' %}
         <button type="button" 
-                class="translate-btn text-[11px] font-mono text-slate-400 hover:text-violet-500 transition inline-flex items-center gap-1 mr-2"
-                data-note-id="{{ note.id }}"
-                data-source-lang="{{ note.lang }}"
-                onclick="translateNote('{{ note.id }}', '{{ note.lang }}', 'en')">
-          <span>🌐 {% trans "Translate" %}</span>
+                class="translate-btn inline-flex items-center gap-1 text-[11px] font-mono text-slate-400 hover:text-violet-500 mr-2 transition"
+                onclick="translateNote(this, '{{ note.id }}', '{{ note.lang }}')">
+          <span>🌐</span>
+          <span class="translate-label">Translate</span>
         </button>
         {% endif %}
 

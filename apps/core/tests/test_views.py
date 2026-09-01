@@ -2187,7 +2187,7 @@ class Phase24ViewsTest(TestCase):
         self.assertEqual(res_unknown.status_code, 200)
         data_unknown = res_unknown.json()
         self.assertTrue(data_unknown["success"])
-        self.assertIn("[Translated]", data_unknown["translated_text"])
+        self.assertIn("[Translation unavailable", data_unknown["translated_text"])
 
     def test_api_translate_empty_text_returns_400(self):
         url = reverse("api_translate")
@@ -2209,3 +2209,72 @@ class Phase24ViewsTest(TestCase):
             self.assertEqual(data["notes"], [])
             self.assertEqual(data["thread_replies"], {})
             self.assertFalse(data["has_more"])
+
+    def test_api_translate_endpoint_post(self):
+        """Asserts POST /api/translate/ returns 200 with JSON payload."""
+        url = reverse("api_translate")
+        response = self.client.post(
+            url,
+            data=json.dumps({"text": "Hello world", "source_lang": "en", "target_lang": "es"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertIn("translated_text", data)
+        self.assertIn("source_lang", data)
+        self.assertIn("target_lang", data)
+
+    def test_api_translate_with_spanish_text(self):
+        """Asserts Spanish text gets translated in mock fallback."""
+        url = reverse("api_translate")
+        response = self.client.post(
+            url,
+            data=json.dumps({"text": "¡hola mundo!", "source_lang": "es", "target_lang": "en"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        # The mock translator should handle this known phrase
+        self.assertEqual(data["translated_text"], "Hello world!")
+
+    def test_api_translate_exceeds_max_length_returns_400(self):
+        """Asserts text exceeding 1000 characters returns 400 error."""
+        url = reverse("api_translate")
+        long_text = "a" * 1001
+        response = self.client.post(
+            url,
+            data=json.dumps({"text": long_text, "source_lang": "en", "target_lang": "es"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+
+class TranslationUITest(TestCase):
+    """Phase 27: Translation UI Tests."""
+
+    def test_thread_post_omits_translate_button_for_english_notes(self):
+        """Asserts notes with lang='en' do not render .translate-btn."""
+        from unittest.mock import patch
+        from .helpers import make_event
+        
+        # Create an English note
+        english_event = make_event("e1", 1, content="Hello world", tags=[])
+        
+        with patch("apps.core.views.relay_req", return_value={"e1": english_event}):
+            response = self.client.get(reverse("feed"))
+        
+        self.assertEqual(response.status_code, 200)
+        # Check that translate-btn is NOT in the response for English notes
+        self.assertNotContains(response, 'class="translate-btn')
+        
+        # Now test with a non-English note
+        spanish_event = make_event("e2", 1, content="Hola mundo", tags=[["lang", "es"]])
+        
+        with patch("apps.core.views.relay_req", return_value={"e2": spanish_event}):
+            response = self.client.get(reverse("feed"))
+        
+        self.assertEqual(response.status_code, 200)
+        # Check that translate-btn IS in the response for Spanish notes
+        self.assertContains(response, 'class="translate-btn')

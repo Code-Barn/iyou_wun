@@ -167,6 +167,29 @@
   - `test_fetch_unified_feed_omits_non_renderable_events`: Verifies filtering in the feed pipeline.
 - [x] **26.5 TODO.md Updated:** Documented Phase 26 implementation — **Done 2026-08-31**
 
+### Phase 27: Language Detection Calibration & Live Translation Pipeline
+- [x] **27.1 Strict ASCII & English Bias in detect_language() (`apps/core/nip10.py`):**
+  - Strips URLs, mentions (`@...`, `nostr:...`), and code snippets before character distribution analysis.
+  - Classifies as `"en"` when >= 85% ASCII, no foreign script characters, and no accented diacritics.
+  - Preserves instant triggers for non-Latin scripts (Japanese, Korean, Chinese, Cyrillic, Arabic, Thai, Greek, Hebrew).
+- [x] **27.2 Translation API Endpoint (`POST /api/translate/`):**
+  - Sanitizes input, limits to 1000 characters, uses external service with 4-second timeout.
+  - Returns JSON with `success`, `translated_text`, `source_lang`, `target_lang` fields.
+  - Fallback message: `[Translation unavailable - network timeout]` for offline/failed requests.
+- [x] **27.3 Route Registration (`apps/core/urls.py`):**
+  - Registered `path("api/translate/", views.api_translate, name="api_translate")`.
+- [x] **27.4 Translation UI (`templates/includes/_thread_post.html`):**
+  - Added translate button rendering only when `note.lang` is present and not English.
+- [x] **27.5 Client-Side Translation (`static/js/feed_interactions.js`):**
+  - Implemented `translateNote(btn, noteId, sourceLang)` with toggle state, loading indicator, and cached original text.
+- [x] **27.6 Unit Tests:**
+  - `test_detect_language_classifies_ascii_tech_posts_as_english` in test_feed.py.
+  - `test_detect_language_classifies_cjk_and_accents_correctly` in test_feed.py.
+  - `test_api_translate_endpoint_post`, `test_api_translate_with_spanish_text`, `test_api_translate_empty_text_returns_400`, `test_api_translate_exceeds_max_length_returns_400` in test_views.py.
+  - `test_thread_post_omits_translate_button_for_english_notes` in test_views.py.
+- [x] **27.7 TODO.md Updated:** Documented Phase 27 implementation — **Done 2026-08-31**
+
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

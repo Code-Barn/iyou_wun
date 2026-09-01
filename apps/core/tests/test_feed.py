@@ -1330,3 +1330,57 @@ class IsRenderableNoteTest(TestCase):
         self.assertNotIn("b1", root_ids)
         self.assertNotIn("e1", root_ids)
 
+
+class LanguageDetectionCalibrationTest(TestCase):
+    """Phase 27: Language Detection Calibration Tests."""
+
+    def test_detect_language_classifies_ascii_tech_posts_as_english(self):
+        """Asserts Hacker News, URLs, and code snippets return 'en'."""
+        from ..nip10 import detect_language
+        
+        # ASCII tech post with URLs
+        tech_post = "Check out this new Nostr client at https://github.com/nostr/nostr and https://nostr.net"
+        self.assertEqual(detect_language(tech_post), "en")
+        
+        # ASCII with mentions
+        mention_post = "Hey @user1 @user2 check out this relay wss://relay.damus.io"
+        self.assertEqual(detect_language(mention_post), "en")
+        
+        # ASCII with code snippets
+        code_post = "The fix is: `npm install -g nostr-relay` and then `relay start`"
+        self.assertEqual(detect_language(code_post), "en")
+        
+        # ASCII nostr URI
+        nostr_uri_post = "This is a note reference: nostr:note1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqwqqqqq"
+        self.assertEqual(detect_language(nostr_uri_post), "en")
+        
+        # Pure ASCII text
+        ascii_text = "This is a simple English text without any special characters."
+        self.assertEqual(detect_language(ascii_text), "en")
+
+    def test_detect_language_classifies_cjk_and_accents_correctly(self):
+        """Asserts Japanese, Thai, Spanish, and German samples resolve to expected codes."""
+        from ..nip10 import detect_language
+        
+        # Japanese text
+        self.assertEqual(detect_language("こんにちは、ノストラ！"), "ja")
+        self.assertEqual(detect_language("日本語のテスト"), "ja")
+        
+        # Thai text
+        self.assertEqual(detect_language("สวัสดีชาวโลก"), "th")
+        
+        # Spanish text with accents
+        self.assertEqual(detect_language("¡Hola mundo! ¿Cómo estás?"), "es")
+        
+        # German text with umlauts
+        self.assertEqual(detect_language("Guten Morgen! Wie geht es dir? äöü"), "de")
+        
+        # French text
+        self.assertEqual(detect_language("Bonjour le monde! Comment ça va?"), "fr")
+        
+        # Chinese text
+        self.assertEqual(detect_language("你好，世界！"), "zh")
+        
+        # Cyrillic text
+        self.assertEqual(detect_language("Привет, мир!"), "ru")
+

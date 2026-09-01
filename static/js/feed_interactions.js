@@ -1771,43 +1771,38 @@
 
     // ---------- Inline Note Translation Engine ----------
 
-    function translateNote(noteId, sourceLang, targetLang) {
-        targetLang = targetLang || "en";
-        sourceLang = sourceLang || "auto";
-
-        var card = document.querySelector('[data-note-card-id="' + noteId + '"]') || document.querySelector('.feed-note-card[data-note-id="' + noteId + '"]');
-        if (!card) return;
-
-        var btn = card.querySelector('.translate-btn[data-note-id="' + noteId + '"]') || card.querySelector('.translate-btn');
-        var transBox = document.getElementById('translated-box-' + noteId);
-        var transText = document.getElementById('trans-text-' + noteId);
-        var transLabel = document.getElementById('trans-label-' + noteId);
+    function translateNote(btn, noteId, sourceLang) {
+        var targetLang = "en";
+        
+        // Locate the note body element
+        var card = btn.closest('[data-note-card-id]') || btn.closest('.feed-note-card');
         var bodyContent = card.querySelector('.note-body-content');
+        if (!bodyContent) return;
 
-        if (!transBox || !transText || !bodyContent) return;
-
-        // If already translated, toggle between original and translated
-        if (transBox.getAttribute("data-translated") === "true") {
-            if (transBox.classList.contains("hidden")) {
-                bodyContent.classList.add("hidden");
-                transBox.classList.remove("hidden");
-                if (btn) btn.innerHTML = '<span>🌐 View Original</span>';
-            } else {
-                transBox.classList.add("hidden");
-                bodyContent.classList.remove("hidden");
-                if (btn) btn.innerHTML = '<span>🌐 View Translation</span>';
+        // Toggle state
+        // If currently showing translation: restore cached original text and set label back to Translate
+        var translateLabel = card.querySelector('.translate-label');
+        if (btn.getAttribute('data-showing-translation') === 'true') {
+            var originalText = btn.getAttribute('data-original-content');
+            if (originalText) {
+                bodyContent.innerHTML = originalText;
             }
+            btn.removeAttribute('data-showing-translation');
+            btn.removeAttribute('data-original-content');
+            if (translateLabel) translateLabel.textContent = 'Translate';
             return;
         }
 
-        var originalText = bodyContent.innerText || bodyContent.textContent || "";
+        // If showing original: display loading indicator, call API, cache original, replace body, update label
+        var originalText = bodyContent.innerHTML || bodyContent.textContent || "";
         if (!originalText.trim()) return;
 
-        var prevBtnHtml = btn ? btn.innerHTML : "";
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<span>🌐 Translating...</span>';
-        }
+        // Store original content
+        btn.setAttribute('data-original-content', originalText);
+        
+        // Show loading state
+        if (translateLabel) translateLabel.textContent = 'Translating...';
+        btn.disabled = true;
 
         fetch('/api/translate/', {
             method: 'POST',
@@ -1823,32 +1818,27 @@
         })
         .then(function (res) {
             if (!res.ok) {
-                if (typeof showToast === 'function') {
-                    showToast('Translation service unavailable', 'warning');
-                }
                 throw new Error('Translation failed with HTTP ' + res.status);
             }
             return res.json();
         })
         .then(function (data) {
             if (data && data.success && data.translated_text) {
-                transText.textContent = data.translated_text;
-                if (transLabel) {
-                    transLabel.textContent = 'TRANSLATED FROM ' + (sourceLang || 'AUTO').toUpperCase();
-                }
-                bodyContent.classList.add('hidden');
-                transBox.classList.remove('hidden');
-                transBox.setAttribute("data-translated", "true");
-                if (btn) {
-                    btn.innerHTML = '<span>🌐 View Original</span>';
-                }
+                bodyContent.innerHTML = data.translated_text;
+                btn.setAttribute('data-showing-translation', 'true');
+                if (translateLabel) translateLabel.textContent = 'View Original';
             } else {
-                if (typeof showToast === 'function') {
-                    showToast('Translation service unavailable', 'warning');
-                }
                 throw new Error((data && data.error) || 'Translation error');
             }
         })
+        .catch(function (err) {
+            if (typeof showToast === 'function') {
+                showToast('Translation unavailable: ' + err.message, 'warning');
+            }
+        })
+        .finally(function () {
+            btn.disabled = false;
+        });
         .catch(function (err) {
             console.error('Translation error:', err);
             if (btn) {
