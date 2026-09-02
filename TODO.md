@@ -353,6 +353,29 @@
   - Updated `test_chat_renders_script_type_module` (UMD/`window.converse`) and hardened `test_chat_jid_uses_pubkey_hex` to assert the rendered pubkey-based JID without the brittle `split("jid:")[1]` heuristic that the base.html session-DID injection disturbed.
 - [x] **36.5 Validation:** `node --check static/js/bridge_client.js`, `manage.py check`, full `apps.core` suite (438 passing), `ruff check .` — all clean — **Done 2026-09-01**
 
+### Phase 36 (Cont): Relay Switchboard Sync, Instant Profile Shell, Empty State Fix & NIP-05 Endpoint
+- [x] **36.6 Relay Switchboard Sync (`static/js/feed_interactions.js`, `apps/core/views.py`):**
+  - Added `getActiveRelays()` helper function to read enabled relay URLs from `localStorage` (`wun_custom_relays`) or `window.relayPool.getRelays()`.
+  - Modified `fetchInitialFeedStream()` and `loadMoreNotes()` to serialize enabled relay URLs and append as `&relays=` parameter to `/api/feed` requests.
+- [x] **36.7 Empty State Teardown (`static/js/feed_interactions.js`):**
+  - Enhanced `appendNoteToFeed()` to explicitly add `hidden` class to `#feed-empty-state` and `#circle-empty-state` elements when note cards are rendered.
+- [x] **36.8 Client Relays Parameter Support (`apps/core/views.py`):**
+  - Updated `api_feed()` to parse `request.GET.get("relays")` JSON list, validate relay URLs, and pass to `relay_req(filter_obj, relay_urls=client_relays)`. Falls back to default relays when parameter is absent or empty.
+- [x] **36.9 Instant Profile Shell (`apps/core/views.py`, `templates/profile.html`):**
+  - Refactored `ProfileView` to resolve local metadata immediately without blocking on remote relay fetches.
+  - Returns profile shell immediately with `hydrate_profile=True` flag, empty `posts`/`replies`/`media_assets` for client-side async loading.
+  - Implemented `api_profile_notes()` endpoint at `/api/profile/<str:identifier>/notes/` with 2.0s deadline, returns `{"notes": [...], "has_more": bool}`.
+- [x] **36.10 Profile Shell Hydration (`templates/profile.html`):**
+  - Added 3 pulsing skeleton cards in posts container while notes load.
+  - Added client-side fetch script calling `api_profile_notes` on DOMContentLoaded, swapping skeleton cards for rendered notes via `appendNoteToFeed()`.
+- [x] **36.11 Z-Index Stacking Fix (`templates/includes/_standard_header.html`):**
+  - Updated `#persona-switcher-dropdown` to include `z-50` and `overflow-hidden` classes with `mt-2` spacing for Layer 1 dropdown isolation.
+- [x] **36.12 NIP-05 Endpoint Enhancement (`apps/core/views.py`, `apps/core/urls.py`):**
+  - Existing `nip05_well_known()` endpoint already supports `?name=<handle>` resolution with CORS header, returns proper JSON mapping.
+  - Verified URL registration at `.well-known/nostr.json`.
+- [x] **36.13 Phase 36 Tests (`apps/core/tests/test_views.py`):**
+  - Added `Phase36RelaySyncTest`, `Phase36NIP05EndpointTest`, `Phase36ProfileNotesAPITest` with comprehensive test coverage.
+
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

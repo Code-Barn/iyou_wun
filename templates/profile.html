@@ -164,13 +164,35 @@
 
   <!-- Tab Panels -->
   <!-- 1. Posts Panel -->
-  <div id="tab-posts" class="tab-panel space-y-3">
+  <div id="tab-posts" class="tab-panel space-y-3" 
+       {% if hydrate_profile %}data-hydrate-profile="true" data-identifier="{{ target_pubkey_hex }}"{% endif %}>
     {% for note in posts %}
     <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
       {% include "includes/_thread_post.html" with note=note %}
     </div>
     {% empty %}
+    <!-- Skeleton loading cards for instant profile shell -->
+    {% if hydrate_profile %}
+    <div id="profile-skeleton-container" class="space-y-3">
+      {% for i in "123" %}
+      <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 animate-pulse space-y-3">
+        <div class="flex items-center gap-3">
+          <div class="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-800"></div>
+          <div class="space-y-1.5 flex-1">
+            <div class="h-3.5 bg-slate-200 dark:bg-slate-800 rounded w-1/4"></div>
+            <div class="h-2.5 bg-slate-200 dark:bg-slate-800 rounded w-1/6"></div>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-full"></div>
+          <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-5/6"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
     <div class="text-center py-12 text-slate-400 font-mono text-xs">No posts authored by this creator.</div>
+    {% endif %}
     {% endfor %}
   </div>
 
@@ -260,6 +282,56 @@
         });
       });
     });
+
+    // Profile Notes Hydration: Fetch notes asynchronously for instant profile shell
+    var profilePanel = document.getElementById("tab-posts");
+    if (profilePanel && profilePanel.getAttribute("data-hydrate-profile") === "true") {
+      var identifier = profilePanel.getAttribute("data-identifier");
+      var skeletonContainer = document.getElementById("profile-skeleton-container");
+      var postsContainer = profilePanel;
+      
+      fetch("/api/profile/" + encodeURIComponent(identifier) + "/notes/?limit=50")
+        .then(function(response) {
+          if (!response.ok) throw new Error("Failed to fetch profile notes");
+          return response.json();
+        })
+        .then(function(data) {
+          // Remove skeleton loading cards
+          if (skeletonContainer) {
+            skeletonContainer.remove();
+          }
+          
+          var notes = data.notes || [];
+          if (notes.length === 0) {
+            // Show empty state if no notes found
+            var emptyDiv = document.createElement("div");
+            emptyDiv.className = "text-center py-12 text-slate-400 font-mono text-xs";
+            emptyDiv.textContent = "No posts authored by this creator.";
+            postsContainer.appendChild(emptyDiv);
+            return;
+          }
+          
+          // Append each note to the posts container
+          notes.forEach(function(note) {
+            if (window.appendNoteToFeed && typeof window.appendNoteToFeed === "function") {
+              window.appendNoteToFeed(note, postsContainer, {});
+            } else {
+              // Fallback: create a basic card for the note
+              var noteDiv = document.createElement("div");
+              noteDiv.className = "bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800";
+              noteDiv.innerHTML = '<div class="flex items-center gap-3"><img src="' + (note.author_avatar || "{% static 'img/mesh_avatar_default.svg' %}") + '" alt="" class="w-9 h-9 rounded-full object-cover"> <div><div class="font-medium text-sm text-slate-900 dark:text-slate-100">' + (note.author_name || "Anonymous") + '</div><div class="text-xs text-slate-400 font-mono">@' + (note.pubkey_hex || "").substring(0, 12) + '...</div></div></div><div class="mt-3 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-line">' + (note.display_content || note.content || "") + '</div>';
+              postsContainer.appendChild(noteDiv);
+            }
+          });
+        })
+        .catch(function(error) {
+          console.error("Failed to hydrate profile notes:", error);
+          // Remove skeleton and show error on failure
+          if (skeletonContainer) {
+            skeletonContainer.remove();
+          }
+        });
+    }
 
     // Scan for Trust Lens aliases
     if (window.TrustLens && typeof window.TrustLens.scanDOM === "function") {

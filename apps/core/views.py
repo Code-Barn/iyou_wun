@@ -751,6 +751,7 @@ def api_feed(request):
     until = request.GET.get("until")
     limit = request.GET.get("limit", 25)
     tag = request.GET.get("tag")
+    client_relays_json = request.GET.get("relays")
 
     try:
         limit = int(limit)
@@ -758,7 +759,29 @@ def api_feed(request):
         limit = 25
 
     user_pubkey = did_to_pubkey(request.user.username) if (request.user and request.user.is_authenticated) else None
-    relays = get_relays_for_request(request)
+    
+    # Handle client-provided relay URLs
+    client_relays = None
+    if client_relays_json:
+        try:
+            client_relays = json.loads(client_relays_json)
+            if isinstance(client_relays, list) and len(client_relays) > 0:
+                # Validate that these are relay URLs
+                validated_relays = []
+                for relay in client_relays:
+                    if isinstance(relay, str) and (relay.startswith("ws://") or relay.startswith("wss://")):
+                        validated_relays.append(relay)
+                client_relays = validated_relays if validated_relays else None
+            else:
+                client_relays = None
+        except (json.JSONDecodeError, TypeError):
+            client_relays = None
+    
+    # Use client relays if provided, otherwise fall back to default
+    if client_relays:
+        relays = client_relays
+    else:
+        relays = get_relays_for_request(request)
 
 
     filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
@@ -942,6 +965,122 @@ def api_feed(request):
         "trending_tags_iyou": trending_tags_iyou,
         "trending_tags_global": trending_tags_global,
         "trending_tags": trending_tags_iyou or trending_tags_global,
+    })
+
+
+def api_profile_notes(request, identifier):
+    """Async endpoint for fetching profile notes (Kind 1) from relays.
+    
+    Route: GET /api/profile/<str:identifier>/notes/
+    Asynchronously fetches authored notes (Kind 1) from relays with a 2.0s deadline.
+    Returns JSON: {"notes": [...], "has_more": bool}
+    """
+    hex_pubkey, _ = resolve_universal_identifier(identifier)
+    if not hex_pubkey:
+        return JsonResponse({"notes": [], "has_more": False, "error": "Invalid identifier"}, status=400)
+    
+    limit = request.GET.get("limit", 50)
+    until = request.GET.get("until")
+    
+    try:
+        limit = int(limit)
+        if limit > 100:
+            limit = 100
+        elif limit < 1:
+            limit = 1
+    except (ValueError, TypeError):
+        limit = 50
+    
+    filter_obj = {"kinds": [1], "authors": [hex_pubkey], "limit": limit}
+    if until:
+        try:
+            filter_obj["until"] = int(until)
+        except (ValueError, TypeError):
+            pass
+    
+    # Set a 2.0s deadline for the relay request to avoid blocking
+    deadline = time.time() + 2.0
+    relays = get_relays_for_request(request)
+    
+    try:
+        raw_events = relay_req(filter_obj, relay_urls=relays, deadline=deadline)
+    except Exception as e:
+        logger.debug("api_profile_notes relay_req failed: %s", e)
+        raw_events = {}
+    
+    # Process and deduplicate events
+    from .nip10 import is_renderable_note
+    deduped_events = {}
+    if isinstance(raw_events, dict):
+        for eid, e in raw_events.items():
+            real_id = e.get("id") or eid
+            if real_id and real_id not in deduped_events and is_renderable_note(e):
+                deduped_events[real_id] = e
+    elif isinstance(raw_events, list):
+        for e in raw_events:
+            real_id = e.get("id")
+            if real_id and real_id not in deduped_events and is_renderable_note(e):
+                deduped_events[real_id] = e
+    
+    # Sort by created_at descending
+    sorted_events = sorted(deduped_events.values(), key=lambda x: x.get("created_at", 0), reverse=True)
+    
+    # Check if we likely have more results
+    has_more = len(sorted_events) >= limit
+    
+    # Fetch profile data for enrichment (quick fetch with deadline)
+    profile = {}
+    try:
+        profile_deadline = time.time() + 0.5  # 500ms for profile fetch
+        profile_events = relay_req(
+            {"kinds": [0], "authors": [hex_pubkey], "limit": 1},
+            relay_urls=relays,
+            deadline=profile_deadline
+        )
+        if profile_events:
+            events_list = list(profile_events.values()) if isinstance(profile_events, dict) else profile_events
+            if events_list:
+                try:
+                    profile = json.loads(events_list[0].get("content", "{}"))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+    except Exception:
+        pass
+    
+    # Enrich events with profile data
+    notes = []
+    for e in sorted_events:
+        note = {
+            "id": e.get("id", ""),
+            "pubkey": e.get("pubkey", hex_pubkey),
+            "pubkey_hex": e.get("pubkey", hex_pubkey),
+            "created_at": e.get("created_at", 0),
+            "created_at_epoch": e.get("created_at", 0),
+            "content": e.get("content", ""),
+            "kind": e.get("kind", 1),
+            "tags": e.get("tags", []),
+            "sig": e.get("sig", ""),
+            "author_name": profile.get("name") or profile.get("display_name") or "",
+            "author_avatar": profile.get("picture") or "",
+            "author_did": "",
+            "display_content": e.get("content", ""),
+            "media_attachments": [],
+            "repost_count": 0,
+            "reply_count": 0,
+            "like_count": 0,
+            "is_sovereign": False,
+        }
+        notes.append(note)
+    
+    # Get oldest timestamp for pagination
+    oldest_timestamp = None
+    if sorted_events and len(sorted_events) > 0:
+        oldest_timestamp = sorted_events[-1].get("created_at")
+    
+    return JsonResponse({
+        "notes": notes,
+        "has_more": has_more,
+        "oldest_timestamp": oldest_timestamp,
     })
 
 
@@ -2549,15 +2688,64 @@ class ProfileView(TemplateView):
             context["error"] = f"Peer Not Found on Mesh: {identifier}"
             return context
 
-        profile = fetch_profile_data(hex_pubkey)
-        context["profile"] = profile
+        # Instant Profile Shell: Resolve local metadata immediately without blocking on relays
+        # Set hydration flag for client-side async note loading
+        context["hydrate_profile"] = True
 
-        # Owner resolution & UserLinkDeck
+        # Fast local profile resolution - use UserLinkDeck data if available
+        profile = {}
         owner_user = None
-        for candidate in UserModel.objects.only("username").iterator():
-            if did_to_pubkey(candidate.username) == hex_pubkey:
-                owner_user = candidate
-                break
+        owner_deck = None
+        
+        # Try to find owner user more efficiently
+        try:
+            # Direct lookup by username if it matches hex_pubkey
+            if len(hex_pubkey) >= 32:
+                owner_user = UserModel.objects.filter(username=hex_pubkey).first()
+            if not owner_user:
+                # Try to find user by DID that maps to this pubkey
+                for candidate in UserModel.objects.only("username").iterator():
+                    if did_to_pubkey(candidate.username) == hex_pubkey:
+                        owner_user = candidate
+                        break
+        except Exception:
+            pass
+
+        if owner_user:
+            owner_deck = getattr(owner_user, "link_deck", None)
+            if owner_deck:
+                profile = {
+                    "name": getattr(owner_deck, "display_name", "") or owner_deck.handle or "",
+                    "display_name": getattr(owner_deck, "display_name", "") or "",
+                    "about": owner_deck.headline or "",
+                    "picture": owner_deck.avatar_url or "",
+                    "banner": owner_deck.banner_url or "",
+                    "nip05": getattr(owner_deck, "nip05", "") or "",
+                    "lud16": getattr(owner_deck, "lud16", "") or "",
+                }
+        
+        # If no local deck found, try a quick relay fetch with deadline to avoid blocking
+        if not profile.get("name") and not profile.get("display_name"):
+            deadline = time.time() + 1.0  # 1 second deadline
+            try:
+                quick_events = relay_req(
+                    {"kinds": [0], "authors": [hex_pubkey], "limit": 1}, 
+                    relay_urls=get_relays_for_request(self.request),
+                    deadline=deadline
+                )
+                if quick_events and isinstance(quick_events, (dict, list)):
+                    events_list = list(quick_events.values()) if isinstance(quick_events, dict) else quick_events
+                    if events_list and len(events_list) > 0:
+                        latest_event = events_list[0]
+                        try:
+                            profile_content = json.loads(latest_event.get("content", "{}"))
+                            profile.update(profile_content)
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+            except Exception:
+                pass  # Ignore errors to avoid blocking
+
+        context["profile"] = profile
 
         author_did = owner_user.username if owner_user else ""
         context["target_did"] = author_did
@@ -2571,7 +2759,6 @@ class ProfileView(TemplateView):
         )
         context["is_owner"] = is_owner
 
-        owner_deck = getattr(owner_user, "link_deck", None) if owner_user else None
         context["owner_deck"] = owner_deck
         context["link_deck"] = owner_deck
 
@@ -2590,88 +2777,13 @@ class ProfileView(TemplateView):
             else ""
         )
 
-        # Author Activity Streams: query notes authored by this user
-        from .nip10 import parse_nip10_tags, _enrich_root
-        raw_events = relay_req({"kinds": [1, 1063, 1111, 30023], "authors": [hex_pubkey], "limit": 50})
-
-        deduped_events = {}
-        if isinstance(raw_events, dict):
-            for eid, e in raw_events.items():
-                real_id = e.get("id") or eid
-                if real_id and real_id not in deduped_events:
-                    deduped_events[real_id] = e
-        elif isinstance(raw_events, list):
-            for e in raw_events:
-                real_id = e.get("id")
-                if real_id and real_id not in deduped_events:
-                    deduped_events[real_id] = e
-
-        profiles_cache = {hex_pubkey: profile}
-
-        def _ts_to_dt(ts):
-            if isinstance(ts, datetime):
-                return ts
-            return datetime.fromtimestamp(ts or 0)
-
-        posts = []
-        replies = []
-        media_assets = []
-
-        for eid, e in deduped_events.items():
-            kind = e.get("kind", 1)
-            if kind not in (1, 1063, 1111, 30023):
-                continue
-            tags = e.get("tags", [])
-
-            root_id, parent_id, marker, mention_ids, reply_to_pubkey = parse_nip10_tags(tags)
-
-            note = _enrich_root(e, kind, profiles_cache, _ts_to_dt, root_id=root_id, parent_id=parent_id, reply_to_pubkey=reply_to_pubkey)
-            note["author_avatar"] = profile.get("picture", "")
-            note["author_name"] = profile.get("name", "")
-
-            # If Kind 1063 or has media attachments
-            if note.get("media_attachments") or kind == 1063 or note.get("media_url"):
-                for m in note.get("media_attachments", []):
-                    media_assets.append({
-                        "id": note["id"],
-                        "media_url": m.get("url"),
-                        "media_type": m.get("type", "image"),
-                        "display_title": note.get("display_content", note.get("content", "")),
-                        "is_sovereign": note.get("is_sovereign", False),
-                        "created_at": note["created_at"],
-                    })
-                if kind == 1063 and not note.get("media_attachments") and note.get("media_url"):
-                    media_assets.append({
-                        "id": note["id"],
-                        "media_url": note.get("media_url"),
-                        "media_type": note.get("media_type", "image"),
-                        "display_title": note.get("alt_text", "") or note.get("content", ""),
-                        "is_sovereign": note.get("is_sovereign", False),
-                        "created_at": note["created_at"],
-                    })
-
-            is_reply = bool(kind == 1111 or parent_id or marker == "reply")
-            if is_reply:
-                replies.append(note)
-            else:
-                posts.append(note)
-
-        relays = get_relays_for_request(self.request)
-        posts = attach_social_counts(posts, relay_urls=relays)
-        replies = attach_social_counts(replies, relay_urls=relays)
-        posts.sort(key=lambda x: x["created_at"], reverse=True)
-        replies.sort(key=lambda x: x["created_at"], reverse=True)
-        media_assets.sort(key=lambda x: x["created_at"], reverse=True)
-
-
-        context["posts"] = posts
-        context["replies"] = replies
-        context["media_assets"] = media_assets
-        context["broadcasts"] = posts  # backwards compatibility
-
-        sovereign_score = sum(1 for m in media_assets if m.get("is_sovereign"))
-        context["sovereign_score"] = sovereign_score
-        context["media"] = media_assets
+        # For instant shell: return empty lists for posts/replies/media - client will fetch async
+        context["posts"] = []
+        context["replies"] = []
+        context["media_assets"] = []
+        context["media"] = []
+        context["broadcasts"] = []
+        context["sovereign_score"] = 0
 
         return context
 

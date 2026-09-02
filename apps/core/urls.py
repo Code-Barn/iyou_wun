@@ -30,6 +30,7 @@ urlpatterns = [
     path('chat', views.ChatView.as_view(), name='chat'),
     path('api/relays', views.api_relays, name='api_relays'),
     path('api/feed', views.api_feed, name='api_feed'),
+    path('api/profile/<str:identifier>/notes/', views.api_profile_notes, name='api_profile_notes'),
     path('api/search/', views.api_search, name='api_search'),
     path('api/translate/', views.api_translate, name='api_translate'),
     path('api/chat/session/', views.api_chat_session, name='api_chat_session'),

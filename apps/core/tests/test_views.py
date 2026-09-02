@@ -2960,3 +2960,138 @@ class TranslationUITest(TestCase):
         self.assertEqual(response.status_code, 200)
         # Check that translate-btn IS in the response for Spanish notes
         self.assertContains(response, 'class="translate-btn')
+
+
+class Phase36RelaySyncTest(TestCase):
+    """Phase 36: Relay Switchboard Sync tests."""
+
+    def test_api_feed_respects_client_relays_parameter(self):
+        """Test that api_feed endpoint uses client-provided relays when available."""
+        custom_relays = ["wss://custom.relay.com", "wss://another.relay.com"]
+        
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            # Call without custom relays
+            response = self.client.get("/api/feed")
+            self.assertEqual(response.status_code, 200)
+            
+            # Call with custom relays
+            response = self.client.get("/api/feed?relays=" + json.dumps(custom_relays))
+            self.assertEqual(response.status_code, 200)
+            
+            # Verify that relay_req was called with the custom relays
+            self.assertTrue(mock_relay_req.called)
+            # Get the last call's kwargs
+            last_call_kwargs = mock_relay_req.call_args[1]
+            self.assertIn("relay_urls", last_call_kwargs)
+            self.assertEqual(last_call_kwargs["relay_urls"], custom_relays)
+
+    def test_api_feed_falls_back_to_default_relays(self):
+        """Test that api_feed falls back to default relays when client relays not provided."""
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            with patch("apps.core.views.get_relays_for_request", return_value=["wss://default.relay.com"]):
+                response = self.client.get("/api/feed")
+                self.assertEqual(response.status_code, 200)
+                
+                # Verify fallback to default relays
+                last_call_kwargs = mock_relay_req.call_args[1]
+                self.assertIn("relay_urls", last_call_kwargs)
+                self.assertEqual(last_call_kwargs["relay_urls"], ["wss://default.relay.com"])
+
+
+class Phase36NIP05EndpointTest(TestCase):
+    """Phase 36: NIP-05 endpoint tests."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="did:test:123")
+        self.deck = UserLinkDeck.objects.create(
+            user=self.user,
+            handle="testuser",
+            is_public=True
+        )
+
+    def test_nip05_well_known_resolves_claimed_handle(self):
+        """Test that GET /.well-known/nostr.json?name=testuser returns proper JSON mapping."""
+        # Patch did_to_pubkey to return a known pubkey
+        with patch("apps.core.views.did_to_pubkey", return_value="abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"):
+            response = self.client.get("/.well-known/nostr.json", {"name": "testuser"})
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            
+            # Check JSON structure
+            self.assertIn("names", data)
+            self.assertIn("relays", data)
+            
+            # Check handle mapping
+            self.assertIn("testuser", data["names"])
+            self.assertEqual(data["names"]["testuser"], "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+            
+            # Check CORS header
+            self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+
+    def test_nip05_well_known_returns_empty_for_missing_handle(self):
+        """Test that non-existent handles return empty names dict."""
+        response = self.client.get("/.well-known/nostr.json", {"name": "nonexistent"})
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("names", data)
+        self.assertEqual(data["names"], {})
+
+    def test_nip05_well_known_returns_empty_for_missing_name(self):
+        """Test that missing name parameter returns empty names dict."""
+        response = self.client.get("/.well-known/nostr.json")
+        
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn("names", data)
+
+
+class Phase36ProfileNotesAPITest(TestCase):
+    """Phase 36: Profile notes API tests."""
+
+    def test_api_profile_notes_returns_json_stream(self):
+        """Test that the profile notes API returns 200 response with proper JSON structure."""
+        test_pubkey = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+        
+        # Mock the resolve_universal_identifier to return our test pubkey
+        with patch("apps.core.views.resolve_universal_identifier", return_value=(test_pubkey, "npub1test")):
+            with patch("apps.core.views.relay_req", return_value={}):
+                response = self.client.get("/api/profile/npub1test/notes/")
+                
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                
+                # Check JSON structure
+                self.assertIn("notes", data)
+                self.assertIn("has_more", data)
+                self.assertIsInstance(data["notes"], list)
+                self.assertIsInstance(data["has_more"], bool)
+
+    def test_api_profile_notes_handles_invalid_identifier(self):
+        """Test that invalid identifier returns 400 response."""
+        with patch("apps.core.views.resolve_universal_identifier", return_value=(None, None)):
+            response = self.client.get("/api/profile/invalid/notes/")
+            
+            self.assertEqual(response.status_code, 400)
+            data = response.json()
+            self.assertIn("error", data)
+
+    def test_api_profile_notes_with_limit_and_until_params(self):
+        """Test that limit and until parameters are processed correctly."""
+        test_pubkey = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+        
+        with patch("apps.core.views.resolve_universal_identifier", return_value=(test_pubkey, "npub1test")):
+            with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+                response = self.client.get("/api/profile/npub1test/notes/?limit=25&until=1234567890")
+                
+                self.assertEqual(response.status_code, 200)
+                
+                # Verify that relay_req was called with correct parameters
+                first_call_args = mock_relay_req.call_args_list[0]
+                filter_obj = first_call_args[0][0] if first_call_args and first_call_args[0] else {}
+                
+                self.assertEqual(filter_obj.get("limit"), 25)
+                self.assertEqual(filter_obj.get("until"), 1234567890)
+                self.assertEqual(filter_obj.get("kinds"), [1])
+                self.assertIn(test_pubkey, filter_obj.get("authors", []))

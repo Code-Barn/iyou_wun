@@ -204,6 +204,53 @@
 
     window.handleSignedEvent = handleSignedEvent;
 
+    // ---------- Relay Pool Sync Helpers ----------
+
+    function getActiveRelays() {
+        // Try to get custom relays from localStorage first
+        var customRelays = [];
+        try {
+            var stored = localStorage.getItem("wun_custom_relays");
+            if (stored) {
+                customRelays = JSON.parse(stored);
+            }
+        } catch (e) {
+            console.debug("Could not read wun_custom_relays from localStorage:", e);
+        }
+        
+        // If no custom relays or error, try window.relayPool
+        if (!customRelays || customRelays.length === 0) {
+            if (window.relayPool && typeof window.relayPool.getRelays === "function") {
+                try {
+                    var poolRelays = window.relayPool.getRelays();
+                    if (poolRelays && poolRelays.length > 0) {
+                        customRelays = poolRelays;
+                    }
+                } catch (e) {
+                    console.debug("Could not get relays from window.relayPool:", e);
+                }
+            }
+        }
+        
+        // Filter to only enabled/active relay URLs
+        var enabledRelays = [];
+        if (Array.isArray(customRelays)) {
+            enabledRelays = customRelays.filter(function(relay) {
+                // Handle objects with url/enabled properties or just strings
+                if (typeof relay === "string") {
+                    return relay.trim().length > 0 && (relay.startsWith("ws://") || relay.startsWith("wss://"));
+                } else if (relay && typeof relay === "object") {
+                    return relay.enabled !== false && relay.url && relay.url.trim().length > 0 && (relay.url.startsWith("ws://") || relay.url.startsWith("wss://"));
+                }
+                return false;
+            }).map(function(relay) {
+                return typeof relay === "string" ? relay.trim() : relay.url.trim();
+            });
+        }
+        
+        return enabledRelays.length > 0 ? enabledRelays : null;
+    }
+
     // ---------- Button Loading State ----------
 
     function setButtonLoading(loading) {
@@ -992,6 +1039,16 @@
             container.appendChild(wrapper);
             checkAndApplyClamping(wrapper);
             hydrateLocalTimestamps(wrapper);
+            
+            // Hide empty state elements when cards are rendered
+            var feedEmptyState = document.getElementById("feed-empty-state");
+            var circleEmptyState = document.getElementById("circle-empty-state");
+            if (feedEmptyState) {
+                feedEmptyState.classList.add("hidden");
+            }
+            if (circleEmptyState) {
+                circleEmptyState.classList.add("hidden");
+            }
 
             if (note.kind === 30023) {
                 var newForm = wrapper.querySelector(".poll-vote-form");
@@ -1043,6 +1100,12 @@
 
         var queryUrl = "/api/feed?limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
         if (tag) queryUrl += "&tag=" + encodeURIComponent(tag);
+        
+        // Add active relays from client storage to sync with server
+        var activeRelays = getActiveRelays();
+        if (activeRelays && activeRelays.length > 0) {
+            queryUrl += "&relays=" + encodeURIComponent(JSON.stringify(activeRelays));
+        }
 
         fetch(queryUrl)
             .then(function (r) { return r.json(); })
@@ -1136,6 +1199,12 @@
         var queryUrl = "/api/feed?until=" + until + "&limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
         if (tag) {
             queryUrl += "&tag=" + encodeURIComponent(tag);
+        }
+        
+        // Add active relays from client storage to sync with server
+        var activeRelays = getActiveRelays();
+        if (activeRelays && activeRelays.length > 0) {
+            queryUrl += "&relays=" + encodeURIComponent(JSON.stringify(activeRelays));
         }
 
         fetch(queryUrl)
