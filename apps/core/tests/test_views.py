@@ -987,6 +987,15 @@ class BackupGraphTest(TestCase):
         self.assertIn("isMixedContentRelay", src)
         self.assertIn("window.showToast", src)
 
+    def test_relay_pool_persists_enabled_toggles_across_reloads(self):
+        src = (settings.BASE_DIR / "static" / "js" / "relay_pool.js").read_text()
+        self.assertIn("getActiveRelayCount", src)
+        self.assertIn("if (r.enabled === false) return;", src)
+        self.assertIn("persistRelays", src)
+        self.assertIn("enabled: r.enabled !== false", src)
+        self.assertIn("if (enabledMap.hasOwnProperty(norm)) {\n                    r.enabled = enabledMap[norm];", src)
+        self.assertIn("if (record.enabled === false) {\n            record.status = \"offline\";", src)
+
     def test_feed_interactions_carries_phase33_proxy_fallback(self):
         src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()
         self.assertIn("/api/blossom/proxy/", src)

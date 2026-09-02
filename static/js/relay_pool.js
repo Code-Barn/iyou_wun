@@ -104,9 +104,9 @@
         });
 
         // 2. Load stored custom relays from localStorage
+        var enabledMap = {};
         try {
             var stored = localStorage.getItem(STORAGE_KEY);
-            var enabledMap = {};
             try {
                 var customStored = localStorage.getItem(CUSTOM_STORAGE_KEY);
                 if (customStored) {
@@ -185,6 +185,22 @@
                 }
             }
         } catch (e) { /* ignore */ }
+
+        // Apply persisted enabled-state toggles to EXISTING pool records
+        // (bootstrap + previously stored relays) so a disabled relay stays
+        // demoted from read/write/broadcast loops across reloads instead of
+        // reverting to the built-in enabled default.
+        if (enabledMap && Object.keys(enabledMap).length > 0) {
+            self.relays.forEach(function (r, norm) {
+                if (enabledMap.hasOwnProperty(norm)) {
+                    r.enabled = enabledMap[norm];
+                    if (r.enabled === false) {
+                        r.status = "offline";
+                        r.lastProbe = null;
+                    }
+                }
+            });
+        }
 
         // 4. Initial probe and periodic probe
         if (typeof window !== "undefined") {
@@ -447,6 +463,14 @@
         var norm = normalizeUrl(url);
         var record = this.relays.get(norm);
         if (!record) return Promise.resolve({ url: url, status: "offline", latencyMs: null });
+
+        // Disabled (switchboard toggle off) relays are never probed — demoted
+        // until re-enabled. Prevents the periodic probe from flipping them back
+        // to "online" and hitting the network on their behalf.
+        if (record.enabled === false) {
+            record.status = "offline";
+            return Promise.resolve({ url: record.url, status: "offline", latencyMs: record.latencyMs });
+        }
 
         // Plain ws:// relays (e.g. the loopback 127.0.0.1:9003 enclave) cannot be
         // probed from an HTTPS origin — the browser blocks the socket outright as
