@@ -1143,23 +1143,36 @@
     }
 
     async function uploadViaServerProxy(file, hash) {
-        var formData = new FormData();
-        formData.append("file", file);
-        if (hash) formData.append("sha256", hash);
-        var headers = {};
-        var csrf = getCsrfToken();
-        if (csrf) {
-            headers["X-CSRFToken"] = csrf;
+        // Phase 33 — resilient media proxy: try the dedicated /api/blossom/proxy/
+        // route first, then fall back to the original /api/media/upload/ alias so
+        // uploads keep working if one route is ever removed or mis-routed.
+        var routes = ["/api/blossom/proxy/", "/api/media/upload/"];
+        var lastErr = null;
+        for (var i = 0; i < routes.length; i++) {
+            try {
+                var formData = new FormData();
+                formData.append("file", file);
+                if (hash) formData.append("sha256", hash);
+                var headers = {};
+                var csrf = getCsrfToken();
+                if (csrf) {
+                    headers["X-CSRFToken"] = csrf;
+                }
+                var res = await fetch(routes[i], {
+                    method: "POST",
+                    headers: headers,
+                    body: formData,
+                });
+                if (!res.ok) {
+                    throw new Error("Server proxy upload failed with status " + res.status);
+                }
+                return await res.json();
+            } catch (err) {
+                lastErr = err;
+                // Route failed — try the next proxy route before giving up.
+            }
         }
-        var res = await fetch("/api/media/upload/", {
-            method: "POST",
-            headers: headers,
-            body: formData,
-        });
-        if (!res.ok) {
-            throw new Error("Server proxy upload failed with status " + res.status);
-        }
-        return await res.json();
+        throw lastErr || new Error("All server proxy routes failed.");
     }
 
     async function sha256Hex(data) {

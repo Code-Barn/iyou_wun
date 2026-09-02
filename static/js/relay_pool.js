@@ -34,15 +34,18 @@
             { url: "wss://relay.damus.io", read: true, write: true, primary: false },
             { url: "wss://relay.primal.net", read: true, write: true, primary: false }
         ];
-        if (isLocalDevOrigin()) {
-            relays.push({ url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false });
-        }
+        // The sovereign local loopback relay is ALWAYS retained in the pool so the
+        // diagnostics drawer never loses the local enclave entry. On an HTTPS origin
+        // browsers block plain ws:// sockets (mixed content), so it simply renders
+        // as "Local Enclave (Desktop/WSS)" instead of being probed over the wire.
+        relays.push({ url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false });
         return relays;
     }
 
     var BOOTSTRAP_RELAYS = buildBootstrapRelays();
 
     var STORAGE_KEY = "wun_relays";
+    var CUSTOM_STORAGE_KEY = "wun_custom_relays";
     var NIP65_STORAGE_KEY = "wun_nip65_relays";
     var PROBE_TIMEOUT_MS = 3500;
     var BROADCAST_TIMEOUT_MS = 4000;
@@ -53,6 +56,20 @@
         var u = String(url).trim();
         if (u.endsWith("/")) u = u.slice(0, -1);
         return u.toLowerCase();
+    }
+
+    function isSecureOrigin() {
+        return typeof window !== "undefined" && window.location && String(window.location.protocol || "").toLowerCase() === "https:";
+    }
+
+    function isPlainWsUrl(url) {
+        return String(url || "").toLowerCase().indexOf("ws://") === 0;
+    }
+
+    // Plain ws:// sockets are blocked by browser Mixed Content rules on an HTTPS
+    // origin, so they are never probed/broadcast from a secure page.
+    function isMixedContentRelay(url) {
+        return isSecureOrigin() && isPlainWsUrl(url);
     }
 
     var MAX_BACKOFF_MS = 60000;
@@ -76,6 +93,7 @@
                 url: r.url,
                 read: r.read !== false,
                 write: r.write !== false,
+                enabled: r.enabled !== false,
                 isLocal: !!r.isLocal || norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
                 primary: !!r.primary,
                 status: "unknown",
@@ -88,6 +106,24 @@
         // 2. Load stored custom relays from localStorage
         try {
             var stored = localStorage.getItem(STORAGE_KEY);
+            var enabledMap = {};
+            try {
+                var customStored = localStorage.getItem(CUSTOM_STORAGE_KEY);
+                if (customStored) {
+                    var customList = JSON.parse(customStored);
+                    if (Array.isArray(customList)) {
+                        customList.forEach(function (entry) {
+                            var url = typeof entry === "string" ? entry : (entry && entry.url);
+                            if (!url) return;
+                            enabledMap[normalizeUrl(url)] = entry.enabled !== false;
+                        });
+                    }
+                }
+            } catch (e) { /* ignore */ }
+
+            var bootstrapNorms = {};
+            self.relays.forEach(function (r) { bootstrapNorms[normalizeUrl(r.url)] = true; });
+
             if (stored) {
                 var list = JSON.parse(stored);
                 if (Array.isArray(list)) {
@@ -95,11 +131,14 @@
                         var url = typeof entry === "string" ? entry : (entry && entry.url);
                         if (!url) return;
                         var norm = normalizeUrl(url);
-                        if (!self.relays.has(norm)) {
+                        if (!bootstrapNorms[norm] && !self.relays.has(norm)) {
+                            var enabled = entry.enabled !== false;
+                            if (enabledMap.hasOwnProperty(norm)) enabled = enabledMap[norm];
                             self.relays.set(norm, {
                                 url: url,
                                 read: entry.read !== false,
                                 write: entry.write !== false,
+                                enabled: enabled,
                                 isLocal: norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
                                 primary: false,
                                 status: "unknown",
@@ -110,6 +149,29 @@
                         }
                     });
                 }
+            }
+
+            // A pure wun_custom_relays list (no wun_relays) still seeds the pool.
+            if (enabledMap && Object.keys(enabledMap).length > 0) {
+                customList.forEach(function (entry) {
+                    var url = typeof entry === "string" ? entry : (entry && entry.url);
+                    if (!url) return;
+                    var norm = normalizeUrl(url);
+                    if (!bootstrapNorms[norm] && !self.relays.has(norm)) {
+                        self.relays.set(norm, {
+                            url: url,
+                            read: entry.read !== false,
+                            write: entry.write !== false,
+                            enabled: enabledMap[norm],
+                            isLocal: norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
+                            primary: false,
+                            status: "unknown",
+                            latencyMs: null,
+                            lastProbe: null,
+                            failCount: 0
+                        });
+                    }
+                });
             }
         } catch (e) { /* ignore */ }
 
@@ -134,6 +196,7 @@
     RelayPool.prototype.getRelays = function () {
         var urls = [];
         this.relays.forEach(function (r) {
+            if (r.enabled === false) return;
             urls.push(r.url);
         });
         return urls;
@@ -142,6 +205,8 @@
     RelayPool.prototype.getWriteRelays = function () {
         var urls = [];
         this.relays.forEach(function (r) {
+            if (r.enabled === false) return;
+            if (isMixedContentRelay(r.url)) return;
             if (r.write && r.status !== "quarantined") urls.push(r.url);
         });
         return urls.length > 0 ? urls : this.getRelays();
@@ -150,6 +215,8 @@
     RelayPool.prototype.getReadRelays = function () {
         var urls = [];
         this.relays.forEach(function (r) {
+            if (r.enabled === false) return;
+            if (isMixedContentRelay(r.url)) return;
             if (r.read && r.status !== "quarantined") urls.push(r.url);
         });
         return urls.length > 0 ? urls : this.getRelays();
@@ -177,11 +244,81 @@
         var online = 0;
         var quarantined = 0;
         this.relays.forEach(function (r) {
+            if (r.enabled === false) return;
             total++;
             if (r.status === "online") online++;
             else if (r.status === "quarantined") quarantined++;
         });
         return { online: online, total: total, quarantined: quarantined };
+    };
+
+    /**
+     * Persist the full pool (with the Phase 33 object schema
+     * `[{url, enabled, read, write}]`) so toggle state survives reloads.
+     * The object schema is mirrored under `wun_custom_relays` while
+     * `wun_relays` keeps a string-only list for legacy consumers.
+     */
+    RelayPool.prototype.persistRelays = function () {
+        try {
+            var list = [];
+            var urls = [];
+            this.relays.forEach(function (r) {
+                list.push({
+                    url: r.url,
+                    enabled: r.enabled !== false,
+                    read: r.read !== false,
+                    write: r.write !== false
+                });
+                urls.push(r.url);
+            });
+            localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(list));
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(urls));
+        } catch (e) { /* ignore */ }
+    };
+
+    /**
+     * Phase 33 — Relay Switchboard Toggle.
+     * `window.toggleRelayState(relayUrl, isEnabled)` demotes a relay from every
+     * active broadcast/subscription loop (read/write) and its diagnostics row,
+     * or reconnects it back into the active pool. State is persisted under
+     * `wun_custom_relays` and immediately reflected in #relay-health-widget.
+     */
+    RelayPool.prototype.toggleRelayState = function (relayUrl, isEnabled) {
+        var norm = normalizeUrl(relayUrl);
+        var record = this.relays.get(norm);
+        if (!record) {
+            this._addRelay(relayUrl, { read: true, write: true });
+            record = this.relays.get(norm);
+        }
+        if (!record) return false;
+
+        var nextEnabled = !!isEnabled;
+        var changed = (record.enabled || true) !== nextEnabled;
+        record.enabled = nextEnabled;
+
+        if (!nextEnabled) {
+            // Demote: close any lingering socket representation and drop from
+            // active broadcast/subscription loops until re-enabled.
+            record.status = "offline";
+            record.lastProbe = Date.now();
+        } else {
+            record.failCount = 0;
+            this.probeRelay(record.url);
+        }
+
+        if (changed) {
+            this.persistRelays();
+            this._notifyStatusChange();
+            this._updateHealthUI();
+            if (typeof window !== "undefined" && typeof window.showToast === "function") {
+                window.showToast("Relay " + record.url + (nextEnabled ? " enabled" : " disabled"), nextEnabled ? "success" : "info");
+            }
+            var drawerEl = document.getElementById("relay-diagnostics-drawer");
+            if (drawerEl && !drawerEl.classList.contains("hidden")) {
+                this.renderDiagnosticsList();
+            }
+        }
+        return nextEnabled;
     };
 
     /**
@@ -232,6 +369,7 @@
             url: url,
             read: opts.read !== false,
             write: opts.write !== false,
+            enabled: opts.enabled !== false,
             isLocal: !!opts.isLocal || norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
             primary: !!opts.primary,
             status: "unknown",
@@ -309,6 +447,17 @@
         var norm = normalizeUrl(url);
         var record = this.relays.get(norm);
         if (!record) return Promise.resolve({ url: url, status: "offline", latencyMs: null });
+
+        // Plain ws:// relays (e.g. the loopback 127.0.0.1:9003 enclave) cannot be
+        // probed from an HTTPS origin — the browser blocks the socket outright as
+        // mixed content. Report them as the "Local Enclave" placeholder instead of
+        // attempting (and failing) a real handshake every interval.
+        if (isMixedContentRelay(url)) {
+            if (record.status !== "unknown") {
+                record.status = "offline";
+            }
+            return Promise.resolve({ url: record.url, status: record.status, latencyMs: record.latencyMs });
+        }
 
         // Exponential backoff: if a relay has failed repeatedly, skip probing
         // until its backoff window elapses so we don't hammer an offline socket
@@ -408,11 +557,13 @@
                     url: url,
                     read: read,
                     write: write,
+                    enabled: true,
                     isLocal: norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
                     primary: false,
                     status: "unknown",
                     latencyMs: null,
-                    lastProbe: null
+                    lastProbe: null,
+                    failCount: 0
                 });
                 added++;
                 // Probe newly discovered relay
@@ -702,6 +853,7 @@
 
         var self = this;
         var rows = [];
+        var isHttps = isSecureOrigin();
 
         this.relays.forEach(function (r) {
             var statusDotClass = "bg-rose-500";
@@ -713,8 +865,8 @@
                 latencyClass = "text-emerald-500 dark:text-emerald-400";
                 latencyText = (r.latencyMs != null ? r.latencyMs : "?") + "ms";
             } else if (r.status === "quarantined") {
-                statusDotClass = "bg-slate-400 animate-pulse";
-                latencyClass = "text-slate-400 dark:text-slate-500";
+                statusDotClass = "bg-rose-500";
+                latencyClass = "text-rose-500 dark:text-rose-400";
                 latencyText = "quarantined";
             } else if (!r.status || r.status === "unknown") {
                 statusDotClass = "bg-amber-500";
@@ -725,18 +877,38 @@
             var isLocal = !!r.isLocal;
             var hostname = escapeHtml(self._cleanRelayHostname(r.url));
 
+            // On an HTTPS origin, plain ws:// loopback sockets cannot be probed
+            // (browser Mixed Content rules) — retain the entry as a static
+            // "Local Enclave (Desktop/WSS)" status instead of a dead offline row.
+            if (isLocal && isHttps && isPlainWsUrl(r.url)) {
+                statusDotClass = "bg-amber-500";
+                latencyClass = "text-slate-500 dark:text-slate-400";
+                latencyText = "Local Enclave (Desktop/WSS)";
+                hostname = "127.0.0.1:9003";
+            } else if (!isLocal && r.enabled === false) {
+                statusDotClass = "bg-slate-300 dark:bg-slate-600";
+                latencyClass = "text-slate-400 dark:text-slate-500";
+                latencyText = "disabled";
+            }
+
             var leftCol =
                 '<div class="flex items-center gap-1.5 min-w-0">' +
                   '<span class="w-1.5 h-1.5 rounded-full ' + statusDotClass + ' shrink-0"></span>' +
                   '<span class="truncate text-slate-700 dark:text-slate-300 font-mono">' + hostname + '</span>' +
-                  (isLocal ? '<span class="px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 text-[9px] text-slate-500 font-mono shrink-0">Local</span>' : '') +
+                  (isLocal ? '<span class="px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 text-[9px] text-violet-600 dark:text-violet-400 font-mono shrink-0">[Local]</span>' : '') +
                 '</div>';
 
+            var readChip = r.read !== false ?
+                '<span class="px-1 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80">R</span>' : '';
+            var writeChip = r.write !== false ?
+                '<span class="px-1 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800/80">W</span>' : '';
+
+            var wideStatus = (isLocal && isHttps && isPlainWsUrl(r.url));
             var rightCol =
                 '<div class="flex items-center gap-1 shrink-0 font-mono text-[10px]">' +
-                  '<span class="px-1 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80">R</span>' +
-                  '<span class="px-1 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800/80">W</span>' +
-                  '<span class="w-14 text-right tabular-nums ' + latencyClass + '">' + latencyText + '</span>' +
+                  readChip +
+                  writeChip +
+                  '<span class="' + (wideStatus ? 'text-right tabular-nums whitespace-nowrap' : 'w-14 text-right tabular-nums') + ' ' + latencyClass + '">' + latencyText + '</span>' +
                 '</div>';
 
             rows.push(
@@ -768,6 +940,13 @@
             return poolInstance.retryQuarantinedRelays();
         }
         return Promise.resolve(0);
+    };
+
+    global.toggleRelayState = function (relayUrl, isEnabled) {
+        if (poolInstance && typeof poolInstance.toggleRelayState === "function") {
+            return poolInstance.toggleRelayState(relayUrl, isEnabled);
+        }
+        return false;
     };
 
     if (typeof module !== "undefined" && module.exports) {

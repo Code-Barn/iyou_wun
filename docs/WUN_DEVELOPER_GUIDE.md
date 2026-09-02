@@ -970,6 +970,70 @@ iyou_wun integrates both a dedicated `/chat` full-page view and a persistent `#f
 
 ---
 
+## Phase 20–32 Delivery Summary
+
+Phases 20–32 shipped the next wave of sovereign-mesh features across chat, social, search, language, governance, and resilience. Each heading below maps to its `TODO.md` phase entry.
+
+### Phase 20 — Dual-Engine Chat (XMPP + Nostr Kind 4 E2EE)
+
+- **Files:** `apps/core/views.py` (`ChatView`), `templates/chat.html`, `templates/includes/_floating_chat_dock.html`, `static/js/floating_chat.js`, `static/js/bridge_client.js`
+- XMPP provisioning via `/api/chat/session/` (verified DID session → canonical JID from pubkey hex → ephemeral WS/BOSH token), with a 6s offline fallback to a local roster plus the Nostr bridge.
+- Floating dock messenger (`#floating-chat-root`) with `openDockedChat(peerNpub, ...)` multi-window panes and unread badges.
+- **Kind 4 NIP-04 fallback transport:** `sendDockedMessage` signs a Kind 4 `["p", peerHex]` event via `window.bridgeClient` for peers without a live JID.
+- Phase 30 hardened this into a full NIP-04 pipeline: `bridgeClient.nip04Encrypt/nip04Decrypt` bridge frames (`NIP04_ENCRYPT`/`NIP04_DECRYPT`), Web Crypto AES-256-CBC fallback, and 🔒-badged dock panes.
+
+### Phase 21 — NIP-18 / NIP-27 Quote Reposts & Preview Cards
+
+- **Files:** `apps/core/nip10.py` (`parse_nip18_quote_tags`, quote enrichment), `apps/core/views.py` (`attach_quoted_notes`), `templates/includes/_quote_card.html`, `templates/includes/_thread_post.html`, `templates/includes/_post_composer.html`, `static/js/feed_interactions.js`
+- Parses `["q", event_id, relay, pubkey]` tags plus `nostr:note1…`/`nostr:nevent1…` URIs; batch-fetches quoted events and attaches `quoted_note` in `fetch_unified_feed()`, `api_feed()`, and `fetch_thread()`.
+- `_quote_card.html` renders a compact embedded quote preview; `toggleRepostDropdown()` gives Repost vs Quote Note menu; the composer attaches NIP-18 `["q", …]` + `["p", …]` tags to signed Kind 1 quotes.
+
+### Phase 22 — NIP-05 Public Identifier Verification & NIP-02 Follow Pipeline
+
+- **Files:** `apps/core/views.py` (`nip05_well_known()`, `api_contacts_follow()`), `static/js/contact_manager.js` (`toggleFollowUser`), `templates/_thread_post.html`
+- `/.well-known/nostr.json` resolves `?name=<handle>` / `?name=_` / all public handles with standard `names`/`relays` schema and `Access-Control-Allow-Origin: *`.
+- `POST /api/contacts/follow/` loads the latest Kind 3, appends/removes `["p", target_pubkey, relay, petname]`, and returns the unsigned Kind 3 for bridge signing; `toggleFollowUser()` broadcasts, updates the local contact cache, and flips `[ + Follow ] ⇄ [ ✓ Following ]`.
+
+### Phase 23 — Global Directory Search & NIP-50 Indexer Triage
+
+- **Files:** `apps/core/views.py` (`ProfileView`, `api_search`), `static/js/circle_feed_filter.js`, `templates/_nav.html`
+- `/profile/<identifier>` resolves `npub1…`, 64-hex, and NIP-05 identifiers with async NIP-05 well-known lookup.
+- Sovereign vs mesh badging (`[ ⚡ iyou ]`, `[ 🌐 Mesh ]`, `[ 🏷️ NIP-05 ]`) and an active transport badge in the chat dock.
+- `#feed-search-input` triage: bech32 → redirect, NIP-05 → profile route, plain text → local cache then NIP-50 (`{"kinds":[0],"search":…}`) against `purplepag.es`/`relay.nostr.band`, with an interactive discovery dropdown.
+
+### Phases 24/26 — Machine Noise Gate & P2P Beacon Suppression
+
+- **Files:** `apps/core/nip10.py` (`is_renderable_note`, NSFW `detect_content_warning`), `apps/core/views.py` (server-side filtering in feed pipelines), `static/js/circle_feed_filter.js`, `static/js/feed_interactions.js` (`isRenderableNote`)
+- Empty discovery beacons (`miasma-peer`, `p2p-beacon`, `relay-ping`, `node-discovery`) and blank Kind 1 notes are suppressed server- and client-side; only media-tagged notes pass with empty content.
+- Expanded NIP-36 gates (`content-warning`, `nsfw`, `sensitive`, `nudity`) render blurred shields honoring `wun_nsfw_pref`.
+
+### Phases 17/27/24 — Language Heuristics & Live Translation Endpoints
+
+- **Files:** `apps/core/nip10.py` (`detect_language`), `apps/core/views.py` (`api_translate`), `static/js/feed_interactions.js` (`translateNote`), `templates/includes/_thread_post.html`
+- `detect_language` strips URLs/mentions/code, applies script + stop-word scoring (`min_score` 1–2), and exposes `data-lang` on cards.
+- `POST /api/translate/` sanitizes, caps at 1000 chars, talks to the translation backend with a 4s timeout, caches responses, and degrades to `[Translation unavailable - network timeout]`. UI shows `[ 🌐 Translate ]` only for non-English notes with a `[ View Original ]` toggle.
+
+### Phase 28 — Real-Time Trending Topics Counter Aggregator
+
+- **Files:** `apps/core/views.py` (`calculate_trending_tags`), `templates/includes/_feed_right_rail.html`, `static/js/circle_feed_filter.js` (`filterByTag`)
+- Real `#t` tags from the deduplicated renderable event batch are tallied with `Counter`, case-insensitive slug normalization, and exact integer frequencies; iyou isolation restricts to registered sovereign pubkeys.
+- `[ 🌐 Global ]`/`[ ⚡ iyou ]` scope tabs in the right rail; clicking a tag injects `#<slug>`, filters the stream, and syncs `?q=%23<slug>`.
+
+### Phase 31 — Blossom 3-Tier Fallback Cascade & Relay Auto-Quarantine
+
+- **Files:** `static/js/feed_interactions.js` (`window.handleMediaError`, `mediaOnErrorAttr`), `static/js/relay_pool.js` (`QUARANTINE_THRESHOLD`, `_recordBroadcastFailure`, `retryQuarantinedRelays`), `templates/includes/_feed_right_rail.html`, `apps/core/views.py` (backup export/import)
+- Media `<img>` tags carrying a 64-hex `x`/`sha256` hash walk `http://127.0.0.1:9002/<sha> → https://cdn.iyou.me/<sha> → https://nostr.download/<sha>`, advancing `data-fallback-tier` per failure, ending in a `[⚠️ Media Unavailable on Mesh]` placeholder.
+- Relays are auto-quarantined after 3 consecutive broadcast drops, demoted from read/write participation, and replaced by an unquarantined fallback; `↻ Retry Quarantined Relays` re-probes and restores.
+- Sovereign graph disaster snapshots: `api_backup_export` / `api_backup_import` serialize versioned deck+graph JSON with transactional restore.
+
+### Phase 32 — Persona Session Re-Anchoring & Multi-Deck Isolation
+
+- **Files:** `apps/core/views.py` (`api_persona_switch`), `apps/core/urls.py` (`api/auth/persona-switch/`), `apps/core/context_processors.py` (`user_identity`), `static/js/bridge_client.js` (`handlePersonaChanged`), `templates/includes/_standard_header.html`, `templates/dashboard.html`
+- On persona activation the bridge compares `profile.did` to header-injected `window.CURRENT_SESSION_DID`; divergence POSTs `/api/auth/persona-switch/`, provisions an isolated `UserLinkDeck` per DID, re-logs the Django session, dispatches `persona:session-reanchored`, and reloads everywhere except `/dashboard` (which re-renders deck identity in place).
+- Header `user_display_label` priority chain: deck `@handle` > `persona (L{n})` > `Primary Identity (L1)` > truncated-DID burner (`L2`).
+
+---
+
 ## Troubleshooting / War Stories
 
 ### `secp256k1` build failure

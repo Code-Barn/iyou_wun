@@ -37,7 +37,8 @@ urlpatterns = [
     path('api/profile/save/', views.api_save_profile, name='api_save_profile'),
     path('api/vote', views.api_cast_vote, name='api_cast_vote'),
 
-    path('api/media/upload/', views.MediaUploadProxyView.as_view(), name='media_upload_proxy'),
+    path('api/media/upload/', views.api_blossom_upload_proxy, name='media_upload_proxy'),
+    path('api/blossom/proxy/', views.api_blossom_upload_proxy, name='api_blossom_proxy'),
     path('api/gallery', views.api_gallery, name='api_gallery'),
     path('api/credentials/issue/', views.IssueCredentialView.as_view(), name='api_issue_credential'),
     path('api/config/', views.node_config, name='node_config'),

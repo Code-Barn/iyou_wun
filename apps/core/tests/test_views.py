@@ -16,6 +16,7 @@
 import hashlib
 import json
 import logging
+import ssl
 import urllib.request
 import urllib.error
 from unittest.mock import patch, MagicMock
@@ -518,6 +519,17 @@ class DashboardProfileTest(TestCase):
         response = self.client.get(reverse("dashboard"))
         self.assertContains(response, "Sovereign Profile")
 
+    def test_dashboard_renders_relay_switchboard_toggles(self):
+        user = User.objects.create_user(username="did:key:z6Mkdashrelay")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("dashboard"))
+        self.assertContains(response, "Sovereign Switchboard")
+        self.assertContains(response, "relay-toggle-checkbox")
+        self.assertContains(response, "data-relay-url=")
+        self.assertContains(response, "toggleRelayState(")
+        self.assertContains(response, "Save Relays")
+
     def test_dashboard_contains_publish_button(self):
         user = User.objects.create_user(username="did:key:z6Mkdashpub")
         self.client.force_login(user)
@@ -965,6 +977,23 @@ class BackupGraphTest(TestCase):
         self.assertIn("_recordBroadcastFailure", src)
         self.assertIn("status !== \"quarantined\"", src)
 
+    def test_relay_pool_carries_phase33_toggle_schema(self):
+        src = (settings.BASE_DIR / "static" / "js" / "relay_pool.js").read_text()
+        self.assertIn("toggleRelayState", src)
+        self.assertIn("wun_custom_relays", src)
+        self.assertIn("enabled: r.enabled !== false", src)
+        self.assertIn("Local Enclave (Desktop/WSS)", src)
+        self.assertIn("127.0.0.1:9003", src)
+        self.assertIn("isMixedContentRelay", src)
+        self.assertIn("window.showToast", src)
+
+    def test_feed_interactions_carries_phase33_proxy_fallback(self):
+        src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()
+        self.assertIn("/api/blossom/proxy/", src)
+        self.assertIn('"/api/media/upload/"', src)
+        self.assertIn("handleMediaSelected", src)
+        self.assertIn("SHA-256", src)
+
 
 class MediaUploadProxyViewTest(TestCase):
     def test_upload_proxy_success_multipart(self):
@@ -989,6 +1018,73 @@ class MediaUploadProxyViewTest(TestCase):
         self.assertEqual(data["size"], len(file_content))
         self.assertEqual(data["type"], "image/jpeg")
         self.assertTrue(mock_urlopen.called)
+
+    def test_upload_proxy_success_returns_phase33_schema(self):
+        file_content = b"schema_probe_bytes"
+        uploaded_file = SimpleUploadedFile("schema_probe.jpg", file_content, content_type="image/jpeg")
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = MagicMock(status=201)
+            mock_urlopen.return_value = mock_cm
+
+            response = self.client.post(
+                reverse("media_upload_proxy"),
+                {"file": uploaded_file},
+            )
+
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertTrue(data["forwarded"])
+        self.assertEqual(data["sha256"], hashlib.sha256(file_content).hexdigest())
+        self.assertEqual(data["url"], f"https://cdn.iyou.me/{hashlib.sha256(file_content).hexdigest()}")
+
+    def test_blossom_proxy_route_accepts_uploads(self):
+        file_content = b"blossom_proxy_route_bytes"
+        expected_hash = hashlib.sha256(file_content).hexdigest()
+        uploaded_file = SimpleUploadedFile("route.jpg", file_content, content_type="image/jpeg")
+
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = MagicMock(status=201)
+            mock_urlopen.return_value = mock_cm
+
+            response = self.client.post(
+                reverse("api_blossom_proxy"),
+                {"file": uploaded_file},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["sha256"], expected_hash)
+
+    @override_settings(BLOSSOM_SERVER_URL="https://cdn.iyou.me")
+    def test_upload_proxy_uses_unverified_ssl_context_for_https_upstream(self):
+        file_content = b"tls_verify_off_bytes"
+        uploaded_file = SimpleUploadedFile("tls.jpg", file_content, content_type="image/jpeg")
+
+        captured = {}
+
+        def fake_urlopen(req, **kwargs):
+            captured["context"] = kwargs.get("context")
+            mock_cm = MagicMock()
+            mock_cm.__enter__.return_value = MagicMock(status=201)
+            return mock_cm
+
+        with patch("urllib.request.urlopen", side_effect=fake_urlopen) as mock_urlopen:
+            response = self.client.post(
+                reverse("media_upload_proxy"),
+                {"file": uploaded_file},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertTrue(mock_urlopen.called)
+        ctx = captured.get("context")
+        self.assertIsNotNone(ctx)
+        self.assertEqual(ctx.verify_mode, ssl.CERT_NONE)
+        self.assertFalse(ctx.check_hostname)
 
     def test_upload_proxy_no_file_returns_400(self):
         response = self.client.post(reverse("media_upload_proxy"), {})

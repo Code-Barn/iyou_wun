@@ -4,7 +4,33 @@
     <p class="text-xs text-slate-500 dark:text-slate-400">Manage your connected Nostr relays. Notes and profile updates are broadcasted across all active relays.</p>
   </div>
 
-  <div id="relayList" class="space-y-2"></div>
+  <div id="relayList" class="space-y-2">
+    {% for relay in relay_objs %}
+    <div class="flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2 gap-3"
+         data-relay-row="{{ relay.url }}">
+      <span class="text-xs font-mono text-slate-700 dark:text-slate-300 break-all flex items-center gap-2 min-w-0">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+        <span class="truncate">{{ relay.url }}</span>
+      </span>
+      <div class="flex items-center gap-2.5 flex-shrink-0">
+        <label class="relative inline-flex items-center cursor-pointer">
+          <input type="checkbox"
+                 class="sr-only peer relay-toggle-checkbox"
+                 data-relay-url="{{ relay.url }}"
+                 {% if relay.enabled != False %}checked{% endif %}
+                 onchange="toggleRelayState('{{ relay.url|escapejs }}', this.checked)">
+          <div class="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-violet-600"></div>
+        </label>
+        <button type="button" onclick="removeRelay('{{ relay.url|escapejs }}')"
+                class="text-rose-500 hover:text-rose-600 text-xs font-mono font-medium flex-shrink-0">
+          Remove
+        </button>
+      </div>
+    </div>
+    {% empty %}
+    <div class="text-center text-slate-400 text-xs font-mono py-4">No relays configured.</div>
+    {% endfor %}
+  </div>
 
   <div class="flex flex-wrap items-center gap-2 pt-2">
     <input type="text" id="relayInput" placeholder="wss://relay.example.com"

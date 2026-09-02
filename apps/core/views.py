@@ -302,6 +302,7 @@ def dashboard(request):
     user_pubkey = did_to_pubkey(request.user.username)
     user_npub = did_to_npub(request.user.username)
     relays = get_relays_for_request(request)
+    relay_objs = [{"url": url, "enabled": True} for url in relays]
     profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
     deck = UserLinkDeck.objects.filter(user=request.user).first()
     return render(request, "dashboard.html", {
@@ -310,6 +311,7 @@ def dashboard(request):
         "user_did": request.user.username,
         "profile": profile,
         "relays": relays,
+        "relay_objs": relay_objs,
         "deck": deck,
     })
 
@@ -3261,80 +3263,112 @@ def node_config(request):
     })
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class MediaUploadProxyView(View):
-    """Server-side proxy for Blossom media uploads to handle mixed content and PNA blocking."""
+@csrf_exempt
+def api_blossom_upload_proxy(request):
+    """Server-side proxy for Blossom media uploads to handle mixed content and PNA blocking.
 
-    def post(self, request):
-        uploaded_file = request.FILES.get("file")
-        if not uploaded_file and request.FILES:
-            uploaded_file = next(iter(request.FILES.values()))
+    Accepts a `POST` (multipart `file` field or a raw request body) and forwards the
+    binary payload to the configured Blossom upstream — local loopback
+    (`http://127.0.0.1:9002/upload`, or the `BLOSSOM_SERVER_URL` setting) with a
+    fallback to the Sovereign CDN (`{BLOSSOM_CDN_URL}/upload`). The server-side HTTP
+    request tolerates staging certificate issues by using an unverified
+    (`verify=False` equivalent) TLS context so uploads keep working behind
+    self-signed / staging certs.
 
-        if uploaded_file:
-            content = uploaded_file.read()
-            mime_type = uploaded_file.content_type or "application/octet-stream"
-            size = uploaded_file.size
+    Returns `{"success": true, "url": ..., "sha256": ..., "size": ..., "type": ...}`
+    even when the upstream is unreachable (graceful degradation), so the composer can
+    attach the canonical CDN URL without throwing unhandled exceptions.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+
+    uploaded_file = request.FILES.get("file")
+    if not uploaded_file and request.FILES:
+        uploaded_file = next(iter(request.FILES.values()))
+
+    if uploaded_file:
+        content = uploaded_file.read()
+        mime_type = uploaded_file.content_type or "application/octet-stream"
+        size = uploaded_file.size
+    else:
+        try:
+            content = request.body
+        except Exception:
+            # Multipart/urlencoded requests consume the stream before a view can
+            # read it; treat those as "no raw payload" rather than crashing.
+            content = b""
+        if content:
+            mime_type = request.content_type or "application/octet-stream"
+            size = len(content)
+        else:
+            return JsonResponse({"error": "No file provided"}, status=400)
+
+    sha256_hex = hashlib.sha256(content).hexdigest()
+    blossom_server_url = getattr(settings, "BLOSSOM_SERVER_URL", "http://127.0.0.1:9002").rstrip("/")
+    cdn_base = getattr(settings, "BLOSSOM_CDN_URL", "https://cdn.iyou.me").rstrip("/")
+    cdn_upload_url = f"{cdn_base}/upload"
+
+    # verify=False equivalent for upstream HTTPS calls — tolerates staging
+    # certificate issues while still encrypting the payload on the wire.
+    ssl_ctx = None
+    if blossom_server_url.startswith("https://") or cdn_upload_url.startswith("https://"):
+        ssl_ctx = ssl.create_default_context()
+        ssl_ctx.check_hostname = False
+        ssl_ctx.verify_mode = ssl.CERT_NONE
+
+    def _forward(upstream_url):
+        req = urllib.request.Request(
+            upstream_url,
+            data=content,
+            headers={
+                "Content-Type": mime_type,
+                "X-SHA-256": sha256_hex,
+            },
+            method="PUT",
+        )
+        kwargs = {"timeout": 10}
+        if ssl_ctx is not None and upstream_url.startswith("https://"):
+            kwargs["context"] = ssl_ctx
+        with urllib.request.urlopen(req, **kwargs):
+            pass
+        return True
+
+    forwarded = False
+    try:
+        _forward(f"{blossom_server_url}/upload")
+        forwarded = True
+    except urllib.error.HTTPError as exc:
+        if exc.code in (404, 405):
+            try:
+                _forward(f"{blossom_server_url}/{sha256_hex}")
+                forwarded = True
+            except Exception:
+                pass
         else:
             try:
-                content = request.body
+                _forward(cdn_upload_url)
+                forwarded = True
             except Exception:
-                content = b""
-            if content:
-                mime_type = request.content_type or "application/octet-stream"
-                size = len(content)
-            else:
-                return JsonResponse({"error": "No file provided"}, status=400)
-
-
-        sha256_hex = hashlib.sha256(content).hexdigest()
-        blossom_server_url = getattr(settings, "BLOSSOM_SERVER_URL", "http://127.0.0.1:9002").rstrip("/")
-        cdn_base = getattr(settings, "BLOSSOM_CDN_URL", "https://cdn.iyou.me").rstrip("/")
-
-        # Forward binary stream to upstream Blossom server
-        try:
-            req = urllib.request.Request(
-                f"{blossom_server_url}/upload",
-                data=content,
-                headers={
-                    "Content-Type": mime_type,
-                    "X-SHA-256": sha256_hex,
-                },
-                method="PUT",
-            )
-            with urllib.request.urlopen(req, timeout=10):
                 pass
-        except urllib.error.HTTPError as exc:
-            if exc.code in (404, 405):
-                try:
-                    req_hash = urllib.request.Request(
-                        f"{blossom_server_url}/{sha256_hex}",
-                        data=content,
-                        headers={
-                            "Content-Type": mime_type,
-                            "X-SHA-256": sha256_hex,
-                        },
-                        method="PUT",
-                    )
-                    with urllib.request.urlopen(req_hash, timeout=10):
-                        pass
-                except Exception:
-                    pass
+    except Exception:
+        # Local Blossom server unreachable — fall through to the Sovereign CDN.
+        try:
+            _forward(cdn_upload_url)
+            forwarded = True
         except Exception:
-            # When Blossom server is unreachable, allow graceful degradation
             pass
 
-        return JsonResponse(
-            {
-                "url": f"{cdn_base}/{sha256_hex}",
-                "sha256": sha256_hex,
-                "size": size,
-                "type": mime_type,
-            },
-            status=200,
-        )
-
-    def get(self, request):
-        return JsonResponse({"error": "POST required"}, status=405)
+    return JsonResponse(
+        {
+            "success": True,
+            "url": f"{cdn_base}/{sha256_hex}",
+            "sha256": sha256_hex,
+            "size": size,
+            "type": mime_type,
+            "forwarded": forwarded,
+        },
+        status=200,
+    )
 
 
 @csrf_exempt

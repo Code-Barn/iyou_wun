@@ -750,14 +750,38 @@
 
   // --- Relay Management ---
   var userRelays = [];
+  function normalizeRelayUrl(url) {
+    var u = String(url || "").trim();
+    if (u.endsWith("/")) u = u.slice(0, -1);
+    return u.toLowerCase();
+  }
+  function relayUrlOf(entry) { return typeof entry === "string" ? entry : (entry && entry.url); }
   function renderRelayList() {
     var list = document.getElementById("relayList");
     if (!list) return;
     list.innerHTML = "";
-    userRelays.forEach(function (url, i) {
+    if (!userRelays || userRelays.length === 0) {
+      list.innerHTML = '<div class="text-center text-slate-400 text-xs font-mono py-4">No relays configured.</div>';
+      return;
+    }
+    userRelays.forEach(function (entry) {
+      var url = relayUrlOf(entry);
+      if (!url) return;
+      var enabled = (entry && entry.enabled !== false);
       var div = document.createElement("div");
-      div.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2";
-      div.innerHTML = '<span class="text-xs font-mono text-slate-700 dark:text-slate-300 break-all flex items-center gap-2"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>' + escapeHtml(url) + '</span><button type="button" onclick="removeRelay(' + i + ')" class="text-rose-500 hover:text-rose-600 text-xs font-mono font-medium ml-2 flex-shrink-0">Remove</button>';
+      div.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2 gap-3";
+      div.innerHTML =
+        '<span class="text-xs font-mono text-slate-700 dark:text-slate-300 break-all flex items-center gap-2 min-w-0">' +
+          '<span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>' +
+          '<span class="truncate">' + escapeHtml(url) + '</span>' +
+        '</span>' +
+        '<div class="flex items-center gap-2.5 flex-shrink-0">' +
+          '<label class="relative inline-flex items-center cursor-pointer">' +
+            '<input type="checkbox" class="sr-only peer relay-toggle-checkbox" data-relay-url="' + escapeHtml(url) + '"' + (enabled ? ' checked' : '') + ' onchange="toggleRelayState(\'' + escapeHtml(url) + '\', this.checked)">' +
+            '<div class="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-violet-600"></div>' +
+          '</label>' +
+          '<button type="button" onclick="removeRelay(\'' + escapeHtml(url) + '\')" class="text-rose-500 hover:text-rose-600 text-xs font-mono font-medium flex-shrink-0">Remove</button>' +
+        '</div>';
       list.appendChild(div);
     });
   }
@@ -767,19 +791,28 @@
     var url = input.value.trim();
     if (!url) return;
     if (!url.startsWith("ws://") && !url.startsWith("wss://")) { showRelayStatus("Relay URL must start with ws:// or wss://", true); return; }
-    if (userRelays.indexOf(url) !== -1) { showRelayStatus("Relay already in list", true); return; }
-    userRelays.push(url);
+    var dup = userRelays.some(function (e) { return normalizeRelayUrl(relayUrlOf(e)) === normalizeRelayUrl(url); });
+    if (dup) { showRelayStatus("Relay already in list", true); return; }
+    userRelays.push({ url: url, enabled: true, read: true, write: true });
     input.value = "";
     renderRelayList();
   }
-  function removeRelay(index) { userRelays.splice(index, 1); renderRelayList(); }
+  function removeRelay(url) {
+    userRelays = userRelays.filter(function (e) { return normalizeRelayUrl(relayUrlOf(e)) !== normalizeRelayUrl(url); });
+    renderRelayList();
+    if (window.relayPool && typeof window.relayPool.toggleRelayState === "function") {
+      window.relayPool.toggleRelayState(url, false);
+    }
+  }
   function saveRelays() {
-    localStorage.setItem("wun_relays", JSON.stringify(userRelays));
+    var urls = userRelays.map(relayUrlOf);
+    localStorage.setItem("wun_relays", JSON.stringify(urls));
+    localStorage.setItem("wun_custom_relays", JSON.stringify(userRelays));
     var csrfToken = document.querySelector("[name=csrfmiddlewaretoken]") ? document.querySelector("[name=csrfmiddlewaretoken]").value : "";
     fetch("/api/relays", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-CSRFToken": csrfToken },
-      body: JSON.stringify({ relays: userRelays }),
+      body: JSON.stringify({ relays: urls }),
     }).then(function (r) { return r.json(); }).then(function () { showRelayStatus("Relays saved successfully."); })
     .catch(function () { showRelayStatus("Saved locally. Server sync failed.", true); });
   }
@@ -793,11 +826,23 @@
   }
   function loadRelays() {
     fetch("/api/relays").then(function (r) { return r.json(); }).then(function (data) {
-      userRelays = data.relays || (typeof getRelays === "function" ? getRelays() : []);
-      localStorage.setItem("wun_relays", JSON.stringify(userRelays));
+      var storedMap = {};
+      try {
+        var stored = JSON.parse(localStorage.getItem("wun_custom_relays") || "[]");
+        stored.forEach(function (e) { storedMap[normalizeRelayUrl(relayUrlOf(e))] = e.enabled !== false; });
+      } catch (err) {}
+      var raw = (data && data.relays) || (typeof getRelays === "function" ? getRelays() : []);
+      userRelays = (raw || []).map(function (u) {
+        var url = relayUrlOf(u);
+        var enabled = (storedMap[normalizeRelayUrl(url)] !== undefined) ? storedMap[normalizeRelayUrl(url)] : (u && u.enabled !== false);
+        return { url: url, enabled: enabled, read: true, write: true };
+      });
+      localStorage.setItem("wun_relays", JSON.stringify(userRelays.map(relayUrlOf)));
+      localStorage.setItem("wun_custom_relays", JSON.stringify(userRelays));
       renderRelayList();
     }).catch(function () {
       userRelays = (typeof getRelays === "function") ? getRelays() : [];
+      userRelays = userRelays.map(function (u) { return { url: relayUrlOf(u), enabled: true, read: true, write: true }; });
       renderRelayList();
     });
   }

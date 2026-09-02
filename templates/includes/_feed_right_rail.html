@@ -30,9 +30,17 @@
         <span>Active Relays</span>
         <a href="/dashboard#settings" class="text-violet-500 hover:underline hover:text-violet-400">Configure ↗</a>
       </div>
+      <div class="flex items-center gap-1.5 text-[9px] text-slate-400 font-mono select-none">
+        <span class="px-1 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/80">R</span>
+        <span>read</span>
+        <span class="px-1 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800/80">W</span>
+        <span>write</span>
+        <span class="px-1 py-0.2 rounded bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 text-[9px] text-violet-600 dark:text-violet-400 font-mono shrink-0">[Local]</span>
+        <span>local enclave</span>
+      </div>
       <div id="relay-diagnostics-list" class="space-y-1.5 max-h-48 overflow-y-auto pr-1 text-[11px]">
         <!-- Populated dynamically via JS -->
-        <div class="text-slate-400 text-center py-2">Probing mesh sockets...</div>
+        <div class="text-slate-400 text-center py-2">Probing mesh sockets... (local 127.0.0.1:9003 enclave always retained)</div>
       </div>
       <button type="button" id="relay-retry-quarantined"
               onclick="if (window.retryQuarantinedRelays) window.retryQuarantinedRelays();"
