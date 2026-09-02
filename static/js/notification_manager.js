@@ -22,13 +22,22 @@
 
     var KIND_ICONS = { 1: "💬", 6: "🔁", 7: "❤️", 9735: "⚡" };
     var KIND_CATEGORY = { 1: "mentions", 6: "reposts", 7: "reactions", 9735: "zaps" };
-    var DEFAULT_RELAYS = [
-        "wss://relay.iyou.me",
-        "wss://nos.lol",
-        "wss://relay.damus.io",
-        "wss://relay.primal.net",
-        "ws://127.0.0.1:9003"
-    ];
+    // The sovereign local relay (ws://127.0.0.1:9003) is only included on a local
+    // HTTP dev origin; over HTTPS we rely solely on the secure public pool.
+    function defaultRelays() {
+        var local = (typeof window !== "undefined" && window.location &&
+            window.location.protocol === "http:" &&
+            (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" || window.location.hostname === "0.0.0.0"))
+            ? ["ws://127.0.0.1:9003"]
+            : [];
+        return [
+            "wss://relay.iyou.me",
+            "wss://nos.lol",
+            "wss://relay.damus.io",
+            "wss://relay.primal.net"
+        ].concat(local);
+    }
+    var DEFAULT_RELAYS = defaultRelays();
     var TAB_BASE_CLASS = "notification-tab flex items-center gap-1 whitespace-nowrap px-2.5 py-1 rounded-full text-xs font-mono border transition ";
     var TAB_ACTIVE_CLASS = "active text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 border-violet-200 dark:border-violet-800/60";
     var TAB_INACTIVE_CLASS = "text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400 border-slate-200 dark:border-slate-800";
@@ -101,11 +110,17 @@
     };
 
     NotificationManager.prototype._relayList = function () {
+        var list = null;
         if (global.relayPool && typeof global.relayPool.getReadRelays === "function") {
-            var list = global.relayPool.getReadRelays();
-            if (list && list.length) return list;
+            list = global.relayPool.getReadRelays();
         }
-        return DEFAULT_RELAYS.slice();
+        if (!list || !list.length) list = DEFAULT_RELAYS.slice();
+        // Defensive: never touch unencrypted ws:// relays over HTTPS production.
+        var isHttps = typeof window !== "undefined" && window.location && window.location.protocol === "https:";
+        if (isHttps) {
+            return list.filter(function (url) { return String(url).toLowerCase().indexOf("ws://") !== 0; });
+        }
+        return list;
     };
 
     /**

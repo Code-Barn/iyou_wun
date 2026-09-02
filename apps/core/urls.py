@@ -41,6 +41,9 @@ urlpatterns = [
     path('api/gallery', views.api_gallery, name='api_gallery'),
     path('api/credentials/issue/', views.IssueCredentialView.as_view(), name='api_issue_credential'),
     path('api/config/', views.node_config, name='node_config'),
+    path('api/backup/export/', views.api_backup_export, name='api_backup_export'),
+    path('api/backup/import/', views.api_backup_import, name='api_backup_import'),
+    path('api/auth/persona-switch/', views.api_persona_switch, name='api_persona_switch'),
     path('.well-known/nostr.json', views.nip05_well_known, name='nip05_well_known'),
 ]
 

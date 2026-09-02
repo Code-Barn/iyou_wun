@@ -21,14 +21,14 @@ import urllib.error
 from unittest.mock import patch, MagicMock
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import Client, TestCase, override_settings
 from django.contrib.auth.models import User
 from django.urls import reverse
 from django.conf import settings
 
 from .helpers import make_event
 from apps.core.views import hex_to_npub
-from apps.core.models import UserLinkDeck
+from apps.core.models import UserLinkDeck, UserLinkItem
 
 
 
@@ -593,6 +593,24 @@ class DashboardProfileTest(TestCase):
         self.assertContains(response, "Manage in iyou_home")
         self.assertContains(response, "[ ⚙️ Edit ]")
 
+    def test_standard_header_renders_persona_dropdown_with_timeout_container(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="persona-list-container"')
+        self.assertContains(response, 'id="persona-bridge-status"')
+        self.assertContains(response, "Querying local vault personas...")
+
+    def test_nav_renders_mobile_health_indicator(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="mobile-bridge-dot"')
+        self.assertContains(response, 'id="mobile-bridge-label"')
+
     def test_standard_header_displays_user_handle_when_available(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         user = User.objects.create_user(username=f"did:iyou:0x{pk}")
@@ -611,6 +629,45 @@ class DashboardProfileTest(TestCase):
         self.assertContains(response, "lg:col-span-8")
         self.assertContains(response, "lg:col-span-4")
         self.assertContains(response, "TRENDING TOPICS")
+
+    def test_sovereign_creators_render_valid_profile_links(self):
+        viewer_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        viewer = User.objects.create_user(username=f"did:iyou:0x{viewer_pk}")
+        creator_user = User.objects.create_user(username="did:key:z6Mkcreatorlink1")
+        UserLinkDeck.objects.create(
+            user=creator_user,
+            handle="@verified_creator",
+            display_name="Verified Creator",
+            avatar_url="https://example.com/creator_avatar.png",
+            is_public=True,
+            is_verified=True,
+        )
+        self.client.force_login(viewer)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('id="sovereign-creators-list"', content)
+        # The whole creator row links to /profile/<handle>/ with the leading
+        # @ stripped so the route resolves without 404/regex mismatches.
+        self.assertIn('href="/profile/verified_creator"', content)
+        self.assertIn("Verified Creator", content)
+        self.assertIn("@verified_creator", content)
+        self.assertIn("https://example.com/creator_avatar.png", content)
+
+    def test_dashboard_toast_is_hidden_by_default(self):
+        user = User.objects.create_user(username="did:key:z6Mktoasthidden1")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # The legacy #toast element must carry the hidden state in server HTML
+        # so no phantom toast renders on initial page load.
+        toast_snippet = content.split('id="toast"', 1)
+        self.assertEqual(len(toast_snippet), 2)
+        opening_tag = toast_snippet[1].split(">", 1)[0]
+        self.assertIn("hidden", opening_tag)
+        self.assertNotIn("alert(", content)
 
     def test_standard_header_omits_persona_switcher_when_anonymous(self):
         with patch("apps.core.views.relay_req", return_value={}):
@@ -645,6 +702,268 @@ class DashboardProfileTest(TestCase):
             filter_obj = mock_relay_req.call_args[0][0]
             self.assertNotIn("authors", filter_obj)
 
+
+
+class DefaultAvatarFallbackTest(TestCase):
+    def test_profile_page_uses_iyou_symbol_when_profile_has_no_picture(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        npub = hex_to_npub(pk)
+        k0_event = make_event("k0_nopic_1", 0, pubkey=pk, created_at=1700000000, content=json.dumps({
+            "name": "Avatarless Alice",
+            "about": "No picture yet",
+        }))
+        k1_post = make_event("k1_nopic_1", 1, pubkey=pk, created_at=1700000100, content="First post")
+
+        relay_data = {"k0_1": k0_event, "k1_1": k1_post}
+        user = User.objects.create_user(username="did:key:z6Mkdefaultav1")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value=relay_data):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+        self.assertEqual(response.status_code, 200)
+        # Default pfp replaces the letter-initial fallback in the hero avatar
+        # AND in the post-author thumbnail (_thread_post.html).
+        self.assertContains(response, "img/iyou_symbol.png")
+        self.assertContains(response, "openImageModal('/static/img/iyou_symbol.png')")
+        # No letter-initial placeholder circle should render for an avatarless profile.
+        self.assertNotContains(response, "bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center")
+        self.assertNotContains(response, "bg-violet-950 flex items-center justify-center")
+
+    def test_dashboard_uses_iyou_symbol_when_no_avatar_set(self):
+        user = User.objects.create_user(username="did:key:z6Mkdashdefav1")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "img/iyou_symbol.png")
+
+    def test_right_rail_sovereign_creator_without_avatar_uses_iyou_symbol(self):
+        viewer_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        viewer = User.objects.create_user(username=f"did:iyou:0x{viewer_pk}")
+        creator_user = User.objects.create_user(username="did:key:z6Mkcreatordef1")
+        UserLinkDeck.objects.create(
+            user=creator_user,
+            handle="@symbol_creator",
+            display_name="Symbol Creator",
+            is_public=True,
+        )
+        self.client.force_login(viewer)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Symbol Creator")
+        self.assertContains(response, "img/iyou_symbol.png")
+
+
+class PersonaSessionSwitchTest(TestCase):
+    ANCHOR_PK = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+
+    def _login(self, username):
+        user = User.objects.create_user(username=username)
+        self.client.force_login(user)
+        return user
+
+    def test_api_persona_switch_updates_session_user(self):
+        did1 = f"did:iyou:0x{self.ANCHOR_PK}"
+        did2 = "did:key:z6Mkpersonaswtest22"
+        user1 = self._login(did1)
+        UserLinkDeck.objects.create(user=user1, handle="alice_sov", display_name="Alice Sovereign")
+
+        response = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": did2, "persona_name": "Burner Runner", "level": 2}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["did"], did2)
+        self.assertEqual(data["persona_name"], "Burner Runner")
+        self.assertEqual(data["level"], 2)
+        self.assertTrue(data["handle"])
+
+        # The new DID is provisioned with its own isolated link deck.
+        switched = User.objects.get(username=did2)
+        deck2 = UserLinkDeck.objects.get(user=switched)
+        self.assertTrue(deck2.handle)
+        self.assertNotEqual(deck2.handle, "alice_sov")
+
+        # Subsequent requests run as the new persona.
+        dash = self.client.get(reverse("dashboard"))
+        self.assertEqual(dash.status_code, 200)
+        self.assertContains(dash, did2)
+        self.assertNotContains(dash, did1)
+
+        # Switching back restores the original deck untouched (per-DID isolation).
+        resp_back = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": did1, "persona_name": "", "level": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp_back.status_code, 200)
+        self.assertTrue(resp_back.json()["success"])
+        user1.refresh_from_db()
+        self.assertEqual(UserLinkDeck.objects.get(user=user1).handle, "alice_sov")
+
+    def test_api_persona_switch_gates_method_and_did(self):
+        self._login(f"did:iyou:0x{self.ANCHOR_PK}")
+
+        # GET is not allowed.
+        get_resp = self.client.get(reverse("api_persona_switch"))
+        self.assertEqual(get_resp.status_code, 405)
+
+        # Malformed / non-DID targets are rejected.
+        bad_resp = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"}),
+            content_type="application/json",
+        )
+        self.assertEqual(bad_resp.status_code, 400)
+
+        # Anonymous callers are rejected without a challenge signature.
+        anon_client = Client()
+        anon_resp = anon_client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": "did:key:z6Mkanonreject1"}),
+            content_type="application/json",
+        )
+        self.assertEqual(anon_resp.status_code, 401)
+
+    def test_header_display_hierarchy_rules(self):
+        anchor_did = f"did:iyou:0x{self.ANCHOR_PK}"
+        burner_username = "did:key:z6MknoHandleCCCC"
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            # (a) Deck handle outranks persona name.
+            u1 = User.objects.create_user(username=anchor_did)
+            UserLinkDeck.objects.create(user=u1, handle="carol_sov", display_name="Carol")
+            c1 = Client()
+            c1.force_login(u1)
+            s1 = c1.session
+            s1["active_persona_name"] = "Burner"
+            s1["active_persona_level"] = 2
+            s1.save()
+            r1 = c1.get(reverse("feed"))
+            self.assertContains(r1, "@carol_sov")
+            self.assertNotContains(r1, "Burner (L2)")
+
+            # (b) Persona name (with level) renders when there is no handle.
+            u2 = User.objects.create_user(username=burner_username)
+            c2 = Client()
+            c2.force_login(u2)
+            s2 = c2.session
+            s2["active_persona_name"] = "Burner"
+            s2["active_persona_level"] = 2
+            s2.save()
+            r2 = c2.get(reverse("feed"))
+            self.assertContains(r2, "Burner (L2)")
+
+            # (c) No persona state and level 1 fall back to the generic label.
+            c3 = Client()
+            c3.force_login(u2)
+            r3 = c3.get(reverse("feed"))
+            self.assertContains(r3, "Primary Identity (L1)")
+
+            # (d) Higher-level persona without a name formats as truncated DID + level.
+            c4 = Client()
+            c4.force_login(u2)
+            s4 = c4.session
+            s4["active_persona_level"] = 2
+            s4.save()
+            r4 = c4.get(reverse("feed"))
+            content = r4.content.decode()
+            self.assertIn(burner_username[:16] + "... (L2)", content)
+            self.assertNotIn("Primary Identity (L1)", content)
+
+    def test_header_injects_current_session_did(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            self._login(f"did:iyou:0x{self.ANCHOR_PK}")
+            response = self.client.get(reverse("feed"))
+            self.assertContains(
+                response,
+                f'window.CURRENT_SESSION_DID = "did:iyou:0x{self.ANCHOR_PK}";',
+            )
+
+
+class BackupGraphTest(TestCase):
+    def test_api_backup_export_requires_auth(self):
+        response = self.client.get(reverse("api_backup_export"))
+        self.assertIn(response.status_code, (302, 401))
+
+    def test_api_backup_export_returns_valid_json_schema(self):
+        user = User.objects.create_user(username="did:key:z6Mkbackupexport1")
+        deck = UserLinkDeck.objects.create(user=user, handle="@export_handle")
+        UserLinkItem.objects.create(
+            deck=deck, title="Site", url="https://example.com", icon_category="website", order=0
+        )
+        self.client.force_login(user)
+        response = self.client.get(reverse("api_backup_export"))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("attachment", response.get("Content-Disposition", ""))
+        data = response.json()
+        for key in ("version", "exported_at", "user", "deck", "contacts", "relays", "circles", "muted"):
+            self.assertIn(key, data)
+        self.assertEqual(data["deck"]["handle"], "@export_handle")
+        self.assertEqual(data["deck"]["items"][0]["title"], "Site")
+
+    def test_api_backup_import_restores_user_graph(self):
+        user = User.objects.create_user(username="did:key:z6Mkbackupimport1")
+        self.client.force_login(user)
+        snapshot = {
+            "version": 1,
+            "user": user.username,
+            "deck": {
+                "handle": "@restored_handle",
+                "display_name": "Restored Sovereign",
+                "items": [{"title": "Git", "url": "https://github.com/x", "icon_category": "github"}],
+            },
+            "contacts": [{"pubkey": "a" * 64, "petname": "alice"}],
+            "relays": ["wss://restored.example"],
+            "circles": ["inner"],
+            "muted": ["b" * 64],
+        }
+        response = self.client.post(
+            reverse("api_backup_import"),
+            data=json.dumps(snapshot),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["restored_contacts"], 1)
+        self.assertEqual(data["restored_relays"], 1)
+
+        deck = UserLinkDeck.objects.get(user=user)
+        self.assertEqual(deck.handle, "restored_handle")
+        self.assertEqual(deck.display_name, "Restored Sovereign")
+        self.assertEqual(deck.items.count(), 1)
+        self.assertEqual(deck.items.first().title, "Git")
+
+    def test_dashboard_renders_backup_recovery_controls(self):
+        user = User.objects.create_user(username="did:key:z6Mkbackupcontrols1")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("sovereign-backup", content.lower().replace("&amp;", "&"))
+        self.assertIn(reverse("api_backup_export"), content)
+        self.assertIn("backup-restore-form", content)
+
+    def test_feed_interactions_carries_blossom_fallback_cascade(self):
+        src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()
+        self.assertIn("handleMediaError", src)
+        self.assertIn("http://127.0.0.1:9002/", src)
+        self.assertIn("https://cdn.iyou.me/", src)
+        self.assertIn("https://nostr.download/", src)
+        self.assertIn("data-fallback-tier", src)
+        self.assertIn("Media Unavailable on Mesh", src)
+        self.assertIn("onerror=\"window.handleMediaError", src)
+
+    def test_relay_pool_carries_auto_quarantine_contract(self):
+        src = (settings.BASE_DIR / "static" / "js" / "relay_pool.js").read_text()
+        self.assertIn("quarantined", src)
+        self.assertIn("QUARANTINE_THRESHOLD", src)
+        self.assertIn("retryQuarantinedRelays", src)
+        self.assertIn("_recordBroadcastFailure", src)
+        self.assertIn("status !== \"quarantined\"", src)
 
 
 class MediaUploadProxyViewTest(TestCase):
@@ -1423,6 +1742,58 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertIn("#alice_iyou", global_block)
         self.assertIn("#bob_global", global_block)
 
+    def test_feed_right_rail_renders_empty_state_when_zero_tags(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('id="trending-global-list"', content)
+        self.assertIn('id="trending-iyou-list"', content)
+        # Event batch has no #t tags, so the real-time lists fall to empty notices.
+        self.assertIn("No active trending tags in mesh.", content)
+        self.assertIn("No trending tags in iyou circle yet.", content)
+        # No hardcoded mock tag cards or click handlers render without real tags.
+        self.assertNotIn("filterByTag(", content)
+        self.assertNotIn("#nostr", content)
+        self.assertNotIn("#sovereign", content)
+
+    def test_feed_right_rail_renders_trending_tags_with_click_handlers(self):
+        from django.contrib.auth import get_user_model
+        from apps.core.models import UserLinkDeck
+        from apps.core.views import did_to_pubkey
+
+        User = get_user_model()
+        alice_did = "did:key:z6Mkalice_trendclick1"
+        user_alice, _ = User.objects.get_or_create(username=alice_did)
+        UserLinkDeck.objects.get_or_create(user=user_alice, handle="alice", display_name="Alice")
+        alice_pk = did_to_pubkey(alice_did)
+        self.assertIsNotNone(alice_pk)
+        bob_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+
+        relay_events = {
+            "trend_i_note": make_event(
+                "trend_i_note", 1, pubkey=alice_pk,
+                content="native mesh", tags=[["t", "sovereign"]],
+            ),
+            "trend_g_note": make_event(
+                "trend_g_note", 1, pubkey=bob_pk,
+                content="mesh world", tags=[["t", "bitcoin"]],
+            ),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # Tag cards route through the interactive filterByTag click handler with
+        # the real tag slug, and render the #-prefixed name + exact frequency.
+        self.assertIn("filterByTag('sovereign')", content)
+        self.assertIn("filterByTag('bitcoin')", content)
+        self.assertIn(">#sovereign<", content)
+        self.assertIn(">#bitcoin<", content)
+        self.assertIn("1 note", content)
+
     def test_layer2_nav_renders_nsfw_shield_toggle(self):
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("feed"))
@@ -1492,7 +1863,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, 'class="translate-btn')
         self.assertContains(response, 'data-note-id="es_note_trans"')
         self.assertContains(response, 'id="translated-box-es_note_trans"')
-        self.assertContains(response, "translateNote('es_note_trans', 'es', 'en')")
+        self.assertContains(response, "translateNote(this, 'es_note_trans', 'es')")
 
     def test_api_translate_endpoint_returns_translated_payload(self):
         from django.core.cache import cache
@@ -1593,9 +1964,9 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "TRENDING TOPICS")
-        self.assertContains(response, "#bitcoin")
-        self.assertContains(response, "#nostr")
-        self.assertContains(response, "#wine")
+        # No real batch tags -> real-time aggregator renders empty notices, not mocks.
+        self.assertContains(response, "No active trending tags in mesh.")
+        self.assertContains(response, "No trending tags in iyou circle yet.")
         self.assertContains(response, "SOVEREIGN CREATORS")
         self.assertContains(response, "Ben Justman")
         self.assertContains(response, "Dan Byers")
@@ -1626,7 +1997,11 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("suggested_creators", response.context)
         self.assertIn("trending_tags", response.context)
-        self.assertGreaterEqual(len(response.context["trending_tags"]), 3)
+        self.assertIn("trending_tags_global", response.context)
+        self.assertIn("trending_tags_iyou", response.context)
+        # No event batch means no mock tags: both real-time lists are empty.
+        self.assertEqual(response.context["trending_tags_global"], [])
+        self.assertEqual(response.context["trending_tags_iyou"], [])
         creators = response.context["suggested_creators"]
         self.assertTrue(any(c.handle == "creatorone" for c in creators))
 
@@ -2236,8 +2611,73 @@ class Phase24ViewsTest(TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data["success"])
-        # The mock translator should handle this known phrase
+        # The offline mock translator handles this known phrase deterministically
+        # (no external network), so the exact translation is asserted.
         self.assertEqual(data["translated_text"], "Hello world!")
+
+    @override_settings(TRANSLATION_API_URL="http://translator.test/translate")
+    def test_api_translate_backend_success_is_hermetic(self):
+        """Hermetic: the external backend call is mocked; no network is touched."""
+        url = reverse("api_translate")
+        with patch("apps.core.views._translate_via_backend", return_value="Hola mundo") as mock_backend:
+            response = self.client.post(
+                url,
+                data=json.dumps({"text": "Hello world", "source_lang": "en", "target_lang": "es"}),
+                content_type="application/json",
+            )
+        mock_backend.assert_called_once()
+        mock_backend.assert_called_once_with("Hello world", "en", "es", "http://translator.test/translate")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["translated_text"], "Hola mundo")
+        self.assertFalse(data["cached"])
+
+    @override_settings(TRANSLATION_API_URL="http://translator.test/translate")
+    def test_api_translate_backend_timeout_falls_back_gracefully(self):
+        """Hermetic: a backend timeout degrades to 200 with offline fallback text."""
+        url = reverse("api_translate")
+        with patch("apps.core.views._translate_via_backend", return_value=None) as mock_backend:
+            response = self.client.post(
+                url,
+                data=json.dumps({"text": "¡hola mundo!", "source_lang": "es", "target_lang": "en"}),
+                content_type="application/json",
+            )
+        mock_backend.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["translated_text"], "Hello world!")
+
+    @override_settings(TRANSLATION_API_URL="http://translator.test/translate")
+    def test_api_translate_backend_exception_returns_200_fallback(self):
+        """Hermetic: any backend exception is suppressed and returns 200 fallback."""
+        url = reverse("api_translate")
+        with patch("apps.core.views._translate_via_backend", side_effect=Exception("boom")) as mock_backend:
+            response = self.client.post(
+                url,
+                data=json.dumps({"text": "guten morgen", "source_lang": "de", "target_lang": "en"}),
+                content_type="application/json",
+            )
+        mock_backend.assert_called_once()
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["translated_text"], "good morning")
+
+    def test_api_translate_unknown_phrase_offline_fallback(self):
+        """Hermetic: unknown text degrades to the offline unavailable marker, still 200."""
+        url = reverse("api_translate")
+        response = self.client.post(
+            url,
+            data=json.dumps({"text": "xq virtual phrase zz", "source_lang": "fr", "target_lang": "en"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertIn("translated_text", data)
+        self.assertIn("Translation unavailable", data["translated_text"])
 
     def test_api_translate_exceeds_max_length_returns_400(self):
         """Asserts text exceeding 1000 characters returns 400 error."""

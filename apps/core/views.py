@@ -25,11 +25,12 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections import Counter
 from datetime import datetime, timedelta
 
 import bech32
 from django.conf import settings
-from django.contrib.auth import get_user_model
+from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
@@ -53,6 +54,230 @@ from .utils import validate_external_bio_url, verify_external_profile_token
 
 logger = logging.getLogger(__name__)
 UserModel = get_user_model()
+
+
+BACKUP_VERSION = 1
+
+
+def _extract_backup_payload(request):
+    """Parse a backup snapshot from a JSON request body or an uploaded file/field."""
+    try:
+        data = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, TypeError):
+        data = request.POST.dict()
+        backup_str = data.get("backup")
+        if backup_str:
+            try:
+                data = json.loads(backup_str)
+            except (json.JSONDecodeError, TypeError):
+                data = {}
+    return data if isinstance(data, dict) else {}
+
+
+def _serialize_deck(deck):
+    """Serialize a UserLinkDeck plus its active link items to a plain dict."""
+    if not deck:
+        return None
+    return {
+        "handle": deck.handle,
+        "discriminator": deck.discriminator,
+        "display_name": deck.display_name,
+        "headline": deck.headline,
+        "avatar_url": deck.avatar_url,
+        "banner_url": deck.banner_url,
+        "nip05": deck.nip05,
+        "lud16": deck.lud16,
+        "is_public": deck.is_public,
+        "items": [
+            {
+                "title": item.title,
+                "url": item.url,
+                "icon_category": item.icon_category,
+                "is_ecosystem_link": item.is_ecosystem_link,
+                "order": item.order,
+                "is_active": item.is_active,
+            }
+            for item in deck.items.all()
+        ],
+    }
+
+
+@login_required
+def api_backup_export(request):
+    """Export a user's sovereign graph as a downloadable timestamped JSON snapshot."""
+    if request.method not in ("GET", "POST"):
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    client_graph = _extract_backup_payload(request) if request.method == "POST" else {}
+
+    deck = UserLinkDeck.objects.filter(user=request.user).first()
+
+    snapshot = {
+        "version": BACKUP_VERSION,
+        "exported_at": timezone.now().isoformat(),
+        "user": request.user.username,
+        "deck": _serialize_deck(deck),
+        "contacts": client_graph.get("contacts", []),
+        "relays": client_graph.get("relays", []),
+        "circles": client_graph.get("circles", []),
+        "muted": client_graph.get("muted", []),
+    }
+
+    timestamp = timezone.now().strftime("%Y%m%dT%H%M%S")
+    filename = f"iyou_wun_backup_{timestamp}.json"
+    response = JsonResponse(snapshot)
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+
+@csrf_exempt
+@login_required
+def api_backup_import(request):
+    """Restore a sovereign graph from an uploaded JSON snapshot (atomic)."""
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    backup = _extract_backup_payload(request)
+    if not backup.get("deck") and not backup.get("contacts") and not backup.get("relays"):
+        return JsonResponse(
+            {"error": "Invalid backup: expected a deck, contacts, or relays key"},
+            status=400,
+        )
+
+    restored_contacts = 0
+    restored_relays = 0
+
+    try:
+        with transaction.atomic():
+            # -- Deck & link items (server-persisted) --
+            deck_data = backup.get("deck")
+            if isinstance(deck_data, dict) and deck_data.get("handle"):
+                deck, _created = UserLinkDeck.objects.get_or_create(user=request.user)
+                handle = str(deck_data.get("handle"))[:32].lstrip("@")
+                if not handle:
+                    handle = "user"
+                deck.handle = handle
+                deck.discriminator = int(deck_data.get("discriminator") or 0)
+                deck.display_name = str(deck_data.get("display_name") or "")[:100]
+                deck.headline = str(deck_data.get("headline") or "")[:160]
+                deck.avatar_url = str(deck_data.get("avatar_url") or "")[:2048]
+                deck.banner_url = str(deck_data.get("banner_url") or "")[:2048]
+                deck.nip05 = str(deck_data.get("nip05") or "")[:300]
+                deck.lud16 = str(deck_data.get("lud16") or "")[:300]
+                deck.is_public = bool(deck_data.get("is_public", True))
+                deck.save()
+
+                deck.items.all().delete()
+                items = deck_data.get("items") or []
+                new_items = []
+                for i, item_data in enumerate(items):
+                    if not isinstance(item_data, dict):
+                        continue
+                    title = str(item_data.get("title") or "")[:64]
+                    url = str(item_data.get("url") or "").strip()
+                    if not title or not url:
+                        continue
+                    new_items.append(
+                        UserLinkItem(
+                            deck=deck,
+                            title=title,
+                            url=url[:2048],
+                            icon_category=str(
+                                item_data.get("icon_category") or "link"
+                            )[:20],
+                            is_ecosystem_link=bool(item_data.get("is_ecosystem_link")),
+                            order=int(item_data.get("order") or i),
+                            is_active=item_data.get("is_active", True) is not False,
+                        )
+                    )
+                if new_items:
+                    UserLinkItem.objects.bulk_create(new_items)
+
+    except IntegrityError:
+        return JsonResponse(
+            {"error": "Import failed: handle conflict or malformed deck data"},
+            status=409,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Backup import failed: %s", exc)
+        return JsonResponse({"error": f"Import failed: {exc}"}, status=500)
+
+    # Contacts & relays are client-local graph data; count them for the response
+    # so the client can reconcile localStorage with the restore result.
+    restored_contacts = len([c for c in backup.get("contacts", []) if c])
+    restored_relays = len([r for r in backup.get("relays", []) if r])
+
+    return JsonResponse(
+        {
+            "success": True,
+            "restored_contacts": restored_contacts,
+            "restored_relays": restored_relays,
+        }
+    )
+
+
+def api_persona_switch(request):
+    """Re-anchor the active browser session to a different sovereign persona DID.
+
+    Each DID gets an isolated ``UserLinkDeck``; the Django session is re-logged
+    into the requested persona so subsequent requests (and the header identity
+    chain) render against that sovereign key.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "Authentication required (or a valid challenge signature from the DID)"},
+            status=401,
+        )
+
+    try:
+        payload = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, TypeError):
+        payload = request.POST.dict()
+
+    did = str(payload.get("did") or "").strip()
+    persona_name = str(payload.get("persona_name") or "")[:80]
+    try:
+        level = int(payload.get("level") or 1)
+    except (TypeError, ValueError):
+        level = 1
+    if level < 1:
+        level = 1
+
+    if not did or not did.startswith("did:"):
+        return JsonResponse({"error": "Invalid or missing did"}, status=400)
+
+    target_user, created = UserModel.objects.get_or_create(username=did)
+    if created:
+        target_user.set_unusable_password()
+        target_user.save()
+
+    if hasattr(target_user, "account_tier"):
+        target_user.account_tier = "sovereign"
+        target_user.save(update_fields=["account_tier"])
+
+    deck = UserLinkDeck.objects.filter(user=target_user).first()
+    if deck is None:
+        base = re.sub(r"[^a-z0-9_-]", "", re.sub(r"\s+", "_", persona_name).lower()).strip("_-")
+        if len(base) < 3:
+            base = "persona"
+        digest = hashlib.sha1(did.encode("utf-8")).hexdigest()[:8]
+        deck = claim_handle(target_user, f"{base[:20]}_{digest}")
+
+    login(request, target_user, backend="django.contrib.auth.backends.ModelBackend")
+    request.session["active_persona_name"] = persona_name
+    request.session["active_persona_level"] = level
+    request.session.modified = True
+
+    return JsonResponse({
+        "success": True,
+        "did": did,
+        "persona_name": persona_name,
+        "level": level,
+        "handle": deck.handle,
+    })
 
 
 def get_relays_for_request(request=None):
@@ -123,96 +348,39 @@ def get_iyou_pubkeys():
     return list(pubkeys)
 
 
-def calculate_trending_tags(notes, scope="global"):
+def calculate_trending_tags(events: list[dict], iyou_pubkeys: set[str] | None = None) -> tuple[list[dict], list[dict]]:
+    """Aggregate real #t tag frequencies from a deduplicated renderable event batch.
+
+    Returns a (global_tags, iyou_tags) tuple of formatted tag metadata ordered by
+    descending frequency. No mock or hardcoded fallback numbers — an empty event
+    batch (or a batch with no #t tags) produces empty tag lists.
     """
-    Calculate top trending hashtags across notes stream with support for iyou/global scopes.
-    Extracts explicit #t tags and inline #hashtag tokens from note content.
-    Returns top 4 tags formatted with count and scope metadata.
-    """
-    if not notes:
-        return []
+    global_counts = Counter()
+    iyou_counts = Counter()
+    iyou_keys = iyou_pubkeys or set()
 
-    from collections import Counter
-    import re
-
-    # 1. Author filtering for iyou scope
-    filtered_notes = []
-    if scope == "iyou":
-        try:
-            iyou_usernames = set(UserLinkDeck.objects.values_list("user__username", flat=True))
-        except Exception:
-            iyou_usernames = set()
-
-        iyou_keys = set()
-        for u in iyou_usernames:
-            if u:
-                iyou_keys.add(u.lower())
-                pk = did_to_pubkey(u)
-                if pk:
-                    iyou_keys.add(pk.lower())
-                try:
-                    np = hex_to_npub(pk or u)
-                    if np:
-                        iyou_keys.add(np.lower())
-                except Exception:
-                    pass
-
-        for n in notes:
-            if not isinstance(n, dict):
-                continue
-            pk = str(n.get("pubkey") or n.get("pubkey_hex") or "").lower()
-            did = str(n.get("author_did") or "").lower()
-            npub = str(n.get("npub") or "").lower()
-            if pk in iyou_keys or did in iyou_keys or npub in iyou_keys:
-                filtered_notes.append(n)
-    else:
-        filtered_notes = [n for n in notes if isinstance(n, dict)]
-
-    # 2. Extract tags & inline hashtags
-    tag_counts = Counter()
-    for n in filtered_notes:
-        seen_in_note = set()
-        # Tags array
-        tags = n.get("tags") or []
+    for ev in events:
+        pk = ev.get("pubkey", "")
+        tags = ev.get("tags", [])
         for t in tags:
-            if isinstance(t, (list, tuple)) and len(t) > 1 and t[0] == "t" and t[1]:
-                tag_val = str(t[1]).strip().lstrip("#").lower()
-                if tag_val and tag_val not in seen_in_note:
-                    seen_in_note.add(tag_val)
-                    tag_counts[tag_val] += 1
+            if isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] == "t" and t[1].strip():
+                tag_name = t[1].strip().lower().lstrip("#")
+                global_counts[tag_name] += 1
+                if pk in iyou_keys:
+                    iyou_counts[tag_name] += 1
 
-        # Content regex for #hashtags
-        content = str(n.get("content") or n.get("display_content") or "")
-        for match in re.findall(r"#([a-zA-Z0-9_\-]+)", content):
-            tag_val = match.strip().lower()
-            if tag_val and tag_val not in seen_in_note:
-                seen_in_note.add(tag_val)
-                tag_counts[tag_val] += 1
+    def format_tags(counter: Counter, limit: int = 6) -> list[dict]:
+        return [
+            {
+                "name": f"#{tag}",
+                "tag_slug": tag,
+                "count": count,
+                "display_count": f"{count} note{'s' if count != 1 else ''}",
+            }
+            for tag, count in counter.most_common(limit)
+        ]
 
-    CATEGORY_MAP = {
-        "bitcoin": "Finance & Sovereign Capital",
-        "btc": "Finance & Sovereign Capital",
-        "sats": "Finance & Sovereign Capital",
-        "crypto": "Cryptography & ZK",
-        "nostr": "Protocol & Relays",
-        "mesh": "Protocol & Relays",
-        "relay": "Protocol & Relays",
-        "nip10": "Protocol & Relays",
-        "iyou": "Ecosystem & Identity",
-        "wine": "Agriculture & Viticulture",
-    }
-
-    top_tags = []
-    for name, count in tag_counts.most_common(4):
-        category = CATEGORY_MAP.get(name, "General & Sovereign Mesh")
-        top_tags.append({
-            "name": name,
-            "count": count,
-            "scope": scope,
-            "category": category,
-        })
-
-    return top_tags
+    return format_tags(global_counts), format_tags(iyou_counts)
 
 
 def enrich_image_grid(note):
@@ -330,25 +498,14 @@ class FeedView(TemplateView):
         context["suggested_creators"] = list(creators_qs[:4])
 
         notes_for_trending = context.get("notes") or []
-        trending_iyou = calculate_trending_tags(notes_for_trending, scope="iyou")
-        trending_global = calculate_trending_tags(notes_for_trending, scope="global")
+        iyou_pubkeys = set(get_iyou_pubkeys())
+        trending_global, trending_iyou = calculate_trending_tags(
+            notes_for_trending, iyou_pubkeys=iyou_pubkeys
+        )
 
-        default_iyou = [
-            {"name": "nostr", "category": "Protocol & Relays", "count": "1.2k", "scope": "iyou"},
-            {"name": "sovereign", "category": "Identity & Keys", "count": "840", "scope": "iyou"},
-            {"name": "iyou", "category": "Ecosystem & Mesh", "count": "450", "scope": "iyou"},
-            {"name": "bitcoin", "category": "Finance & Sovereign Capital", "count": "320", "scope": "iyou"},
-        ]
-        default_global = [
-            {"name": "bitcoin", "category": "Finance & Sovereign Capital", "count": "1.4k", "scope": "global"},
-            {"name": "nostr", "category": "Protocol & Relays", "count": "920", "scope": "global"},
-            {"name": "wine", "category": "Agriculture & Viticulture", "count": "312", "scope": "global"},
-            {"name": "crypto", "category": "Cryptography & ZK", "count": "280", "scope": "global"},
-        ]
-
-        context["trending_tags_iyou"] = trending_iyou if trending_iyou else default_iyou
-        context["trending_tags_global"] = trending_global if trending_global else default_global
-        context["trending_tags"] = context["trending_tags_iyou"]
+        context["trending_tags_iyou"] = trending_iyou
+        context["trending_tags_global"] = trending_global
+        context["trending_tags"] = trending_iyou or trending_global
 
         return context
 
@@ -728,8 +885,10 @@ def api_feed(request):
     oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
     has_more = bool(roots and len(roots) > 0)
 
-    trending_tags_iyou = calculate_trending_tags(feed_data["roots"], scope="iyou")
-    trending_tags_global = calculate_trending_tags(feed_data["roots"], scope="global")
+    iyou_pubkeys = set(get_iyou_pubkeys())
+    trending_tags_global, trending_tags_iyou = calculate_trending_tags(
+        feed_data["roots"], iyou_pubkeys=iyou_pubkeys
+    )
 
     return JsonResponse({
         "success": True,
@@ -3179,6 +3338,33 @@ class MediaUploadProxyView(View):
 
 
 @csrf_exempt
+def _translate_via_backend(text, source_lang, target_lang, trans_url):
+    """Call the external translation backend via urllib with a short timeout.
+
+    Returns the translated string, or None if the backend is unreachable,
+    times out, or returns an unexpected payload — so callers can degrade
+    gracefully to the offline fallback translator without crashing.
+    """
+    try:
+        req_data = json.dumps({
+            "q": text,
+            "source": source_lang if source_lang != "auto" else "",
+            "target": target_lang,
+            "format": "text",
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            trans_url,
+            data=req_data,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            return res.get("translatedText")
+    except Exception as e:
+        logger.warning("Translation backend error: %s", e)
+        return None
+
+
 def api_translate(request):
     """Translate note content on-demand with caching and resilient fallback.
     
@@ -3225,27 +3411,18 @@ def api_translate(request):
     trans_url = getattr(settings, "TRANSLATION_API_URL", "")
     if trans_url:
         try:
-            req_data = json.dumps({
-                "q": text,
-                "source": source_lang if source_lang != "auto" else "",
-                "target": target_lang,
-                "format": "text",
-            }).encode("utf-8")
-            req = urllib.request.Request(
-                trans_url,
-                data=req_data,
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=4) as resp:
-                res = json.loads(resp.read().decode("utf-8"))
-                translated_text = res.get("translatedText")
+            translated_text = _translate_via_backend(text, source_lang, target_lang, trans_url)
         except Exception as e:
+            # Hermetic resilience: never crash on network/backend failure — fall
+            # through to the offline translator and still return a 200 payload.
             logger.warning("Translation backend error: %s", e)
+            translated_text = None
 
     # 3. Fallback / Mock Translator for offline / test environments
     if not translated_text:
         translations_dict = {
             "¡hola mundo nostr! ¿cómo estás?": "Hello nostr world! How are you?",
+            "¡hola mundo!": "Hello world!",
             "hola mundo": "hello world",
             "buenos días": "good morning",
             "buenas tardes": "good afternoon",

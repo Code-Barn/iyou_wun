@@ -77,3 +77,38 @@ class ChatSessionBootstrapTest(TestCase):
         # The bootstrap must reference the session-driven credentials.
         self.assertIn("session.ws_url", content)
         self.assertIn("session.jid", content)
+
+
+class Nip04CryptoContractTest(TestCase):
+    def test_chat_view_context_includes_nip04_bridge_contracts(self):
+        bridge_src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
+        chat_src = (settings.BASE_DIR / "static" / "js" / "floating_chat.js").read_text()
+        for marker in (
+            "NIP04_ENCRYPT",
+            "NIP04_DECRYPT",
+            "nip04Encrypt",
+            "nip04Decrypt",
+            "encrypted_payload",
+        ):
+            self.assertIn(marker, bridge_src)
+        for marker in (
+            "nip04Encrypt",
+            "nip04Decrypt",
+            "kind: 4",
+            "NIP-04 E2EE Session",
+            "Sovereign Enclave Mesh",
+        ):
+            self.assertIn(marker, chat_src)
+
+    def test_floating_dock_template_renders_encryption_badge_containers(self):
+        user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
+        self.client.force_login(user)
+        response = self.client.get(reverse("dashboard"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn('id="docked-chat-windows"', content)
+        self.assertIn('id="floating-dock-security-status"', content)
+        self.assertIn('id="dock-security-badge-e2ee"', content)
+        self.assertIn('id="dock-security-badge-mesh"', content)
+        self.assertIn("NIP-04 E2EE Session", content)
+        self.assertIn("Sovereign Enclave Mesh", content)

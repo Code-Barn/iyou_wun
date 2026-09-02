@@ -1,4 +1,16 @@
-# Stage 1: Build Layer
+# Stage 1: Node.js Assets — compile Tailwind CSS
+FROM node:20-alpine AS assets
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY tailwind.config.js postcss.config.js ./
+COPY static/css/input.css ./static/css/input.css
+COPY apps/ ./apps/
+COPY templates/ ./templates/
+RUN npm run build:css
+
+# Stage 2: Build Layer
 FROM python:3.12-slim AS builder
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -19,6 +31,10 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --no-dev
 
 COPY . .
+
+# Copy compiled Tailwind CSS from assets stage before collectstatic
+COPY --from=assets /app/static/css/output.css /app/static/css/output.css
+
 ENV DJANGO_SETTINGS_MODULE=config.settings
 RUN OIDC_RP_CLIENT_ID=builder OIDC_RP_CLIENT_SECRET=builder OIDC_RP_CALLBACK_URL=builder \
     uv run python manage.py collectstatic --noinput

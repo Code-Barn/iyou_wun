@@ -14,7 +14,18 @@
     "use strict";
 
     // ---------- Constants & Defaults ----------
-    const DEFAULT_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me"];
+    // The sovereign local relay (ws://127.0.0.1:9003) is only used on a local HTTP
+    // dev origin. Over HTTPS we rely solely on the secure public relay pool so we
+    // never touch an unencrypted mixed-content socket.
+    function getDefaultRelays() {
+        const local = (typeof window !== "undefined" && window.location &&
+            window.location.protocol === "http:" &&
+            (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" || window.location.hostname === "0.0.0.0"))
+            ? ["ws://127.0.0.1:9003"]
+            : [];
+        return ["wss://relay.iyou.me"].concat(local);
+    }
+    let DEFAULT_RELAYS = getDefaultRelays();
     const DEFAULT_BRIDGE_WS_URL = "wss://home.iyou.me:9001";
     const RELAY_QUERY_TIMEOUT_MS = 3000;
     const RELAY_BROADCAST_TIMEOUT_MS = 4000;
@@ -67,13 +78,24 @@
 
     function getRelays() {
         if (typeof global.getRelays === "function") {
-            return global.getRelays();
+            return sanitizeRelays(global.getRelays());
         }
         const stored = localStorage.getItem("wun_relays");
         if (stored) {
-            try { return JSON.parse(stored); } catch (e) { /* ignore */ }
+            try { return sanitizeRelays(JSON.parse(stored)); } catch (e) { /* ignore */ }
         }
-        return DEFAULT_RELAYS;
+        return sanitizeRelays(DEFAULT_RELAYS);
+    }
+
+    // Strip unencrypted ws:// relays (e.g. the sovereign 9003 socket) over HTTPS
+    // so mixed-content connections are never attempted in production.
+    function sanitizeRelays(list) {
+        if (!Array.isArray(list)) return [];
+        const proto = (typeof window !== "undefined" && window.location) ? window.location.protocol : "";
+        if (proto === "https:") {
+            return list.filter((r) => !String(r).toLowerCase().startsWith("ws://"));
+        }
+        return list;
     }
 
     function getBridgeWsUrl() {

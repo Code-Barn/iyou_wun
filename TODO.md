@@ -189,6 +189,108 @@
   - `test_thread_post_omits_translate_button_for_english_notes` in test_views.py.
 - [x] **27.7 TODO.md Updated:** Documented Phase 27 implementation — **Done 2026-08-31**
 
+### Phase 28: Trending Topics Real-Time Aggregator & Tag-Click Filtering
+- [x] **28.1 Real-Time Tag Aggregator (`apps/core/views.py`):**
+  - Purged all hardcoded mock trending dictionaries (`#nostr 1.2k`, `#sovereign 840`, `#iyou 450`).
+  - `calculate_trending_tags(events, iyou_pubkeys=None) -> (global, iyou)` now aggregates real `#t` tags from the deduplicated renderable event batch via `Counter`, with case-insensitive slug normalization and exact integer frequencies.
+  - iyou isolation tallies only authors present in the registered sovereign pubkey set.
+  - `FeedView.get_context_data()` passes real `trending_tags_global`/`trending_tags_iyou` to the right rail; `api_feed` returns the same real-time aggregates.
+- [x] **28.2 Interactive Tag Triggers (`templates/includes/_feed_right_rail.html`):**
+  - `[ 🌐 Global ]`/`[ ⚡ iyou ]` scope tabs (`#trending-tab-global`/`#trending-tab-iyou`) toggle `#trending-global-list`/`#trending-iyou-list`.
+  - Tag cards render real tag metadata (`{{ tag.name }}`, `{{ tag.display_count }}`) and invoke `filterByTag('<tag_slug>')` on click.
+  - Empty-state notices render when a batch has no `#t` tags.
+- [x] **28.3 Client-Side Tag Filter Routing (`static/js/circle_feed_filter.js`):**
+  - `filterByTag(tagSlug)` injects `#<slug>` into `#feed-search-input`, applies filters, smooth-scrolls to `#feed-container`, and reflects `?q=%23<slug>` via `window.history.replaceState`; exposed as `window.filterByTag`.
+- [x] **28.4 Tests & Verification:**
+  - `test_calculate_trending_tags_aggregates_real_counts` and `test_calculate_trending_tags_isolates_iyou_pubkeys` in `test_feed.py`.
+  - `test_feed_right_rail_renders_empty_state_when_zero_tags` and `test_feed_right_rail_renders_trending_tags_with_click_handlers` in `test_views.py`.
+  - `npm run build:css`, `manage.py check`, `manage.py test apps.core`, `ruff check .` all clean — **Done 2026-09-01**
+
+### Phase 29: Bridge Health UX, Persona Timeout, Mobile Diagnostics & Test Reconciliation
+- [x] **29.1 Persona Switcher Bridge Health Timeout (`static/js/bridge_client.js`, `templates/includes/_standard_header.html`):**
+  - Added `id="persona-bridge-status"` to the "Bridge Connected" pill in the "Active Enclave Personas" header divider.
+  - `queryVaultPersonas()` (2500ms timeout) sends `list_profiles` + `LIST_PERSONAS` on socket open or channel open, and arms `_personaQueryTimer`.
+  - `markPersonaBridgeOffline()` renders an amber "Enclave Offline" notice in `#persona-list-container` and flips the pill to `BRIDGE OFFLINE`; idempotent.
+  - Persona-list responses (`profiles_list`, `LIST_PERSONAS_RESPONSE`, `personas_list`) disarm the timer and restore the connected pill.
+  - `togglePersonaDropdown()` and `connect()` delegate to `queryVaultPersonas()`; socket error/close paths call `markPersonaBridgeOffline()` when a query is active.
+- [x] **29.2 Mobile Mesh/Bridge Health Indicator (`templates/_nav.html`, `static/js/relay_pool.js`):**
+  - Compact `lg:hidden` pill with `#mobile-bridge-dot` + `#mobile-bridge-label` ("Mesh") in the nav top-row controls.
+  - `updateMobileBridgeHealth(online)` updates dot (`bg-emerald-500`/`bg-amber-500`) and label ("Online"/"Manual"); exposed as `window.updateMobileBridgeHealth`.
+  - `relay_pool._updateHealthUI()` drives it from relay counts; `bridge_client` drives it from bridge socket open/close and offline path.
+- [x] **29.3 Test Event Reconciliation (`apps/core/tests/test_feed.py`):**
+  - Synthetic events in `ProcessIntoFeedTest` now carry non-empty content (`content="valid note"`, reactions `content="+"`, votes `content="poll-vote"`, 1063 `content="file attachment"`) so `is_renderable_note` keeps them.
+  - `detect_language` (`apps/core/nip10.py`): replaced the strict pure-ASCII "return en" gate with stop-word scoring using `min_score` of 1 for accented/marker prose and 2 for accent-free prose (keeps URL/code English posts as 'en', detects accent-free French/Italian/Spanish like "Bonjour tout le monde").
+- [x] **29.4 New View Tests (`apps/core/tests/test_views.py`):**
+  - `test_standard_header_renders_persona_dropdown_with_timeout_container`: asserts `#persona-list-container`, `#persona-bridge-status`, and the "Querying local vault personas..." state.
+  - `test_nav_renders_mobile_health_indicator`: asserts `#mobile-bridge-dot` and `#mobile-bridge-label`.
+- [x] **29.5 TODO.md Updated:** Documented Phase 29 implementation — **Done 2026-09-01**
+
+### Phase 30: NIP-04 End-to-End DM Cryptography & Session Decryption Pipeline
+- [x] **30.1 Bridge NIP-04 Crypto Contract (`static/js/bridge_client.js`):**
+  - `nip04Encrypt(recipientPubkeyHex, plaintext)` + `nip04Decrypt(senderPubkeyHex, encryptedPayload)` + `_nip04BridgeRequest()` RPC helper.
+  - When the bridge socket (`ws://127.0.0.1:9001` / `wss://home.iyou.me:9001`) is OPEN, dispatches `NIP04_ENCRYPT`/`NIP04_DECRYPT` frames (`peer_pubkey` + `content`) and awaits the correlated `NIP04_ENCRYPT_RESPONSE` (`encrypted_payload`) / `NIP04_DECRYPT_RESPONSE` (plaintext) per-peer.
+  - Web Crypto fallback helpers (`nip04WebCryptoEncrypt`/`nip04WebCryptoDecrypt`, `nip04WebCryptoKey`, `nip04LocalIdentityHex`, `bytesToBase64`/`base64ToBytes`, `isHex64`): AES-256-CBC, 16-byte IV, output `${base64Ciphertext}?iv=${base64Iv}` per NIP-04. Decrypt failures fall back to the clean `"[Encrypted Message — Open Enclave to Decrypt]"` string.
+- [x] **30.2 Floating Chat Encrypt + Decrypt Wiring (`static/js/floating_chat.js`):**
+  - `sendViaNostr()` now prefers `bridge.nip04Encrypt` (async) over legacy `nip04_encrypt`/`window.nip04_encrypt`.
+  - `sendDockedMessage()` resolves the peer target early and renders a subtle `🔒 ` prefix on optimistic Nostr bubbles (Kind 4 `["p", peerHex]` still signed via `bridgeClient.signEvent()` and broadcast across relays).
+  - Incoming Kind 4 listener: decrypts via `await window.bridgeClient.nip04Decrypt(ev.pubkey, ev.content)` (with legacy `window.nip04_decrypt` fallback) before dispatching the bubble.
+- [x] **30.3 Encryption Badge Containers (`static/js/floating_chat.js`, `templates/includes/_floating_chat_dock.html`):**
+  - Extracted `buildDockedChatWindowHtml(peerId, peerName, peerAvatar)`; pane header now shows `<span class="text-[10px] text-emerald-400 ...">🔒 NIP-04 E2EE Session</span>` for Nostr peers and `<span class="text-[10px] text-violet-400 ...">⚡ Sovereign Enclave Mesh</span>` for XMPP mesh peers.
+  - Dock template gained `#floating-dock-security-status` with `#dock-security-badge-e2ee` + `#dock-security-badge-mesh` containers (same copy) in the roster footer.
+- [x] **30.4 New Tests (`apps/core/tests/test_chat_engine.py`):**
+  - `test_chat_view_context_includes_nip04_bridge_contracts`: asserts `bridge_client.js` carries `NIP04_ENCRYPT`/`NIP04_DECRYPT`/`nip04Encrypt`/`nip04Decrypt`/`encrypted_payload` and `floating_chat.js` carries `nip04Encrypt`/`nip04Decrypt`/`kind: 4` + both banner strings.
+  - `test_floating_dock_template_renders_encryption_badge_containers`: renders the authenticated dashboard and asserts `#docked-chat-windows`, `#floating-dock-security-status`, `#dock-security-badge-e2ee`, `#dock-security-badge-mesh`, and both security banner strings.
+- [x] **30.5 TODO.md Updated:** Documented Phase 30 implementation — **Done 2026-09-01**
+
+### Pre-Flight Hotfix Pass
+- [x] **HOTFIX-1 `static/js/feed_interactions.js` — Syntax Halt Repair:** Removed the orphaned duplicate `.catch(...).finally(...)` block (was `prevBtnHtml`) in the translate handler that made `node --check` fail with `Unexpected token '.'`; `node --check` passes and `window.handleSignedEvent` (declared L92, exported L205, consumed in `feed.html:259`) resolves correctly.
+- [x] **HOTFIX-2 `static/js/circle_feed_filter.js` — Circle Transition Toasts:** Added `CIRCLE_TOASTS` map (global → "Switched to Global Mesh", following → "Filtered to Following (L1 Contacts)", inner → "Filtered to Inner Circle (L0 Enclave Peers)", mutual → "Filtered to Mutual Friends", iyou → "Filtered to iyou Sovereign Mesh"; all type "info") fired only on real circle transitions, suppressed via `suppressCircleToasts = true` until hydration completes in `initCircleFeedFilter`.
+- [x] **HOTFIX-3 `templates/includes/_feed_right_rail.html` — Sovereign Creator Profile Routing:** Creator rows now wrap their avatar/name/badge/handle block in `<a href="{% url 'profile' ... %}" ...>` so the whole row is clickable with an active/hover state; the nav identifier is built via `{% with profile_id=creator.handle|cut:"@" %}` (leading `@` stripped so the `^profile/[a-zA-Z0-9_@.-]+/?$` route always resolves); added `id="sovereign-creators-list"` to the container; Follow button stays outside the anchor with `data-follow-target`/`data-follow-petname`.
+- [x] **HOTFIX-4 `templates/dashboard.html` — Phantom Toast & Mount Audit:** The legacy `#toast` element used the `.hide` class which has **no CSS definition**, so it rendered visibly on every load; added Tailwind `hidden` so server HTML ships it hidden (real toasts flow through `toast_manager.js` → `window.showToast`). Audited: no unconditional `showToast()`/`alert()` runs on `DOMContentLoaded` (load-time handler only does switchTab/loadRelays/loadFeedHygienePreferences/renderModerationRoster/updatePreview/initDeckManager) and `bridge_client.connect()` performs no mount-time persona/reset dispatch (`switchPersona` fires only on explicit header clicks) — nothing to remove there.
+- [x] **HOTFIX-5 Regression Tests (`apps/core/tests/test_views.py`, `DashboardProfileTest`):**
+  - `test_sovereign_creators_render_valid_profile_links`: public verified `UserLinkDeck` with a leading-`@` handle renders under `#sovereign-creators-list` with `href="/profile/verified_creator"`, display name, `@handle` line, and avatar.
+  - `test_dashboard_toast_is_hidden_by_default`: authenticated dashboard response ships `#toast` with the `hidden` class in its opening tag and no inline `alert()` calls.
+  - Full `DashboardProfileTest` (15 tests) green. Note: the `creator.npub|default:creator.pubkey` fallback chain from the original spec cannot exist — `UserLinkDeck` has no such attributes and Django raises `VariableDoesNotExist` resolving them inside `{% url %}`/`{% with %}` arg resolution; since the queryset is `exclude(handle="")`, `handle|cut:"@"` is the guaranteed route-safe identifier.
+- [x] **HOTFIX-6 Validation:** `/usr/local/Cellar/node/26.7.0/bin/node --check` on both edited JS files, CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite, `ruff check .` — all clean — **Done 2026-09-01**
+
+### Phase 31: Blossom Fallback Cascade, Relay Auto-Failover & Sovereign Graph Backup
+- [x] **31.1 Multi-Source Blossom Fallback Cascade (`static/js/feed_interactions.js`):**
+  - `window.handleMediaError(imgEl, sha256)` walks a fixed mirror cascade — 1. Local Loopback Daemon `http://127.0.0.1:9002/<sha>` → 2. Sovereign CDN `https://cdn.iyou.me/<sha>` → 3. Public Fallback Blossom Node `https://nostr.download/<sha>` — reading the current tier from `data-fallback-tier` (default 0), advancing a tier per failed probe, and rendering the compact placeholder `[⚠️ Media Unavailable on Mesh]` once all mirrors exhaust.
+  - `mediaOnErrorAttr(media)` attaches `onerror="window.handleMediaError(this, '<sha>')"` to card `<img>` tags whenever a 64-hex NIP-94 `x`/`sha256` hash is present; `extractMediaFromNote` now carries the Kind 1063 `x` tag into `media.hash` for client-side extraction.
+- [x] **31.2 Relay Health Auto-Quarantine & Failover (`static/js/relay_pool.js`, `templates/includes/_feed_right_rail.html`):**
+  - `QUARANTINE_THRESHOLD = 3`; `broadcast()` calls `_recordBroadcastFailure(url)` on each WebSocket drop/timeout/error, and once a relay exceeds 3 consecutive failures it is transitioned `ONLINE → QUARANTINED`, demoted from the active read/write pool, and an unquarantined fallback from `BOOTSTRAP_RELAYS`/`DEFAULT_RELAYS` is added and probed (`_pickFallbackRelay`/`_addRelay`).
+  - `getWriteRelays()`/`getReadRelays()` skip quarantined relays; `renderDiagnosticsList` shows a slate pulsing dot + "quarantined" latency; `_updateHealthUI` reports "Mesh Degraded (N Quarantined)" / "Mesh Quartantining Relays... (Reconnecting)" and `getActiveRelayCount` now tracks quarantined count.
+  - `window.retryQuarantinedRelays()` re-probes every quarantined relay, restoring read/write on an online result; surfaced as a `↻ Retry Quarantined Relays` button in the mesh right-rail diagnostics drawer (`#relay-retry-quarantined`).
+- [x] **31.3 Sovereign Graph Disaster Snapshot Export & Import (`apps/core/views.py`, `apps/core/urls.py`, `templates/dashboard.html`):**
+  - `@login_required api_backup_export`: serializes the user's `UserLinkDeck` + claimed handle + `UserLinkItem`s plus the client-local graph (contacts/relays/circles/muted) into a versioned snapshot (`BACKUP_VERSION = 1`); returns a downloadable `Content-Disposition: attachment; filename="iyou_wun_backup_<timestamp>.json"`.
+  - `@csrf_exempt @login_required api_backup_import`: accepts a JSON body or multipart `backup` field, validates schema (requires deck/contacts/relays), and restores the deck + link items inside a single `transaction.atomic()` block (409 on handle conflict); returns `{ "success": true, "restored_contacts": N, "restored_relays": M }` for client-side localStorage reconciliation.
+  - Registered `api/backup/export/` + `api/backup/import/`; the Account & Key Info tab gained the `#sovereign-backup` card with an `📥 Export Mesh Snapshot` link, a JSON file-input dropzone + `📤 Restore from Backup` submit (form handled via `setupBackupRestore()`, which rehydrates `wun_contacts`/`wun_relays`/`wun_circles`/`wun_muted_pubkeys` in localStorage and reloads on success).
+- [x] **31.4 Tests (`apps/core/tests/test_views.py`, `BackupGraphTest`):**
+  - `test_api_backup_export_requires_auth`: anonymous GET returns 302/401.
+  - `test_api_backup_export_returns_valid_json_schema`: validates `version`/`exported_at`/`user`/`deck`/`contacts`/`relays`/`circles`/`muted` keys + deck handle/items serialization.
+  - `test_api_backup_import_restores_user_graph`: round-trip rehydration of deck, handle, and link items from a mock snapshot (asserts `restored_contacts`/`restored_relays` counts).
+  - `test_dashboard_renders_backup_recovery_controls`: asserts `#sovereign-backup`, the export href, and `#backup-restore-form` render in the authenticated dashboard.
+  - Plus JS contract tests `test_feed_interactions_carries_blossom_fallback_cascade` and `test_relay_pool_carries_auto_quarantine_contract`.
+- [x] **31.5 Validation:** `node --check` on both edited JS files, CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite, `ruff check .` — all clean — **Done 2026-09-01**
+
+### Phase 32: Persona Session Re-Anchoring & Multi-Deck Isolation
+- [x] **32.1 Session Re-Anchoring Endpoint (`apps/core/views.py`, `apps/core/urls.py`):**
+  - `api_persona_switch(request)`: POST JSON `{"did", "persona_name", "level"}` gated by an authenticated session (unauth returns 401 pending a challenge-signature flow). Resolves/provisions `User(username=did)` with an unusable password (+ honors an optional `account_tier` extension column), provisions an isolated `UserLinkDeck` per DID via `claim_handle` with a DID-derived handle, then `login(request, target_user, ModelBackend)` and caches `session["active_persona_name"]`/`session["active_persona_level"]`. Returns `{"success", "did", "persona_name", "level", "handle"}`.
+  - Registered route `api/auth/persona-switch/` (`api_persona_switch`).
+- [x] **32.2 Bridge Alignment & Auto Re-Anchoring (`static/js/bridge_client.js`):**
+  - New `handlePersonaChanged(profile)` called from the `_handleMessage` persona-activation branch (`profile_sync`/`profile_activated`/`active_profile_changed`/`SET_ACTIVE_PERSONA_RESPONSE`): compares `profile.did` against the header-injected `window.CURRENT_SESSION_DID`; on divergence POSTs `/api/auth/persona-switch/` with CSRF header, updates `CURRENT_SESSION_DID`, dispatches `persona:session-reanchored`, toasts the re-anchor, and reloads the page on every route except `/dashboard`.
+- [x] **32.3 Header Display Hierarchy (`apps/core/context_processors.py`, `templates/includes/_standard_header.html`):**
+  - `user_identity` now renders `user_display_label` via a priority chain — authenticated deck `@handle` > `active_persona_name (L{level})` > `Primary Identity (L1)` > `{username[:16]}... (L{level})` — plus `current_session_did` (legacy `user_pubkey_hex`/`user_npub`/`user_handle`/`user_profile_url` preserved).
+  - `_standard_header.html` ships `<script>window.CURRENT_SESSION_DID = "{{ current_session_did|escapejs }}";</script>` and the `#active-persona-display-name` span renders `{{ user_display_label }}`.
+- [x] **32.4 Smooth Dashboard Re-Anchor (`templates/dashboard.html`):**
+  - Identity block got `#dashboard-deck-handle` + `#dashboard-user-did` ids; a `persona:session-reanchored` listener rewrites them from the switch response so the dashboard re-renders its deck identity without dropping the bridge socket (no full reload).
+- [x] **32.5 Tests (`apps/core/tests/test_views.py`, `PersonaSessionSwitchTest`):**
+  - `test_api_persona_switch_updates_session_user`: swapping DIDs re-anchors `request.user`, provisions an isolated deck per DID, leaves the original handle untouched on round-trip.
+  - `test_api_persona_switch_gates_method_and_did`: 405 on GET, 400 on non-DID target, 401 anonymous.
+  - `test_header_display_hierarchy_rules`: handle precedence, persona+level fallback, generic L1 placeholder, L2 truncated-DID burner formatting.
+  - `test_header_injects_current_session_did`: asserts `window.CURRENT_SESSION_DID` is rendered server-side.
+- [x] **32.6 Validation:** `node --check` on `bridge_client.js`, CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite, `ruff check .` — all clean — **Done 2026-09-01**
+
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

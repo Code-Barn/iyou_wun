@@ -14,9 +14,8 @@
     </a>
     {% else %}
     <a href="{% url 'profile' npub=note.npub %}">
-      <div class="w-10 h-10 bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center border border-violet-200 dark:border-violet-800 shrink-0 aspect-square">
-        <span class="text-violet-600 dark:text-violet-400 font-mono text-sm font-bold">{{ note.author_name|default:"N"|first|upper }}</span>
-      </div>
+      <img src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar"
+           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-violet-950 p-1 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
     </a>
     {% endif %}
   </div>

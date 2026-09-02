@@ -12,20 +12,18 @@
     <!-- Top Identity Header Bar -->
     <div class="px-5 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-50/60 dark:bg-slate-950/40">
       <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-full bg-violet-100 dark:bg-violet-950/60 border border-violet-200 dark:border-violet-800 flex items-center justify-center font-mono font-bold text-violet-600 dark:text-violet-400 text-sm">
-          {% if deck and deck.display_name %}{{ deck.display_name|first|upper }}{% elif deck and deck.handle %}{{ deck.handle|first|upper }}{% elif profile and profile.name %}{{ profile.name|first|upper }}{% else %}S{% endif %}
-        </div>
+        <img src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar" class="w-10 h-10 rounded-full object-cover border border-violet-200 dark:border-violet-800 bg-violet-950 p-1" />
         <div>
 
           <div class="flex items-center gap-2 flex-wrap">
-            <h1 class="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100">
+            <h1 id="dashboard-deck-handle" class="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100">
               {% if deck.handle %}@{{ deck.handle }}{% else %}Sovereign Dashboard{% endif %}
             </h1>
             {% if deck.is_verified %}
             <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700">✓ VERIFIED</span>
             {% endif %}
           </div>
-          <p class="text-xs font-mono text-slate-400 truncate max-w-xs sm:max-w-md" title="{{ user_did }}">
+          <p id="dashboard-user-did" class="text-xs font-mono text-slate-400 truncate max-w-xs sm:max-w-md" title="{{ user_did }}">
             {{ user_did|truncatechars:36 }}
           </p>
         </div>
@@ -129,11 +127,7 @@
                 <div class="relative">
                   <img id="previewAvatar" src="{% firstof deck.avatar_url profile.picture '' %}" alt="Avatar Preview" 
                        class="w-16 h-16 rounded-full object-cover border-2 border-white dark:border-slate-900 bg-slate-800 {% if not deck.avatar_url and not profile.picture %}hidden{% endif %}" />
-                  <div id="previewAvatarPlaceholder" class="w-16 h-16 rounded-full border-2 border-white dark:border-slate-900 bg-violet-950 flex items-center justify-center {% if deck.avatar_url or profile.picture %}hidden{% endif %}">
-                    <span id="previewInitial" class="text-xl font-bold font-mono text-violet-400">
-                      {% if deck and deck.display_name %}{{ deck.display_name|first|upper }}{% elif deck and deck.handle %}{{ deck.handle|first|upper }}{% elif profile and profile.name %}{{ profile.name|first|upper }}{% else %}N{% endif %}
-                    </span>
-                  </div>
+                  <img id="previewAvatarPlaceholder" src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar" class="w-16 h-16 rounded-full object-cover border-2 border-white dark:border-slate-900 bg-violet-950 p-1 {% if deck.avatar_url or profile.picture %}hidden{% endif %}" />
 
                 </div>
 
@@ -324,6 +318,40 @@
           <span class="text-slate-600 dark:text-slate-400">{{ request.user.date_joined|date:"Y-m-d H:i" }}</span>
         </div>
       </div>
+
+      <!-- Sovereign Backup & Disaster Recovery -->
+      <div id="sovereign-backup" class="mt-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm">
+        <div class="p-5 border-b border-slate-100 dark:border-slate-800">
+          <h3 class="text-sm font-mono font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">🛟 Sovereign Backup &amp; Disaster Recovery</h3>
+          <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Export your full mesh graph — identity deck, contacts, relays, circles, and noise-filter rules — or restore a previously saved snapshot.</p>
+        </div>
+        <div class="p-5 space-y-6">
+          <div>
+            <span class="block text-[11px] font-mono font-semibold text-slate-600 dark:text-slate-300 mb-2">Export Mesh Snapshot</span>
+            <a href="{% url 'api_backup_export' %}"
+               class="inline-flex items-center gap-2 bg-violet-600 hover:bg-violet-700 text-white text-xs font-mono font-semibold py-2.5 px-4 rounded-lg transition">
+              📥 Export Mesh Snapshot
+            </a>
+            <p class="text-[11px] text-slate-400 mt-2">Downloads a timestamped <code class="font-mono">iyou_wun_backup_&lt;timestamp&gt;.json</code> containing your sovereign profile and local graph.</p>
+          </div>
+
+          <div>
+            <span class="block text-[11px] font-mono font-semibold text-slate-600 dark:text-slate-300 mb-2">Restore from Backup</span>
+            <form id="backup-restore-form" method="post" enctype="multipart/form-data" action="{% url 'api_backup_import' %}"
+                  class="flex flex-col sm:flex-row sm:items-center gap-3">
+              {% csrf_token %}
+              <input type="file" id="backup-file-input" name="backup"
+                     accept="application/json,.json"
+                     class="block w-full text-xs text-slate-500 dark:text-slate-300 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-mono file:font-semibold file:bg-slate-100 dark:file:bg-slate-800 file:text-slate-700 dark:file:text-slate-200 hover:file:bg-violet-50 dark:hover:file:bg-violet-950/50 transition" />
+              <button type="submit"
+                      class="inline-flex items-center justify-center gap-2 border border-violet-600 text-violet-600 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-950/40 text-xs font-mono font-semibold py-2.5 px-4 rounded-lg transition">
+                📤 Restore from Backup
+              </button>
+            </form>
+            <p id="backup-restore-status" class="text-[11px] mt-2 font-mono hidden"></p>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>
@@ -414,7 +442,7 @@
 </div>
 
 <!-- Global Toast Notification -->
-<div id="toast" class="fixed top-4 right-4 bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-lg toast hide z-50 text-xs font-mono" role="alert">
+<div id="toast" class="fixed top-4 right-4 bg-emerald-600 text-white px-5 py-3 rounded-xl shadow-lg toast hide hidden z-50 text-xs font-mono" role="alert">
   <span class="font-medium">Profile updated successfully.</span>
 </div>
 {% endblock %}
@@ -427,6 +455,21 @@
   var userHandle = "{{ deck.handle|default:''|escapejs }}";
   var pendingEvent = null;
   var isProcessing = false;
+
+  window.addEventListener("persona:session-reanchored", function (e) {
+    var detail = e.detail || {};
+    if (detail.handle) {
+      var deckEl = document.getElementById("dashboard-deck-handle");
+      if (deckEl) deckEl.textContent = "@" + String(detail.handle).replace(/^@/, "");
+    }
+    if (detail.did) {
+      var didEl = document.getElementById("dashboard-user-did");
+      if (didEl) {
+        didEl.textContent = detail.did.length > 36 ? detail.did.slice(0, 33) + "..." : detail.did;
+        didEl.setAttribute("title", detail.did);
+      }
+    }
+  });
 
   function broadcastProfile(signedEvent) {
     var relays = (typeof getRelays === "function") ? getRelays() : ["wss://nos.lol", "wss://relay.damus.io", "wss://relay.primal.net"];
@@ -914,6 +957,90 @@
     if (typeof showToast === "function") showToast("Hidden notes cleared", "info");
   }
 
+  function setupBackupRestore() {
+    var form = document.getElementById("backup-restore-form");
+    var statusEl = document.getElementById("backup-restore-status");
+    if (!form || !statusEl) return;
+
+    form.addEventListener("submit", function (ev) {
+      var input = document.getElementById("backup-file-input");
+      var file = input && input.files && input.files[0];
+      if (!file) {
+        ev.preventDefault();
+        statusEl.classList.remove("hidden");
+        statusEl.classList.add("text-rose-500");
+        statusEl.textContent = "Select a backup .json file first.";
+        return;
+      }
+      if (!file.name.toLowerCase().endsWith(".json")) {
+        ev.preventDefault();
+        statusEl.classList.remove("hidden");
+        statusEl.classList.add("text-rose-500");
+        statusEl.textContent = "Please choose a .json backup file.";
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onload = function (re) {
+        var raw = re.target.result;
+        var fileInfo = { name: file.name, size: file.size };
+        var parsed = null;
+        try { parsed = JSON.parse(raw); } catch (e) {}
+
+        var payload = new FormData();
+        payload.append("backup", raw);
+        payload.append("backup_filename", file.name);
+
+        statusEl.classList.remove("hidden");
+        statusEl.classList.add("text-violet-600 dark:text-violet-400");
+        statusEl.textContent = "Restoring sovereign graph...";
+
+        fetch(form.getAttribute("action"), {
+          method: "POST",
+          headers: { "X-CSRFToken": (form.querySelector("[name=csrfmiddlewaretoken]") || {}).value || "" },
+          body: payload
+        }).then(function (resp) {
+          return resp.json().then(function (data) {
+            return { ok: resp.ok, data: data };
+          });
+        }).then(function (res) {
+          if (res.ok && res.data && res.data.success) {
+            var d = res.data;
+            // Rehydrate client-local graph stores from the restored snapshot.
+            var imported = parsed || {};
+            if (imported.contacts) {
+              try { localStorage.setItem("wun_contacts", JSON.stringify(imported.contacts)); } catch (e) {}
+            }
+            if (imported.relays) {
+              try { localStorage.setItem("wun_relays", JSON.stringify(imported.relays)); } catch (e) {}
+            }
+            if (imported.circles) {
+              try { localStorage.setItem("wun_circles", JSON.stringify(imported.circles)); } catch (e) {}
+            }
+            if (imported.muted) {
+              try { localStorage.setItem("wun_muted_pubkeys", JSON.stringify(imported.muted)); } catch (e) {}
+            }
+            statusEl.classList.remove("text-violet-600", "dark:text-violet-400");
+            statusEl.classList.add("text-emerald-600");
+            statusEl.textContent = "Restored " + (d.restored_contacts || 0) + " contacts and " + (d.restored_relays || 0) + " relays. Refreshing...";
+            if (typeof showToast === "function") showToast("Sovereign graph restored", "success");
+            setTimeout(function () { location.reload(); }, 900);
+          } else {
+            statusEl.classList.remove("text-violet-600", "dark:text-violet-400");
+            statusEl.classList.add("text-rose-500");
+            statusEl.textContent = "Restore failed: " + ((res.data && res.data.error) || "Unknown error");
+          }
+        }).catch(function (err) {
+          statusEl.classList.remove("text-violet-600", "dark:text-violet-400");
+          statusEl.classList.add("text-rose-500");
+          statusEl.textContent = "Restore failed: " + err;
+        });
+      };
+      reader.readAsText(file);
+      ev.preventDefault();
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () {
     var initialTab = (window.location.hash ? window.location.hash.replace("#", "") : "") || localStorage.getItem("wun_dashboard_active_tab") || "profile";
     switchTab(initialTab);
@@ -922,6 +1049,7 @@
     renderModerationRoster();
     updatePreview();
     if (typeof initDeckManager === "function") { initDeckManager(); }
+    setupBackupRestore();
   });
 </script>
 <script src="{% static 'js/link_deck_manager.js' %}"></script>

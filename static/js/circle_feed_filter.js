@@ -27,6 +27,18 @@
         mutual: "MUTUAL FRIENDS"
     };
 
+    const CIRCLE_TOASTS = {
+        global: "Switched to Global Mesh",
+        following: "Filtered to Following (L1 Contacts)",
+        inner: "Filtered to Inner Circle (L0 Enclave Peers)",
+        mutual: "Filtered to Mutual Friends",
+        iyou: "Filtered to iyou Sovereign Mesh"
+    };
+
+    // Suppress circle-transition toasts during initial page load / hydration so
+    // they only fire on explicit user clicks afterward.
+    let suppressCircleToasts = true;
+
     const ACTIVE_TAB_CLASSES = [
         "bg-violet-600", "text-white", "font-bold",
         "dark:bg-violet-500", "dark:text-slate-950"
@@ -543,6 +555,7 @@
     }
 
     function setCircle(circleMode) {
+        const previousCircle = activeCircle;
         activeCircle = circleMode || "global";
 
         // Update tabs UI
@@ -567,8 +580,15 @@
             scopeLabel.textContent = CIRCLE_LABELS[activeCircle] || activeCircle.toUpperCase();
         }
 
-        if (activeCircle === "iyou" && typeof global.showToast === "function") {
-            global.showToast("Filtering feed: iyou Ecosystem", "info");
+        // Circle-transition toast feedback (skipped during hydration and when
+        // the active circle did not actually change).
+        if (!suppressCircleToasts && previousCircle !== activeCircle) {
+            const toastFn = (typeof global.showToast === "function")
+                ? global.showToast
+                : (typeof showToast === "function" ? showToast : null);
+            if (toastFn) {
+                toastFn(CIRCLE_TOASTS[activeCircle] || ("Filtered to " + activeCircle), "info");
+            }
         }
 
         // Update URL search params gracefully on feed and gallery
@@ -599,6 +619,25 @@
         }
 
         applyFilters();
+    }
+
+    function filterByTag(tagSlug) {
+        const cleanSlug = String(tagSlug || "").trim().replace(/^#/, "");
+        const rawTag = "#" + cleanSlug;
+
+        const searchInput = document.getElementById("feed-search-input");
+        if (searchInput) searchInput.value = rawTag;
+        setSearchQuery(rawTag);
+        applyFilters();
+
+        const feedContainer = document.getElementById("feed-container") || getFeedContainer();
+        if (feedContainer && typeof feedContainer.scrollIntoView === "function") {
+            feedContainer.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+
+        if (window.history && typeof window.history.replaceState === "function") {
+            window.history.replaceState({}, "", "?q=%23" + cleanSlug);
+        }
     }
 
     function isFeedOrGalleryPage() {
@@ -851,6 +890,9 @@
         updateNsfwShieldStatusUI();
         applyNsfwBlurState();
 
+        // Hydration complete: subsequent circle transitions are user-driven.
+        suppressCircleToasts = false;
+
         // 6. Reactive listeners for trust lens & contacts updates
         window.addEventListener("trustLensUpdated", function () {
             applyFilters();
@@ -882,6 +924,7 @@
     global.circleFeedFilter = circleFeedFilter;
     global.applyCircleFilter = setCircle;
     global.toggleNsfwFilter = toggleNsfwFilter;
+    global.filterByTag = filterByTag;
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initCircleFeedFilter);

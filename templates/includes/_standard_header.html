@@ -1,4 +1,7 @@
 {% load static %}
+<script>
+  window.CURRENT_SESSION_DID = "{{ current_session_did|escapejs }}";
+</script>
 <header class="border-b backdrop-blur-sm transition-colors duration-200 bg-white/90 border-slate-200 text-slate-900 dark:bg-[#0B0F19]/90 dark:border-gray-800 dark:text-gray-100">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
     
@@ -34,13 +37,7 @@
             >
               <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" id="active-persona-dot" title="Sovereign Key Active"></span>
               <span id="active-persona-display-name" class="truncate max-w-[140px] font-mono text-xs font-medium text-slate-700 dark:text-slate-200">
-                {% if user_handle %}
-                  @{{ user_handle }}
-                {% elif user_npub %}
-                  {{ user_npub|truncatechars:14 }}
-                {% else %}
-                  {{ request.user.username|default:user.username|truncatechars:16 }}
-                {% endif %}
+                {{ user_display_label }}
               </span>
               <span class="text-[10px] px-1 py-0.5 rounded bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 font-bold" id="active-persona-level">
                 L1
@@ -57,7 +54,7 @@
             >
               <div class="px-2 py-1.5 text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center justify-between">
                 <span>Active Enclave Personas</span>
-                <span class="text-emerald-500 font-normal">Bridge Connected</span>
+                <span id="persona-bridge-status" class="text-emerald-500 font-normal">Bridge Connected</span>
               </div>
 
               <!-- Persona List Target Container -->

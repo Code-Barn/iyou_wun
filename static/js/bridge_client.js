@@ -14,14 +14,28 @@
     var SOCKET_POLL_TIMEOUT = 6000;
     var ALIAS_DEBOUNCE_MS = 200;
     var ALIAS_CONNECT_POLL_MAX_ATTEMPTS = 60;
+    var PERSONA_QUERY_TIMEOUT_MS = 2500;
 
-    var DEFAULT_RELAYS = [
-        "wss://relay.iyou.me",
-        "wss://nos.lol",
-        "wss://relay.damus.io",
-        "wss://relay.primal.net",
-        "ws://127.0.0.1:9003"
-    ];
+    // The sovereign local relay (ws://127.0.0.1:9003) is only included on a local
+    // HTTP dev origin; over HTTPS we rely solely on the secure public pool.
+    function localDevOrigin() {
+        return typeof window !== "undefined" && window.location &&
+            window.location.protocol === "http:" &&
+            (window.location.hostname === "127.0.0.1" || window.location.hostname === "localhost" || window.location.hostname === "0.0.0.0");
+    }
+
+    function buildDefaultRelays() {
+        var list = [
+            "wss://relay.iyou.me",
+            "wss://nos.lol",
+            "wss://relay.damus.io",
+            "wss://relay.primal.net"
+        ];
+        if (localDevOrigin()) list.push("ws://127.0.0.1:9003");
+        return list;
+    }
+
+    var DEFAULT_RELAYS = buildDefaultRelays();
 
     // ---------- Utilities ----------
 
@@ -54,13 +68,22 @@
 
     function getRelays() {
         if (typeof window !== "undefined" && window.relayPool && typeof window.relayPool.getRelays === "function") {
-            return window.relayPool.getRelays();
+            return sanitizeRelays(window.relayPool.getRelays());
         }
         var stored = localStorage.getItem("wun_relays");
         if (stored) {
-            try { return JSON.parse(stored); } catch (e) { /* ignore */ }
+            try { return sanitizeRelays(JSON.parse(stored)); } catch (e) { /* ignore */ }
         }
-        return DEFAULT_RELAYS;
+        return sanitizeRelays(DEFAULT_RELAYS);
+    }
+
+    // Strip unencrypted ws:// relays over HTTPS production to avoid mixed-content.
+    function sanitizeRelays(list) {
+        if (!Array.isArray(list)) return [];
+        if (typeof window !== "undefined" && window.location && window.location.protocol === "https:") {
+            return list.filter(function (r) { return String(r).toLowerCase().indexOf("ws://") !== 0; });
+        }
+        return list;
     }
 
     function setRelays(list) {
@@ -71,6 +94,93 @@
         return "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".replace(/x/g, function () {
             return Math.floor(Math.random() * 16).toString(16);
         });
+    }
+
+    function isHex64(str) {
+        return typeof str === "string" && /^[0-9a-fA-F]{64}$/.test(str);
+    }
+
+    function bytesToBase64(bytes) {
+        var bin = "";
+        for (var i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+        return btoa(bin);
+    }
+
+    function base64ToBytes(b64) {
+        var bin = atob(String(b64).replace(/-/g, "+").replace(/_/g, "/"));
+        var bytes = new Uint8Array(bin.length);
+        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        return bytes;
+    }
+
+    // ---------- NIP-04 Web Crypto fallback helpers ----------
+    //
+    // The iyou_home enclave performs real NIP-04 (ECDH + AES-CBC) encryption.
+    // When the bridge is offline and no local private key material exists in
+    // memory, these helpers derive a per-conversation AES-256-CBC session key
+    // from the in-memory identity pair so offline DMs stay round-trippable.
+    // This is a degraded cipher, never a substitute for enclave signing.
+
+    function nip04LocalIdentityHex() {
+        var profile = (typeof window !== "undefined" && window.activeProfile) ? window.activeProfile : null;
+        if (profile) {
+            var hex = profile.nostr_pubkey_hex || profile.pubkey_hex || profile.pubkey || "";
+            if (isHex64(hex)) return hex.toLowerCase();
+        }
+        if (typeof window !== "undefined" && isHex64(window.userPubkey)) {
+            return String(window.userPubkey).toLowerCase();
+        }
+        return "";
+    }
+
+    function nip04FallbackSeed(peerHex) {
+        // SHA-256 over "<localIdentityHex>:<peerHex>" — stable per conversation pair.
+        var local = nip04LocalIdentityHex() || "iyou-local-enclave-fallback";
+        return crypto.subtle.digest("SHA-256", new TextEncoder().encode(local + ":" + peerHex));
+    }
+
+    function nip04WebCryptoKey(peerHex) {
+        if (typeof crypto === "undefined" || !crypto.subtle) {
+            return Promise.reject(new Error("Web Crypto unavailable"));
+        }
+        return nip04FallbackSeed(peerHex)
+            .then(function (digest) {
+                return crypto.subtle.importKey("raw", digest, { name: "AES-CBC" }, false, ["encrypt", "decrypt"]);
+            });
+    }
+
+    function nip04WebCryptoEncrypt(peerHex, plaintext) {
+        if (typeof crypto === "undefined" || !crypto.subtle) {
+            return Promise.reject(new Error("Web Crypto unavailable"));
+        }
+        var iv = crypto.getRandomValues(new Uint8Array(16));
+        return nip04WebCryptoKey(peerHex)
+            .then(function (key) {
+                return crypto.subtle.encrypt({ name: "AES-CBC", iv: iv }, key, new TextEncoder().encode(plaintext));
+            })
+            .then(function (cipherBuffer) {
+                return bytesToBase64(new Uint8Array(cipherBuffer)) + "?iv=" + bytesToBase64(iv);
+            });
+    }
+
+    function nip04WebCryptoDecrypt(senderHex, encryptedPayload) {
+        if (typeof crypto === "undefined" || !crypto.subtle) {
+            return Promise.reject(new Error("Web Crypto unavailable"));
+        }
+        var parts = String(encryptedPayload || "").split("?iv=");
+        if (parts.length !== 2) return Promise.reject(new Error("Invalid NIP-04 payload shape"));
+        var cipherBytes = base64ToBytes(parts[0]);
+        var ivBytes = base64ToBytes(parts[1]);
+        if (!cipherBytes || !ivBytes || ivBytes.length !== 16) {
+            return Promise.reject(new Error("Invalid NIP-04 ciphertext or IV"));
+        }
+        return nip04WebCryptoKey(senderHex)
+            .then(function (key) {
+                return crypto.subtle.decrypt({ name: "AES-CBC", iv: ivBytes }, key, cipherBytes);
+            })
+            .then(function (plainBuffer) {
+                return new TextDecoder().decode(plainBuffer);
+            });
     }
 
     // ---------- Toast ----------
@@ -116,6 +226,8 @@
         this._aliasWaiters = [];               // pending Promise resolve callbacks
         this._aliasPendingBatches = [];        // FIFO of { keys, waiters } sent over the wire
         this._aliasTimer = null;
+        this._personaQueryTimer = null;        // enclave persona list query timeout
+        this._personaQueryActive = false;      // waiting on an enclave persona list response
     }
 
     TauriBridgeClient.prototype._normalizeAliasKey = function (raw) {
@@ -258,11 +370,17 @@
     };
 
     TauriBridgeClient.prototype.getBridgeUrl = function () {
+        if (typeof window !== "undefined" && window.talkContext && window.talkContext.bridgeWsUrl) {
+            return window.talkContext.bridgeWsUrl;
+        }
         var scriptTag = document.querySelector('script[src*="bridge_client.js"]');
         var url = (scriptTag && scriptTag.getAttribute("data-bridge-url")) || "";
         if (url) return url;
         if (typeof window !== "undefined" && window.TAURI_SIGNING_BRIDGE) return window.TAURI_SIGNING_BRIDGE;
-        return "wss://home.iyou.me:9001/";
+        if (typeof window !== "undefined" && window.BRIDGE_WS_URL) return window.BRIDGE_WS_URL;
+        return (typeof window !== "undefined" && window.location && window.location.protocol === "https:")
+            ? "wss://home.iyou.me:9001/"
+            : "ws://127.0.0.1:9001/";
     };
 
     TauriBridgeClient.prototype.connect = function (onMessage) {
@@ -297,10 +415,12 @@
                     bridgeStatusEl.textContent = "Bridge Connected";
                     bridgeStatusEl.className = "text-emerald-500 font-normal";
                 }
+                if (typeof window.updateMobileBridgeHealth === "function") {
+                    window.updateMobileBridgeHealth(true);
+                }
                 if (self.pendingSignedPayload) return;
                 socket.send(JSON.stringify({ type: "get_profile" }));
-                socket.send(JSON.stringify({ type: "list_profiles" }));
-                socket.send(JSON.stringify({ type: "LIST_PERSONAS" }));
+                self.queryVaultPersonas();
             };
             socket.onmessage = function (event) {
                 self._handleMessage(event.data);
@@ -309,6 +429,7 @@
                 clearTimeout(connectTimeout);
                 if (!connected) {
                     self.connectionLock = "IDLE";
+                    if (self._personaQueryActive) self.markPersonaBridgeOffline();
                     if (self.isProcessing) self.showFallbackModal();
                 }
             };
@@ -322,9 +443,14 @@
                     bridgeStatusEl.textContent = "Bridge Offline";
                     bridgeStatusEl.className = "text-slate-400 font-normal";
                 }
+                if (typeof window.updateMobileBridgeHealth === "function") {
+                    window.updateMobileBridgeHealth(false);
+                }
+                if (self._personaQueryActive) self.markPersonaBridgeOffline();
             };
         } catch (err) {
             this.connectionLock = "IDLE";
+            if (this._personaQueryActive) this.markPersonaBridgeOffline();
             if (this.isProcessing) this.showFallbackModal();
         }
     };
@@ -373,6 +499,118 @@
         if (dotEl) {
             dotEl.className = "w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block";
             dotEl.title = "Active: " + nameStr + " (" + levelStr + ")";
+        }
+    };
+
+    /**
+     * Realign the Django session with the enclave's newly-activated persona.
+     * Fires whenever the bridge reports a persona whose DID diverges from the
+     * server-rendered session DID (`window.CURRENT_SESSION_DID`). On success the
+     * session is re-anchored to the persona's isolated link deck; the page is
+     * refreshed except on the dashboard, which self-heals via the
+     * `persona:session-reanchored` event so the bridge socket is never dropped.
+     */
+    TauriBridgeClient.prototype.handlePersonaChanged = function (profile) {
+        if (!profile) return;
+        var did = profile.did || profile.active_did || "";
+        var sessionDid = (typeof window.CURRENT_SESSION_DID === "string") ? window.CURRENT_SESSION_DID : "";
+        if (!did || !sessionDid || did === sessionDid) return;
+
+        var name = profile.name || profile.profile_name || profile.label || "";
+        var level = profile.level !== undefined ? profile.level : (profile.derivation_index || 1);
+        if (typeof level === "string") level = parseInt(level, 10) || 1;
+
+        var payload = {
+            did: did,
+            persona_name: String(name),
+            level: level
+        };
+        var csrfToken = (typeof getCookie === "function") ? getCookie("csrftoken") : "";
+
+        fetch("/api/auth/persona-switch/", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": csrfToken
+            },
+            body: JSON.stringify(payload)
+        }).then(function (res) {
+            return res.json().catch(function () { return null; });
+        }).then(function (data) {
+            if (data && data.success) {
+                window.CURRENT_SESSION_DID = did;
+                window.dispatchEvent(new CustomEvent("persona:session-reanchored", { detail: data }));
+                var label = data.handle ? "@" + String(data.handle).replace(/^@/, "") : (name || did);
+                if (typeof showToast === "function") {
+                    showToast("Session re-anchored to " + label);
+                }
+                if (window.location.pathname !== "/dashboard") {
+                    window.location.reload();
+                }
+            } else {
+                console.warn("Persona re-anchor rejected:", data && data.error ? data.error : "unknown response");
+            }
+        }).catch(function (err) {
+            console.error("Persona re-anchor failed:", err);
+        });
+    };
+
+    /**
+     * Query the iyou_home enclave for the active persona list with a bounded
+     * timeout. Arms a 2500ms timer; if the bridge never answers (or the socket
+     * dies), the dropdown degrades to an explicit offline state.
+     */
+    TauriBridgeClient.prototype.queryVaultPersonas = function () {
+        var self = this;
+        if (this._personaQueryActive) return;
+        this._personaQueryActive = true;
+
+        var container = document.getElementById("persona-list-container");
+        if (container) {
+            container.innerHTML = '<div class="px-2 py-2 text-slate-400 text-center text-[11px] animate-pulse">Querying local vault personas...</div>';
+        }
+
+        var socket = this.socket;
+        if (socket && socket.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: "list_profiles" }));
+            socket.send(JSON.stringify({ type: "LIST_PERSONAS" }));
+        } else {
+            this.connect();
+        }
+
+        if (this._personaQueryTimer) clearTimeout(this._personaQueryTimer);
+        this._personaQueryTimer = setTimeout(function () {
+            self._personaQueryTimer = null;
+            if (self._personaQueryActive) self.markPersonaBridgeOffline();
+        }, PERSONA_QUERY_TIMEOUT_MS);
+    };
+
+    /**
+     * Degrade the persona switcher to an explicit offline state: replace the
+     * list with an "Enclave Offline" notice and flip the bridge status pill to
+     * amber. Idempotent — safe to call repeatedly.
+     */
+    TauriBridgeClient.prototype.markPersonaBridgeOffline = function () {
+        this._personaQueryActive = false;
+        if (this._personaQueryTimer) {
+            clearTimeout(this._personaQueryTimer);
+            this._personaQueryTimer = null;
+        }
+        var container = document.getElementById("persona-list-container");
+        if (container) {
+            container.innerHTML = '<div class="px-3 py-3 text-center">' +
+                '<div class="text-[11px] font-mono text-amber-500 font-semibold mb-1">⚠️ Enclave Offline</div>' +
+                '<p class="text-[10px] text-slate-400 leading-tight">Start iyou_home to enable contextual persona switching and local signing.</p>' +
+                '</div>';
+        }
+        var pill = document.getElementById("persona-bridge-status");
+        if (pill) {
+            pill.textContent = "BRIDGE OFFLINE";
+            pill.className = "text-amber-500 font-normal";
+        }
+        if (typeof window.updateMobileBridgeHealth === "function") {
+            window.updateMobileBridgeHealth(false);
         }
     };
 
@@ -453,6 +691,18 @@
                     return true;
                 });
                 window.enclavePersonas = validProfiles;
+                // The enclave answered: disarm the persona query timeout and
+                // restore the default connected pill state.
+                this._personaQueryActive = false;
+                if (this._personaQueryTimer) {
+                    clearTimeout(this._personaQueryTimer);
+                    this._personaQueryTimer = null;
+                }
+                var bridgeStatusEl = document.getElementById("persona-bridge-status");
+                if (bridgeStatusEl) {
+                    bridgeStatusEl.textContent = "Bridge Connected";
+                    bridgeStatusEl.className = "text-emerald-500 font-normal";
+                }
                 this.renderPersonaDropdownList(validProfiles);
                 return;
             }
@@ -463,6 +713,7 @@
                     var previousPubkey = window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex) : null;
                     window.activeProfile = prof;
                     this.updateActivePersonaUI(prof);
+                    this.handlePersonaChanged(prof);
                     if (window.enclavePersonas && window.enclavePersonas.length > 0) {
                         this.renderPersonaDropdownList(window.enclavePersonas);
                     }
@@ -531,6 +782,91 @@
                 self.showFallbackModal();
             }
         }, SOCKET_POLL_TIMEOUT);
+    };
+
+    // ---------- NIP-04 End-to-End DM Cryptography ----------
+    //
+    // Primary path: the iyou_home enclave bridge performs real NIP-04
+    // encryption/decryption (secp256k1 ECDH + AES-256-CBC). Frames are
+    // correlated by peer pubkey, mirroring the sign_event/list_profiles
+    // request pattern. When the bridge is offline, Web Crypto helpers fall
+    // back to a per-conversation session cipher so offline DMs stay readable.
+
+    TauriBridgeClient.prototype.nip04Encrypt = function (recipientPubkeyHex, plaintext) {
+        var self = this;
+        var peerHex = String(recipientPubkeyHex || "").toLowerCase();
+        plaintext = String(plaintext == null ? "" : plaintext);
+        if (!isHex64(peerHex) || !plaintext) {
+            return Promise.reject(new Error("NIP-04 encrypt requires a valid 64-char peer pubkey and a message"));
+        }
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            return this._nip04BridgeRequest("NIP04_ENCRYPT", "NIP04_ENCRYPT_RESPONSE", peerHex, plaintext)
+                .then(function (msg) {
+                    if (msg.encrypted_payload) return msg.encrypted_payload;
+                    throw new Error("NIP-04 response missing encrypted_payload");
+                })
+                .catch(function () {
+                    return nip04WebCryptoEncrypt(peerHex, plaintext);
+                });
+        }
+        return nip04WebCryptoEncrypt(peerHex, plaintext);
+    };
+
+    TauriBridgeClient.prototype.nip04Decrypt = function (senderPubkeyHex, encryptedPayload) {
+        var self = this;
+        var senderHex = String(senderPubkeyHex || "").toLowerCase();
+        if (!isHex64(senderHex) || !encryptedPayload) {
+            return Promise.reject(new Error("NIP-04 decrypt requires a valid 64-char sender pubkey and a payload"));
+        }
+        var gracefulFallback = "[Encrypted Message — Open Enclave to Decrypt]";
+        if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+            return this._nip04BridgeRequest("NIP04_DECRYPT", "NIP04_DECRYPT_RESPONSE", senderHex, encryptedPayload)
+                .then(function (msg) {
+                    return msg.plaintext || msg.payload || msg.content || gracefulFallback;
+                })
+                .catch(function () {
+                    return nip04WebCryptoDecrypt(senderHex, encryptedPayload).catch(function () {
+                        return gracefulFallback;
+                    });
+                });
+        }
+        return nip04WebCryptoDecrypt(senderHex, encryptedPayload).catch(function () {
+            return gracefulFallback;
+        });
+    };
+
+    TauriBridgeClient.prototype._nip04BridgeRequest = function (frameType, responseType, peerHex, content) {
+        var self = this;
+        var frame = { type: frameType, peer_pubkey: peerHex, content: content };
+        return new Promise(function (resolve, reject) {
+            function awaitResponse(event) {
+                var msg = null;
+                try { msg = JSON.parse(event.data); } catch (err) { return; }
+                if (msg && msg.type === responseType && String(msg.peer_pubkey || "").toLowerCase() === peerHex) {
+                    cleanup();
+                    resolve(msg);
+                }
+            }
+            function cleanup() {
+                clearTimeout(deadline);
+                try { self.socket.removeEventListener("message", awaitResponse); } catch (err) {}
+            }
+            var deadline = setTimeout(function () {
+                cleanup();
+                reject(new Error("NIP-04 bridge request timed out"));
+            }, SOCKET_POLL_TIMEOUT);
+            try { self.socket.addEventListener("message", awaitResponse); } catch (err) {
+                cleanup();
+                reject(err);
+                return;
+            }
+            try {
+                self.socket.send(JSON.stringify(frame));
+            } catch (err) {
+                cleanup();
+                reject(err);
+            }
+        });
     };
 
     TauriBridgeClient.prototype.getEffectivePubkey = async function () {
@@ -738,10 +1074,9 @@
         if (isHidden) {
             dropdown.classList.remove('hidden');
             if (btn) btn.setAttribute('aria-expanded', 'true');
-            var socket = window.activeFeedSocket || (window.bridgeClient && window.bridgeClient.socket);
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify({ type: "list_profiles" }));
-                socket.send(JSON.stringify({ type: "LIST_PERSONAS" }));
+            var client = window.bridgeClient;
+            if (client && typeof client.queryVaultPersonas === "function") {
+                client.queryVaultPersonas();
             }
         } else {
             dropdown.classList.add('hidden');

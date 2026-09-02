@@ -294,37 +294,15 @@ def detect_language(event_or_content):
     if HEBREW_REGEX.search(cleaned):
         return "he"
 
-    # 3. Strict ASCII & English Bias
-    # Check for accented diacritics
+    # 3. Latin Stop-Words - score distinct languages from token overlap
+    # Check for accented diacritics and typographic markers
     accented_diacritics = ("¿", "¡", "ñ", "ä", "ö", "ü", "ß", "ç", "œ", "é", "à", "è", "É", "Ä", "Ö", "Ü", "Ç", "Ñ")
     has_accented = any(d in cleaned for d in accented_diacritics)
-    
-    # Check for non-ASCII characters beyond accented diacritics
-    # ASCII range: 0-127, plus we allow some basic punctuation
-    ascii_chars = sum(1 for c in cleaned if ord(c) < 128)
-    total_chars = len(cleaned)
-    ascii_ratio = ascii_chars / total_chars if total_chars > 0 else 1.0
-    
-    # Strict ASCII bias: >= 85% ASCII and no foreign script chars and no accented diacritics = en
-    has_foreign_script = (
-        THAI_REGEX.search(cleaned) or JA_KANA_REGEX.search(cleaned) or
-        KOREAN_REGEX.search(cleaned) or CJK_REGEX.search(cleaned) or
-        CYRILLIC_REGEX.search(cleaned) or ARABIC_REGEX.search(cleaned) or
-        GREEK_REGEX.search(cleaned) or HEBREW_REGEX.search(cleaned)
-    )
-    
-    if ascii_ratio >= 0.85 and not has_foreign_script and not has_accented:
-        return "en"
 
-    # 4. Latin Stop-Words - Only check if text contains accented markers or distinctive stop-words match
     lowered = cleaned.lower()
     has_spanish_markers = any(m in cleaned for m in SPANISH_MARKERS) or any(m in lowered for m in ("¿", "¡", "ñ"))
     has_french_markers = any(m in lowered for m in FRENCH_MARKERS)
     has_german_markers = any(m in lowered for m in GERMAN_MARKERS)
-
-    # Only do token-based matching if there are accented markers
-    if not has_accented and not has_spanish_markers and not has_french_markers and not has_german_markers:
-        return "en"
 
     tokens = set(re.findall(r"[a-zà-öø-ÿ]+", lowered))
     if not tokens:
@@ -338,8 +316,13 @@ def detect_language(event_or_content):
         "pt": len(tokens & PORTUGUESE_WORDS),
     }
 
+    # Accented or marker-bearing prose only needs a single distinctive match;
+    # pure-ASCII prose requires unambiguous stop-word density so English text
+    # (including URL/code/mention stripped posts) stays classified as 'en'.
+    min_score = 1 if (has_accented or has_spanish_markers or has_french_markers or has_german_markers) else 2
+
     best_lang, best_score = max(scores.items(), key=lambda item: item[1])
-    if best_score > 0:
+    if best_score >= min_score:
         return best_lang
 
     return "en"

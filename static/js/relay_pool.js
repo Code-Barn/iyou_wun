@@ -12,13 +12,35 @@
 (function (global) {
     "use strict";
 
-    var BOOTSTRAP_RELAYS = [
-        { url: "wss://relay.iyou.me", read: true, write: true, primary: true },
-        { url: "wss://nos.lol", read: true, write: true, primary: false },
-        { url: "wss://relay.damus.io", read: true, write: true, primary: false },
-        { url: "wss://relay.primal.net", read: true, write: true, primary: false },
-        { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false }
-    ];
+    /**
+     * Build the bootstrap relay pool.
+     * The sovereign local relay (ws://127.0.0.1:9003) is only included when
+     * running on a local HTTP dev origin (http://127.0.0.1:* or http://localhost:*).
+     * Over HTTPS (production) we rely solely on the secure public pool so we never
+     * push/read from an unencrypted mixed-content socket.
+     */
+    function isLocalDevOrigin() {
+        if (typeof window === "undefined" || !window.location) return false;
+        var protocol = String(window.location.protocol || "").toLowerCase();
+        var hostname = String(window.location.hostname || "").toLowerCase();
+        if (protocol !== "http:") return false;
+        return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "0.0.0.0";
+    }
+
+    function buildBootstrapRelays() {
+        var relays = [
+            { url: "wss://relay.iyou.me", read: true, write: true, primary: true },
+            { url: "wss://nos.lol", read: true, write: true, primary: false },
+            { url: "wss://relay.damus.io", read: true, write: true, primary: false },
+            { url: "wss://relay.primal.net", read: true, write: true, primary: false }
+        ];
+        if (isLocalDevOrigin()) {
+            relays.push({ url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false });
+        }
+        return relays;
+    }
+
+    var BOOTSTRAP_RELAYS = buildBootstrapRelays();
 
     var STORAGE_KEY = "wun_relays";
     var NIP65_STORAGE_KEY = "wun_nip65_relays";
@@ -33,8 +55,12 @@
         return u.toLowerCase();
     }
 
+    var MAX_BACKOFF_MS = 60000;
+    var QUARANTINE_THRESHOLD = 3;   // consecutive drop/timeout failures to quarantine
+    var QUARANTINE_COOLDOWN_MS = 90000; // re-probe window for quarantined relays
+
     function RelayPool() {
-        this.relays = new Map(); // url -> { url, read, write, isLocal, primary, status, latencyMs, lastProbe }
+        this.relays = new Map(); // url -> { url, read, write, isLocal, primary, status, latencyMs, lastProbe, failCount }
         this.listeners = [];
         this.probeTimer = null;
         this._initPool();
@@ -54,7 +80,8 @@
                 primary: !!r.primary,
                 status: "unknown",
                 latencyMs: null,
-                lastProbe: null
+                lastProbe: null,
+                failCount: 0
             });
         });
 
@@ -77,7 +104,8 @@
                                 primary: false,
                                 status: "unknown",
                                 latencyMs: null,
-                                lastProbe: null
+                                lastProbe: null,
+                                failCount: 0
                             });
                         }
                     });
@@ -114,7 +142,7 @@
     RelayPool.prototype.getWriteRelays = function () {
         var urls = [];
         this.relays.forEach(function (r) {
-            if (r.write) urls.push(r.url);
+            if (r.write && r.status !== "quarantined") urls.push(r.url);
         });
         return urls.length > 0 ? urls : this.getRelays();
     };
@@ -122,7 +150,7 @@
     RelayPool.prototype.getReadRelays = function () {
         var urls = [];
         this.relays.forEach(function (r) {
-            if (r.read) urls.push(r.url);
+            if (r.read && r.status !== "quarantined") urls.push(r.url);
         });
         return urls.length > 0 ? urls : this.getRelays();
     };
@@ -145,18 +173,153 @@
     };
 
     RelayPool.prototype.getActiveRelayCount = function () {
-        var total = this.relays.size;
+        var total = 0;
         var online = 0;
+        var quarantined = 0;
         this.relays.forEach(function (r) {
+            total++;
             if (r.status === "online") online++;
+            else if (r.status === "quarantined") quarantined++;
         });
-        return { online: online, total: total };
+        return { online: online, total: total, quarantined: quarantined };
+    };
+
+    /**
+     * Quarantine a relay that has exceeded its consecutive-failure threshold.
+     * The relay is demoted from the active read/write pool until an explicit
+     * retry (or a healthy re-probe) clears it.
+     */
+    RelayPool.prototype._markQuarantined = function (url, via) {
+        var norm = normalizeUrl(url);
+        var record = this.relays.get(norm);
+        if (!record) return;
+        record.status = "quarantined";
+        record.quarantineSince = Date.now();
+        record.quarantineVia = via || "consecutive-failure";
+        // Demote from active broadcast/read participation.
+        record.write = false;
+        record.read = false;
+        this._notifyStatusChange();
+        this._updateHealthUI();
+    };
+
+    RelayPool.prototype._pickFallbackRelay = function () {
+        var self = this;
+        var candidates = (typeof DEFAULT_RELAYS !== "undefined" && Array.isArray(DEFAULT_RELAYS) ? DEFAULT_RELAYS : BOOTSTRAP_RELAYS);
+        for (var i = 0; i < candidates.length; i++) {
+            var cand = typeof candidates[i] === "string" ? candidates[i] : candidates[i].url;
+            var norm = normalizeUrl(cand);
+            if (!norm) continue;
+            var existing = self.relays.get(norm);
+            // Prefer an unquarantined candidate not already in the pool,
+            // else any candidate that is currently healthy/unknown.
+            if (!existing) {
+                self._addRelay(cand, { read: true, write: true });
+                return norm;
+            }
+            if (existing.status === "online" || existing.status === "unknown") {
+                return norm;
+            }
+        }
+        return null;
+    };
+
+    RelayPool.prototype._addRelay = function (url, opts) {
+        opts = opts || {};
+        var norm = normalizeUrl(url);
+        if (this.relays.has(norm)) return;
+        this.relays.set(norm, {
+            url: url,
+            read: opts.read !== false,
+            write: opts.write !== false,
+            isLocal: !!opts.isLocal || norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
+            primary: !!opts.primary,
+            status: "unknown",
+            latencyMs: null,
+            lastProbe: null,
+            failCount: 0
+        });
+        this.probeRelay(url);
+        this._notifyStatusChange();
+    };
+
+    /**
+     * Called when a relay's broadcast fails (drop/timeout/error). Tracks a
+     * rolling consecutive-failure window; once it exceeds QUARANTINE_THRESHOLD
+     * the relay is quarantined and an unquarantined fallback relay is added.
+     */
+    RelayPool.prototype._recordBroadcastFailure = function (url) {
+        var norm = normalizeUrl(url);
+        var record = this.relays.get(norm);
+        if (!record) return;
+        record.failCount = (record.failCount || 0) + 1;
+        record.lastProbe = Date.now();
+
+        if (record.status !== "quarantined" && record.failCount >= QUARANTINE_THRESHOLD) {
+            this._markQuarantined(norm, "broadcast-consecutive");
+            // Auto-failover: bring in an unquarantined fallback relay.
+            var fallback = this._pickFallbackRelay();
+            if (fallback) {
+                this.probeRelay(fallback);
+                this._updateHealthUI();
+            }
+        } else {
+            this._updateHealthUI();
+        }
+    };
+
+    /**
+     * Manually re-probe every quarantined relay; if it comes back online it is
+     * restored to the active read/write pool. Exposed as window.retryQuarantinedRelays
+     * for the mesh right rail.
+     */
+    RelayPool.prototype.retryQuarantinedRelays = function () {
+        var self = this;
+        var quarantinedUrls = [];
+        this.relays.forEach(function (r) {
+            if (r.status === "quarantined") quarantinedUrls.push(r.url);
+        });
+        if (quarantinedUrls.length === 0) {
+            return Promise.resolve(0);
+        }
+        return Promise.all(quarantinedUrls.map(function (u) { return self.probeRelay(u); })).then(function (results) {
+            var restored = 0;
+            results.forEach(function (res) {
+                if (res && res.status === "online") {
+                    var norm = normalizeUrl(res.url);
+                    var record = self.relays.get(norm);
+                    if (record) {
+                        record.read = true;
+                        record.write = true;
+                        record.failCount = 0;
+                        record.quarantineSince = null;
+                        restored++;
+                    }
+                }
+            });
+            if (restored > 0) {
+                self._notifyStatusChange();
+                self._updateHealthUI();
+            }
+            return restored;
+        });
     };
 
     RelayPool.prototype.probeRelay = function (url) {
         var norm = normalizeUrl(url);
         var record = this.relays.get(norm);
         if (!record) return Promise.resolve({ url: url, status: "offline", latencyMs: null });
+
+        // Exponential backoff: if a relay has failed repeatedly, skip probing
+        // until its backoff window elapses so we don't hammer an offline socket
+        // and spam connection attempts.
+        if (record.status === "offline" && record.failCount > 0) {
+            var delay = Math.min(Math.pow(2, record.failCount - 1) * 1000, MAX_BACKOFF_MS);
+            var elapsed = Date.now() - (record.lastProbe || 0);
+            if (elapsed < delay) {
+                return Promise.resolve({ url: record.url, status: record.status, latencyMs: record.latencyMs });
+            }
+        }
 
         var self = this;
         return new Promise(function (resolve) {
@@ -169,6 +332,11 @@
                 record.status = status;
                 record.latencyMs = latency;
                 record.lastProbe = Date.now();
+                if (status === "online") {
+                    record.failCount = 0;
+                } else {
+                    record.failCount = (record.failCount || 0) + 1;
+                }
                 self._notifyStatusChange();
                 resolve({ url: record.url, status: status, latencyMs: latency });
             }
@@ -322,9 +490,14 @@
                         if (isLocal) localSuccess = true;
                         else globalSuccess = true;
                         var r = self.relays.get(norm);
-                        if (r) r.status = "online";
+                        if (r) {
+                            r.status = "online";
+                            r.failCount = 0;
+                        }
                     } else {
                         failedRelays.push(relayUrl);
+                        // Track consecutive failures; auto-quarantine on excess.
+                        self._recordBroadcastFailure(relayUrl);
                     }
                     checkDone();
                 }
@@ -392,6 +565,28 @@
         this._updateHealthUI();
     };
 
+    /**
+     * Update the compact mobile-only mesh/bridge health pill
+     * (#mobile-bridge-dot + #mobile-bridge-label). Shared with bridge_client.js
+     * so both the relay pool and the local signing bridge can drive it.
+     *   online  -> emerald dot, "Online"
+     *   offline -> amber dot,  "Manual"
+     */
+    function updateMobileBridgeHealth(online) {
+        if (typeof document === "undefined") return;
+        var dot = document.getElementById("mobile-bridge-dot");
+        var label = document.getElementById("mobile-bridge-label");
+        if (dot) {
+            dot.className = online
+                ? "w-2 h-2 rounded-full bg-emerald-500"
+                : "w-2 h-2 rounded-full bg-amber-500";
+        }
+        if (label) {
+            label.textContent = online ? "Online" : "Manual";
+            label.className = online ? "text-emerald-500" : "text-amber-500";
+        }
+    }
+
     RelayPool.prototype._updateHealthUI = function () {
         if (typeof document === "undefined") return;
         var counts = this.getActiveRelayCount();
@@ -400,7 +595,10 @@
         var countEl = document.getElementById("relay-health-count");
 
         if (countEl) {
-            countEl.textContent = counts.online + "/" + counts.total;
+            var shown = counts.online > 0
+                ? counts.online
+                : (counts.quarantined > 0 ? 0 : counts.online);
+            countEl.textContent = shown + "/" + counts.total;
         }
 
         if (dot) {
@@ -414,8 +612,13 @@
         if (label) {
             var base = "font-semibold truncate group-hover:text-violet-600 dark:group-hover:text-violet-400 transition-colors";
             if (counts.online === 0) {
-                label.textContent = "Mesh Offline (Reconnecting...)";
+                label.textContent = counts.quarantined > 0
+                    ? "Mesh Quarantining Relays... (Reconnecting)"
+                    : "Mesh Offline (Reconnecting...)";
                 label.className = base + " text-rose-500";
+            } else if (counts.quarantined > 0) {
+                label.textContent = "Mesh Degraded (" + counts.quarantined + " Quarantined)";
+                label.className = base + " text-amber-500 dark:text-amber-400";
             } else if (counts.online < counts.total) {
                 label.textContent = "Mesh Degraded (" + counts.online + " Active)";
                 label.className = base + " text-amber-500 dark:text-amber-400";
@@ -424,6 +627,8 @@
                 label.className = base + " text-slate-700 dark:text-slate-200";
             }
         }
+
+        updateMobileBridgeHealth(counts.online > 0);
 
         // Live-refresh the open diagnostics drawer so latency/state stay current.
         var drawer = document.getElementById("relay-diagnostics-drawer");
@@ -507,6 +712,10 @@
                 statusDotClass = "bg-emerald-500";
                 latencyClass = "text-emerald-500 dark:text-emerald-400";
                 latencyText = (r.latencyMs != null ? r.latencyMs : "?") + "ms";
+            } else if (r.status === "quarantined") {
+                statusDotClass = "bg-slate-400 animate-pulse";
+                latencyClass = "text-slate-400 dark:text-slate-500";
+                latencyText = "quarantined";
             } else if (!r.status || r.status === "unknown") {
                 statusDotClass = "bg-amber-500";
                 latencyClass = "text-amber-500 dark:text-amber-400";
@@ -551,6 +760,15 @@
     // Export to global window / module
     global.relayPool = poolInstance;
     global.RelayPool = poolInstance;
+
+    global.updateMobileBridgeHealth = updateMobileBridgeHealth;
+
+    global.retryQuarantinedRelays = function () {
+        if (poolInstance && typeof poolInstance.retryQuarantinedRelays === "function") {
+            return poolInstance.retryQuarantinedRelays();
+        }
+        return Promise.resolve(0);
+    };
 
     if (typeof module !== "undefined" && module.exports) {
         module.exports = poolInstance;

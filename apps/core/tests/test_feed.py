@@ -93,14 +93,14 @@ class ProcessIntoFeedTest(TestCase):
         self.assertFalse(roots[0]["is_sovereign"])
 
     def test_kind_1063_sovereign_flag_false_no_url(self):
-        events = {"e1": make_event("e1", 1063)}
+        events = {"e1": make_event("e1", 1063, content="file attachment")}
         roots = self._roots(events)
         self.assertFalse(roots[0]["is_sovereign"])
 
     def test_reaction_grouped_under_parent(self):
         events = {
-            "parent": make_event("parent", 1),
-            "r1": make_event("r1", 7, tags=[["e", "parent"]]),
+            "parent": make_event("parent", 1, content="parent note"),
+            "r1": make_event("r1", 7, content="+", tags=[["e", "parent"]]),
         }
         roots = self._roots(events)
         self.assertEqual(len(roots), 1)
@@ -109,8 +109,8 @@ class ProcessIntoFeedTest(TestCase):
 
     def test_reaction_without_parent_dropped(self):
         events = {
-            "r1": make_event("r1", 7, tags=[["e", "nonexistent_parent"]]),
-            "parent": make_event("parent", 1),
+            "r1": make_event("r1", 7, content="+", tags=[["e", "nonexistent_parent"]]),
+            "parent": make_event("parent", 1, content="parent note"),
         }
         roots = self._roots(events)
         self.assertEqual(len(roots), 1)
@@ -119,7 +119,7 @@ class ProcessIntoFeedTest(TestCase):
 
     def test_reply_grouped_under_parent(self):
         events = {
-            "parent": make_event("parent", 1),
+            "parent": make_event("parent", 1, content="parent note"),
             "c1": make_event("c1", 1111, content="reply", tags=[["e", "parent", "reply"]]),
         }
         result = process_into_feed(events)
@@ -140,16 +140,16 @@ class ProcessIntoFeedTest(TestCase):
 
     def test_reaction_dedup_by_pubkey(self):
         events = {
-            "parent": make_event("parent", 1),
-            "r1": make_event("r1", 7, tags=[["e", "parent"]]),
-            "r2": make_event("r2", 7, pubkey=VALID_PUBKEY_HEX, tags=[["e", "parent"]]),
+            "parent": make_event("parent", 1, content="parent note"),
+            "r1": make_event("r1", 7, content="+", tags=[["e", "parent"]]),
+            "r2": make_event("r2", 7, pubkey=VALID_PUBKEY_HEX, content="+", tags=[["e", "parent"]]),
         }
         roots = self._roots(events)
         self.assertEqual(len(roots[0]["reactions"]), 1)
 
     def test_max_items_truncates_output(self):
         events = {
-            f"e{i}": make_event(f"e{i}", 1, created_at=1000000 + i)
+            f"e{i}": make_event(f"e{i}", 1, content=f"note {i}", created_at=1000000 + i)
             for i in range(10)
         }
         roots = self._roots(events, max_items=3)
@@ -157,9 +157,9 @@ class ProcessIntoFeedTest(TestCase):
 
     def test_events_sorted_by_created_at_desc(self):
         events = {
-            "old": make_event("old", 1, created_at=100),
-            "mid": make_event("mid", 1, created_at=200),
-            "new": make_event("new", 1, created_at=300),
+            "old": make_event("old", 1, content="old note", created_at=100),
+            "mid": make_event("mid", 1, content="mid note", created_at=200),
+            "new": make_event("new", 1, content="new note", created_at=300),
         }
         roots = self._roots(events, max_items=10)
         self.assertEqual(roots[0]["id"], "new")
@@ -167,7 +167,7 @@ class ProcessIntoFeedTest(TestCase):
         self.assertEqual(roots[2]["id"], "old")
 
     def test_profile_enrichment_sets_author_name_and_avatar(self):
-        events = {"e1": make_event("e1", 1)}
+        events = {"e1": make_event("e1", 1, content="valid note")}
         profiles = {
             VALID_PUBKEY_HEX: {
                 "display_name": "Alice",
@@ -181,7 +181,7 @@ class ProcessIntoFeedTest(TestCase):
 
 
     def test_profile_enrichment_falls_back_to_name(self):
-        events = {"e1": make_event("e1", 1)}
+        events = {"e1": make_event("e1", 1, content="valid note")}
         profiles = {
             VALID_PUBKEY_HEX: {
                 "name": "bob",
@@ -192,13 +192,13 @@ class ProcessIntoFeedTest(TestCase):
         self.assertEqual(roots[0]["author_name"], "bob")
 
     def test_profile_enrichment_empty_when_no_profile(self):
-        events = {"e1": make_event("e1", 1)}
+        events = {"e1": make_event("e1", 1, content="valid note")}
         roots = self._roots(events, profiles={})
         self.assertEqual(roots[0]["author_name"], "")
         self.assertEqual(roots[0]["author_avatar"], "")
 
     def test_none_profiles_does_not_crash(self):
-        events = {"e1": make_event("e1", 1)}
+        events = {"e1": make_event("e1", 1, content="valid note")}
         roots = self._roots(events, profiles=None)
         self.assertEqual(len(roots), 1)
         self.assertEqual(roots[0]["author_name"], "")
@@ -228,8 +228,8 @@ class ProcessIntoFeedTest(TestCase):
         events = {
             "p1": make_event("p1", 1, content="parent one"),
             "p2": make_event("p2", 1063, tags=[["url", "http://example.com/img.png"]]),
-            "r1": make_event("r1", 7, tags=[["e", "p1"]]),
-            "r2": make_event("r2", 7, tags=[["e", "p2"]]),
+            "r1": make_event("r1", 7, content="+", tags=[["e", "p1"]]),
+            "r2": make_event("r2", 7, content="+", tags=[["e", "p2"]]),
         }
         roots = self._roots(events)
         self.assertEqual(len(roots), 2)
@@ -253,7 +253,7 @@ class ProcessIntoFeedTest(TestCase):
         self.assertIn("orphan", ids)
 
     def test_npub_field_is_populated(self):
-        events = {"e1": make_event("e1", 1)}
+        events = {"e1": make_event("e1", 1, content="valid note")}
         roots = self._roots(events)
         self.assertIn("npub", roots[0])
         self.assertIsInstance(roots[0]["npub"], str)
@@ -286,7 +286,7 @@ class ProcessIntoFeedTest(TestCase):
 
     def test_kind_30023_extracts_scope_tags(self):
         events = {
-            "poll": make_event("poll", 30023, tags=[
+            "poll": make_event("poll", 30023, content="Scope poll?", tags=[
                 ["option", "Yes"],
                 ["geohash", "9q8yy"],
                 ["org", "iyou"],
@@ -301,7 +301,7 @@ class ProcessIntoFeedTest(TestCase):
     def test_kind_1112_vote_grouped_under_parent_poll(self):
         events = {
             "poll": make_event("poll", 30023, content="Test poll?", tags=[["option", "A"]]),
-            "vote": make_event("vote", 1112, tags=[["e", "poll"]]),
+            "vote": make_event("vote", 1112, content="poll-vote", tags=[["e", "poll"]]),
         }
         roots = self._roots(events)
         self.assertEqual(len(roots), 1)
@@ -312,7 +312,7 @@ class ProcessIntoFeedTest(TestCase):
 
     def test_kind_1112_vote_dropped_without_parent(self):
         events = {
-            "vote": make_event("vote", 1112, tags=[["e", "nonexistent"]]),
+            "vote": make_event("vote", 1112, content="poll-vote", tags=[["e", "nonexistent"]]),
             "poll": make_event("poll", 30023, content="Real poll?", tags=[["option", "A"]]),
         }
         roots = self._roots(events)
@@ -337,7 +337,7 @@ class ProcessIntoFeedTest(TestCase):
         self.assertNotIn("did:iyou:", roots[0]["author_did"])
 
     def test_nip05_and_lud16_populated_from_profile(self):
-        events = {"e1": make_event("e1", 1)}
+        events = {"e1": make_event("e1", 1, content="valid note")}
         profiles = {
             VALID_PUBKEY_HEX: {
                 "display_name": "JB",
@@ -355,7 +355,7 @@ class ProcessIntoFeedTest(TestCase):
         User.objects.create_user(username="did:key:z6MkuG2validuser", first_name="Sovereign")
         # In views.py, resolve_author_did will match when did_to_pubkey matches
         with patch("apps.core.views.did_to_pubkey", return_value=VALID_PUBKEY_HEX):
-            events = {"e1": make_event("e1", 1, pubkey=VALID_PUBKEY_HEX)}
+            events = {"e1": make_event("e1", 1, pubkey=VALID_PUBKEY_HEX, content="valid note")}
             roots = self._roots(events)
             self.assertEqual(roots[0]["author_did"], "did:key:z6MkuG2validuser")
 
@@ -1059,56 +1059,77 @@ class AttachSocialCountsTests(TestCase):
         self.assertEqual(len(result["ancestors"]), 1)
         self.assertEqual(result["ancestors"][0]["id"], "missing_parent_id")
 
-    def test_calculate_trending_tags_aggregates_from_note_stream(self):
+    def test_calculate_trending_tags_aggregates_real_counts(self):
         from apps.core.views import calculate_trending_tags
-        from apps.core.models import UserLinkDeck
-        from django.contrib.auth import get_user_model
 
-        User = get_user_model()
-        user_alice, _ = User.objects.get_or_create(username="did:key:z6Mkalice_trend")
-        UserLinkDeck.objects.get_or_create(user=user_alice, handle="alice", display_name="Alice")
-
-        notes = [
+        events = [
             {
                 "id": "note1",
                 "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
-                "author_did": "did:key:z6Mkalice_trend",
                 "content": "Excited about #nostr and #bitcoin development!",
-                "tags": [["t", "nostr"], ["t", "mesh"]],
+                "tags": [["t", "nostr"], ["t", "#Mesh"], ["t", "bitcoin"]],
             },
             {
                 "id": "note2",
                 "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
-                "author_did": "did:key:z6Mkalice_trend",
                 "content": "Another update regarding #nostr protocol.",
-                "tags": [["t", "nostr"]],
+                "tags": [["t", "NOSTR"]],
             },
             {
                 "id": "note3",
                 "pubkey": "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245",
-                "author_did": "did:key:z6Mkbob_external",
                 "content": "Global wine notes with #wine and #bitcoin",
                 "tags": [["t", "wine"]],
             },
         ]
 
-        # 1. Global scope aggregates across all authors
-        global_tags = calculate_trending_tags(notes, scope="global")
-        self.assertTrue(len(global_tags) >= 3)
-        tag_names = [t["name"] for t in global_tags]
-        self.assertIn("nostr", tag_names)
-        self.assertIn("bitcoin", tag_names)
-        self.assertIn("wine", tag_names)
-        nostr_item = next(t for t in global_tags if t["name"] == "nostr")
-        self.assertEqual(nostr_item["count"], 2)
-        self.assertEqual(nostr_item["scope"], "global")
+        global_tags, iyou_tags = calculate_trending_tags(events)
 
-        # 2. iyou scope aggregates only for authors in UserLinkDeck
-        iyou_tags = calculate_trending_tags(notes, scope="iyou")
-        iyou_names = [t["name"] for t in iyou_tags]
-        self.assertIn("nostr", iyou_names)
-        self.assertIn("bitcoin", iyou_names)
-        self.assertNotIn("wine", iyou_names)
+        # Real frequencies: case-insensitive #t tags collapse, leading '#' is stripped.
+        self.assertEqual(global_tags[0]["name"], "#nostr")
+        self.assertEqual(global_tags[0]["count"], 2)
+        self.assertEqual(global_tags[0]["display_count"], "2 notes")
+        self.assertEqual(global_tags[0]["tag_slug"], "nostr")
+
+        names = [t["name"] for t in global_tags]
+        self.assertIn("#bitcoin", names)
+        self.assertIn("#mesh", names)
+        self.assertIn("#wine", names)
+        mesh_item = next(t for t in global_tags if t["name"] == "#mesh")
+        self.assertEqual(mesh_item["count"], 1)
+        self.assertEqual(mesh_item["display_count"], "1 note")
+
+        # Exact integer counters only — never mock magnitudes ("1.2k").
+        self.assertTrue(all(isinstance(t["count"], int) for t in global_tags))
+        self.assertTrue(all("k" not in t["display_count"] for t in global_tags))
+
+        # No iyou pubkeys provided -> no iyou-scoped tags at all.
+        self.assertEqual(iyou_tags, [])
+
+    def test_calculate_trending_tags_isolates_iyou_pubkeys(self):
+        from apps.core.views import calculate_trending_tags
+
+        alice_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        bob_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+
+        events = [
+            {"id": "note1", "pubkey": alice_pk, "content": "", "tags": [["t", "sovereign"]]},
+            {"id": "note2", "pubkey": alice_pk, "content": "", "tags": [["t", "mesh"]]},
+            {"id": "note3", "pubkey": bob_pk, "content": "", "tags": [["t", "mesh"]]},
+        ]
+
+        global_tags, iyou_tags = calculate_trending_tags(events, iyou_pubkeys={alice_pk})
+
+        # Global scope aggregates across every author.
+        global_map = {t["name"]: t for t in global_tags}
+        self.assertEqual(global_map["#mesh"]["count"], 2)
+        self.assertEqual(global_map["#sovereign"]["count"], 1)
+
+        # iyou scope tallies ONLY tags authored by members of iyou_pubkeys.
+        iyou_map = {t["name"]: t for t in iyou_tags}
+        self.assertEqual(iyou_map["#sovereign"]["count"], 1)
+        self.assertEqual(iyou_map["#mesh"]["count"], 1)
+        self.assertTrue(all(t["tag_slug"] in ("sovereign", "mesh") for t in iyou_tags))
 
     def test_enrich_image_grid_caps_deck_at_four_and_counts_total(self):
         from apps.core.views import enrich_image_grid

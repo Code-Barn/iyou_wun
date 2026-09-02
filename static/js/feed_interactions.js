@@ -411,6 +411,11 @@
                 var mTag = note.tags.find(function (t) { return t[0] === "m"; });
                 if (mTag && mTag[1]) mime = mTag[1].toLowerCase();
             }
+            var hashTag = "";
+            if (note.tags) {
+                var xTag = note.tags.find(function (t) { return t[0] === "x"; });
+                if (xTag && xTag[1]) hashTag = String(xTag[1]).trim();
+            }
             if (url) {
                 var type = "file";
                 if (mime.indexOf("image") !== -1 || /\.(png|jpg|jpeg|gif|webp|svg)(\?.*)?$/i.test(url)) {
@@ -420,7 +425,9 @@
                 } else if (mime.indexOf("audio") !== -1 || /\.(mp3|ogg|wav|m4a|flac)(\?.*)?$/i.test(url)) {
                     type = "audio";
                 }
-                attachments.push({ type: type, url: url });
+                var mediaEntry = { type: type, url: url };
+                if (hashTag) mediaEntry.hash = hashTag;
+                attachments.push(mediaEntry);
             }
         }
 
@@ -494,7 +501,85 @@
         });
     }
 
+    // ---------- Blossom Fallback Cascade ----------
+
+    var MEDIA_FALLBACK_CASCADE = [
+        function (sha) { return "http://127.0.0.1:9002/" + sha; },        // Local Loopback Daemon
+        function (sha) { return "https://cdn.iyou.me/" + sha; },          // Sovereign CDN
+        function (sha) { return "https://nostr.download/" + sha; }        // Public Fallback Blossom Node
+    ];
+
+    /**
+     * `handleMediaError(imgEl, sha256)` — called via inline onerror on <img>
+     * tags that carry a known SHA-256 content hash. Walks a fixed cascade of
+     * mirror routes, swapping src up a tier each time the current mirror fails.
+     * If every mirror fails, it renders a compact unavailable placeholder.
+     *
+     * Tier navigation is persisted on the element via `data-fallback-tier`.
+     */
+    window.handleMediaError = function (imgEl, sha256) {
+        if (!imgEl || !sha256) return;
+        var tier = parseInt(imgEl.getAttribute("data-fallback-tier") || "0", 10);
+        if (isNaN(tier)) tier = 0;
+        if (tier < MEDIA_FALLBACK_CASCADE.length) {
+            var nextSrc = MEDIA_FALLBACK_CASCADE[tier](sha256);
+            tier += 1;
+            imgEl.setAttribute("data-fallback-tier", String(tier));
+            if (imgEl.parentNode) {
+                var wrap = document.createElement("div");
+                wrap.className = "w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-mono text-xs";
+                wrap.textContent = "⏳";
+                imgEl.parentNode.replaceChild(wrap, imgEl);
+                // Preserve the swap through the new placeholder container.
+                var probe = new Image();
+                probe.onload = function () {
+                    try {
+                        var host = imgEl.tagName.toLowerCase() === "image" ? imgEl : imgEl;
+                        var img = document.createElement("img");
+                        img.src = nextSrc;
+                        img.alt = imgEl.getAttribute("alt") || "Attached visual";
+                        img.loading = "lazy";
+                        img.className = imgEl.className.includes("h-full w-full object-cover") ? "w-full h-full object-cover" : "w-full h-full object-contain max-h-[500px]";
+                        img.onclick = imgEl.onclick;
+                        img.onerror = function () { window.handleMediaError(img, sha256); };
+                        wrap.replaceWith(img);
+                    } catch (e) { /* ignore */ }
+                };
+                probe.onerror = function () {
+                    try { wrap.textContent = ""; } catch (e) {}
+                    // The probe failed, so we recorded the tier advance already;
+                    // bail out entirely rather than churn.
+                };
+                probe.src = nextSrc;
+            }
+        } else {
+            // All mirrors exhausted.
+            var parent = imgEl.parentNode;
+            if (parent) {
+                var placeholder = document.createElement("div");
+                placeholder.className = "w-full h-full flex items-center justify-center bg-slate-100 dark:bg-slate-900 text-slate-500 dark:text-slate-400 font-mono text-xs";
+                placeholder.textContent = "[⚠️ Media Unavailable on Mesh]";
+                parent.replaceChild(placeholder, imgEl);
+            }
+        }
+    };
+
     // ---------- Template Builder for Cards ----------
+
+    /**
+     * Build an inline `onerror="handleMediaError(this, '<hash>')"` attribute
+     * when a media attachment carries a NIP-94 `x` hash (or explicit sha256),
+     * enabling the Blossom fallback cascade. Returns "" when no hash is known.
+     */
+    function mediaOnErrorAttr(media) {
+        if (!media) return "";
+        var sha = media.hash || media.sha256 || media.sha || "";
+        sha = String(sha || "").trim();
+        if (!sha) return "";
+        // Only a 64-char hex digest can address mirrors reliably.
+        if (!/^[a-fA-F0-9]{64}$/.test(sha)) return "";
+        return ' onerror="window.handleMediaError(this, \'' + sha + '\')"';
+    }
 
     function buildCardHtml(note) {
         if (!note) return "";
@@ -532,8 +617,9 @@
                 imageAttachments.slice(0, 4).forEach(function (media, idx) {
                     if (!media || !media.url) return;
                     var mUrl = escapeAttr(media.url);
+                    var onErr = mediaOnErrorAttr(media);
                     mediaHtml += '<div class="relative aspect-square overflow-hidden cursor-pointer">' +
-                        '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-200" onclick="openImageModal(\'' + mUrl + '\')" />';
+                        '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-200" onclick="openImageModal(\'' + mUrl + '\')"' + onErr + ' />';
                     if (idx === 3) {
                         mediaHtml += '<div class="absolute inset-0 bg-black/60 flex items-center justify-center"><span class="text-white font-mono font-bold text-2xl">+' + (imageAttachments.length - 4) + '</span></div>';
                     }
@@ -546,8 +632,9 @@
                     if (!media || !media.url) return;
                     var mUrl = escapeAttr(media.url);
                     if (media.type === "image") {
+                        var onErr = mediaOnErrorAttr(media);
                         mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-slate-950/20 max-h-[500px]">' +
-                            '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" onclick="openImageModal(\'' + mUrl + '\')" />' +
+                            '<img src="' + mUrl + '" alt="Attached visual" loading="lazy" class="w-full h-full object-contain max-h-[500px] hover:scale-[1.01] transition-transform duration-200 cursor-pointer" onclick="openImageModal(\'' + mUrl + '\')"' + onErr + ' />' +
                             '</div>';
                     } else if (media.type === "video") {
                         mediaHtml += '<div class="rounded-xl overflow-hidden border border-slate-200 dark:border-slate-800 bg-black max-h-[500px]">' +
@@ -1838,15 +1925,6 @@
         })
         .finally(function () {
             btn.disabled = false;
-        });
-        .catch(function (err) {
-            console.error('Translation error:', err);
-            if (btn) {
-                btn.innerHTML = prevBtnHtml;
-            }
-        })
-        .finally(function () {
-            if (btn) btn.disabled = false;
         });
     }
 
