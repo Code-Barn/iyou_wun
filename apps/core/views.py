@@ -2568,6 +2568,13 @@ class ProfileView(TemplateView):
         owner_deck = getattr(owner_user, "link_deck", None) if owner_user else None
         context["owner_deck"] = owner_deck
         context["link_deck"] = owner_deck
+
+        is_iyou_native = bool(
+            is_owner
+            or (owner_deck and getattr(owner_deck, "handle", None))
+            or UserLinkDeck.objects.filter(user__username=hex_pubkey).exists()
+        )
+        context["is_iyou_native"] = is_iyou_native
         context["deck_items"] = list(owner_deck.items.filter(is_active=True)) if owner_deck else []
         context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
 

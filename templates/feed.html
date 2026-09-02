@@ -220,9 +220,9 @@
 
       </div>
 
-      <!-- Right Rail Sticky Column (Right 4 Cols - Main Feed Mode only) -->
+      <!-- Right Rail Adaptive Sticky Column -->
       {% if feed_mode != 'thread' %}
-      <aside class="hidden lg:block lg:col-span-4 sticky top-20 space-y-4">
+      <aside class="hidden lg:block lg:col-span-4 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto no-scrollbar space-y-4">
         {% include "includes/_feed_right_rail.html" %}
       </aside>
       {% endif %}

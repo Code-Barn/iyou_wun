@@ -322,6 +322,21 @@
   - `test_avatar_fallback_uses_iyou_symbol_only_for_native_peers`, `test_avatar_fallback_uses_mesh_default_for_external_peers`, `test_feed_renders_skeleton_placeholder_markup`, `test_feed_async_shell_skips_blocking_relay_io`, `test_feed_serializes_avatar_resolution_with_client_side_pool`; updated strict `relay_req` mocks for the new `timeout`/`deadline` kwargs.
 - [x] **34.4 Validation:** CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite, `ruff check .`, `node --check` on `feed_interactions.js` — all clean — **Done 2026-09-01**
 
+### Phase 35: Profile Hero Avatar Origin Scoping, Adaptive Sticky Right Rail & NIP-36 Shield Scanner
+- [x] **35.1 Profile Hero Avatar Origin Scoping (`apps/core/views.py`, `templates/profile.html`):**
+  - `ProfileView.get_context_data()` now computes and injects `context["is_iyou_native"]` from `is_owner` OR an owned/`UserLinkDeck` handle on the target OR a `UserLinkDeck` whose user username matches the target pubkey hex.
+  - The avatar hero block proxies the fallback strictly by origin: verified `profile.picture` wins; iyou-native creators render the protected `iyou_symbol.png` violet-brand mark; unverified external mesh peers render the neutral `mesh_avatar_default.svg` globe (slate ring/padding) — mirroring the Phase 34 feed scoping.
+- [x] **35.2 Adaptive Sticky Right Rail (`templates/feed.html`, `static/css/input.css`):**
+  - The right rail `<aside>` became `sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto no-scrollbar`, so the Discovery Rail scrolls within its own pane and stays locked into the viewport without native OS scrollbars.
+  - Added the `.no-scrollbar` utility (`scrollbar-width: none; -ms-overflow-style: none; &::-webkit-scrollbar { display: none; }`) to `input.css`.
+- [x] **35.3 Heuristic NIP-36 Sensitive Content Scanner (`apps/core/nip10.py`):**
+  - `detect_content_warning(event)` still parses standard NIP-36 tags (`content-warning`, `nsfw`, `sensitive`, `nudity`, plus `l`/`label` namespaces) and now additionally scans raw `content` via new `EXPLICIT_CONTENT_REGEXES` heuristics (illicit/adult/spam patterns like onlyfans, nsfw, nude/nudity, webcam, escort, viagra, drug terms).
+  - When matched it annotates the event in place with `event["has_content_warning"] = True` and `event["content_warning_reason"]`; the enrichment emitters surface it as `note.has_content_warning` / `note.warning_reason` (`content_warning_reason` fallback honored) so `circle_feed_filter.js` blurs/hides flagged cards per `wun_nsfw_pref`.
+- [x] **35.4 Tests & Docs:**
+  - `test_profile_hero_avatar_uses_mesh_default_for_external_peers` (external `npub` renders the globe), `test_profile_hero_avatar_uses_iyou_symbol_for_native_creators` (sovereign user renders the brand mark), and `test_detect_content_warning_flags_nip36_and_heuristics` (NIP-36 tag parsing + heuristic regex + in-place event annotation + end-to-end enrichment).
+  - Existing `test_profile_page_uses_iyou_symbol_when_profile_has_no_picture` migrated to `test_profile_hero_avatar_uses_mesh_default_for_external_peers` (avatarless external peers no longer receive the protected brand mark).
+- [x] **35.5 Validation:** CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite (434 passing), `ruff check .` — all clean — **Done 2026-09-01**
+
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

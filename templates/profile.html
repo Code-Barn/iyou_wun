@@ -46,10 +46,14 @@
           <img src="{{ profile.picture }}" alt="{{ profile.name }}" 
                class="w-32 h-32 sm:w-40 sm:h-40 aspect-square rounded-full object-cover border-4 border-white dark:border-slate-900 shadow-2xl bg-slate-800 cursor-pointer hover:opacity-95 transition"
                onclick="openImageModal('{{ profile.picture }}')" />
-          {% else %}
-          <img src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar"
-               class="w-32 h-32 sm:w-40 sm:h-40 aspect-square rounded-full object-cover border-4 border-white dark:border-slate-900 shadow-2xl bg-slate-900 p-2 cursor-pointer hover:opacity-95 transition"
+          {% elif is_iyou_native %}
+          <img src="{% static 'img/iyou_symbol.png' %}" alt="Sovereign Creator"
+               class="w-32 h-32 sm:w-40 sm:h-40 aspect-square rounded-full object-cover border-4 border-violet-500/50 dark:border-violet-600/60 shadow-2xl bg-violet-950 p-3 cursor-pointer hover:opacity-95 transition"
                onclick="openImageModal('{% static 'img/iyou_symbol.png' %}')" />
+          {% else %}
+          <img src="{% static 'img/mesh_avatar_default.svg' %}" alt="Mesh Peer"
+               class="w-32 h-32 sm:w-40 sm:h-40 aspect-square rounded-full object-cover border-4 border-slate-700 dark:border-slate-800 shadow-2xl bg-slate-900 p-2 cursor-pointer hover:opacity-95 transition"
+               onclick="openImageModal('{% static 'img/mesh_avatar_default.svg' %}')" />
           {% endif %}
         </div>
 

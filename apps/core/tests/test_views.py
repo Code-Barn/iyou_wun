@@ -717,7 +717,7 @@ class DashboardProfileTest(TestCase):
 
 
 class DefaultAvatarFallbackTest(TestCase):
-    def test_profile_page_uses_iyou_symbol_when_profile_has_no_picture(self):
+    def test_profile_hero_avatar_uses_mesh_default_for_external_peers(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         npub = hex_to_npub(pk)
         k0_event = make_event("k0_nopic_1", 0, pubkey=pk, created_at=1700000000, content=json.dumps({
@@ -732,13 +732,35 @@ class DefaultAvatarFallbackTest(TestCase):
         with patch("apps.core.views.relay_req", return_value=relay_data):
             response = self.client.get(reverse("profile", kwargs={"npub": npub}))
         self.assertEqual(response.status_code, 200)
-        # Default pfp replaces the letter-initial fallback in the hero avatar
-        # AND in the post-author thumbnail (_thread_post.html).
+        # An external mesh peer without an avatar renders the neutral globe,
+        # not the protected iyou brand mark.
+        self.assertContains(response, "img/mesh_avatar_default.svg")
+
+    def test_profile_hero_avatar_uses_iyou_symbol_for_native_creators(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        npub = hex_to_npub(pk)
+        owner_user = User.objects.create_user(username=pk)
+        UserLinkDeck.objects.create(
+            user=owner_user,
+            handle="brandcreator",
+            display_name="Brand Creator",
+            is_public=True,
+        )
+        k0_event = make_event("k0_nopic_1", 0, pubkey=pk, created_at=1700000000, content=json.dumps({
+            "name": "Avatarless Alice",
+            "about": "No picture yet",
+        }))
+        k1_post = make_event("k1_nopic_1", 1, pubkey=pk, created_at=1700000100, content="First post")
+
+        relay_data = {"k0_1": k0_event, "k1_1": k1_post}
+        user = User.objects.create_user(username="did:key:z6Mkdefaultav1")
+        self.client.force_login(user)
+        with patch("apps.core.views.relay_req", return_value=relay_data):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+        self.assertEqual(response.status_code, 200)
+        # Sovereign creators render the protected iyou brand mark.
         self.assertContains(response, "img/iyou_symbol.png")
-        self.assertContains(response, "openImageModal('/static/img/iyou_symbol.png')")
-        # No letter-initial placeholder circle should render for an avatarless profile.
-        self.assertNotContains(response, "bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center")
-        self.assertNotContains(response, "bg-violet-950 flex items-center justify-center")
+        self.assertNotContains(response, "img/mesh_avatar_default.svg")
 
     def test_dashboard_uses_iyou_symbol_when_no_avatar_set(self):
         user = User.objects.create_user(username="did:key:z6Mkdashdefav1")

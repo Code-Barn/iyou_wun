@@ -30,6 +30,16 @@ html, body {
   min-height: 100%;
 }
 
+/* --- Hide-OS-scrollbar utility for scroll panes (right rail, docks) --- */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
 /* --- Plyr Theme Overrides & Video Viewports --- */
 :root {
   --plyr-color-main: #7c3aed;

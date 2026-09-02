@@ -31,6 +31,16 @@ STACK_TRACE_REGEX = re.compile(r"Traceback \(most recent call last\)|File \".*\"
 
 ADULT_CONTENT_MARKERS = ("#nsfw", "#adult", "#sensitive", "#18+", "18+")
 
+EXPLICIT_CONTENT_REGEXES = (
+    re.compile(r"\b(?:porn|porno|xxx|nsfw|onlyfans|sex tape)\b", re.IGNORECASE),
+    re.compile(r"\b(?:nude|nudity|naked|topless|nsfw)\b", re.IGNORECASE),
+    re.compile(r"\b(?:explicit|uncensored|adult content|mature content)\b", re.IGNORECASE),
+    re.compile(r"\b(?:escort|erotic|fetish|bdsm|hentai)\b", re.IGNORECASE),
+    re.compile(r"\b(?:free cam|live cam|webcam girl|streaming cam)\b", re.IGNORECASE),
+    re.compile(r"\b(?:d[uo]pe|meth|cocaine|heroin|fentanyl)\b", re.IGNORECASE),
+    re.compile(r"\b(?:v[i1]agr[a4]|cipro|cashapp scam|bitcoin giveaway)\b", re.IGNORECASE),
+)
+
 
 def sanitize_event_content(event):
     """Heuristic noise & NSFW classifier for a raw Nostr event.
@@ -127,6 +137,13 @@ def detect_machine_noise(content):
 def detect_content_warning(event):
     """NIP-36 content-warning detection from tags and visible markers.
 
+    Checks standard NIP-36 tags (``content-warning``, ``nsfw``, ``sensitive``,
+    ``nudity``, plus ``l``/``label`` ISO-3166-1 or namespace tags) and scans the
+    raw content for illicit, adult, or extreme spam patterns via keyword/regex
+    heuristics when no tag is present. When matched, the event dict is annotated
+    in place with ``has_content_warning`` / ``content_warning_reason`` so
+    downstream renderers and ``circle_feed_filter.js`` can blur or hide the note.
+
     Returns (has_content_warning, warning_reason).
     """
     if not isinstance(event, dict):
@@ -143,16 +160,28 @@ def detect_content_warning(event):
         if first_tag in ("content-warning", "nsfw", "sensitive", "nudity"):
             if len(tag) > 1 and str(tag[1]).strip():
                 reason = str(tag[1]).strip()
+            event["has_content_warning"] = True
+            event["content_warning_reason"] = reason or "Sensitive Content"
             return True, reason or "Sensitive Content"
         if first_tag in ("l", "label"):
             for item in tag[1:]:
                 item_str = str(item).strip().lower()
                 if item_str in ("content-warning", "nsfw", "sensitive", "nudity"):
+                    event["has_content_warning"] = True
+                    event["content_warning_reason"] = "Sensitive Content"
                     return True, "Sensitive Content"
 
     lowered = str(content).lower()
     for marker in ADULT_CONTENT_MARKERS:
         if marker in lowered:
+            event["has_content_warning"] = True
+            event["content_warning_reason"] = "Sensitive Content"
+            return True, "Sensitive Content"
+
+    for pattern in EXPLICIT_CONTENT_REGEXES:
+        if pattern.search(lowered):
+            event["has_content_warning"] = True
+            event["content_warning_reason"] = "Sensitive Content"
             return True, "Sensitive Content"
 
     return False, ""
@@ -689,7 +718,7 @@ def build_thread_tree(raw_events, profiles=None):
             "reactions": [],
             "replies": [],
             "has_content_warning": bool(e.get("has_content_warning") or detect_content_warning(e)[0]),
-            "warning_reason": e.get("warning_reason") or detect_content_warning(e)[1] or "",
+            "warning_reason": e.get("content_warning_reason") or e.get("warning_reason") or detect_content_warning(e)[1] or "",
             "lang": e.get("lang") or detect_language(e) or "en",
         }
         return extract_media_from_note(note)
@@ -834,7 +863,7 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "reactions": [],
         "replies": [],
         "has_content_warning": bool(e.get("has_content_warning") or detect_content_warning(e)[0]),
-        "warning_reason": e.get("warning_reason") or detect_content_warning(e)[1] or "",
+        "warning_reason": e.get("content_warning_reason") or e.get("warning_reason") or detect_content_warning(e)[1] or "",
         "lang": e.get("lang") or detect_language(e) or "en",
     }
 

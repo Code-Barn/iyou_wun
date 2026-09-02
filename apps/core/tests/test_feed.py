@@ -1278,6 +1278,50 @@ class FeedPhase24Test(TestCase):
         self.assertContains(response, "Public relay note test")
         self.assertNotContains(response, "🌐 Mesh")
 
+    def test_detect_content_warning_flags_nip36_and_heuristics(self):
+        from apps.core.nip10 import detect_content_warning, sanitize_event_content, build_thread_tree
+
+        # --- NIP-36 tag parsing ---
+        self.assertEqual(detect_content_warning({"tags": [["content-warning", "spoilers"]]}), (True, "spoilers"))
+        self.assertEqual(detect_content_warning({"tags": [["nsfw"]]}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"tags": [["sensitive"]]}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"tags": [["nudity"]]}), (True, "Sensitive Content"))
+
+        # Tags annotate the event dict in place for downstream consumers.
+        tagged = {"tags": [["content-warning", "adult"]]}
+        self.assertTrue(detect_content_warning(tagged)[0])
+        self.assertTrue(tagged.get("has_content_warning"))
+        self.assertEqual(tagged.get("content_warning_reason"), "adult")
+
+        # --- Heuristic regex matching over raw content ---
+        self.assertEqual(detect_content_warning({"content": "Watch the full video on onlyfans"}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"content": "Check out my nsfw art"}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"content": "Live webcam girl streaming now"}), (True, "Sensitive Content"))
+        self.assertEqual(detect_content_warning({"content": "Buy viagra online cheap"}), (True, "Sensitive Content"))
+
+        # Explicit male-model / label spam variants.
+        self.assertEqual(detect_content_warning({"content": "❌ Porn spam free cam dump"}), (True, "Sensitive Content"))
+
+        # --- Clean content stays unflagged ---
+        self.assertEqual(detect_content_warning({"content": "Morning coffee and a nice hike", "tags": []}), (False, ""))
+        self.assertEqual(detect_content_warning({"content": "Shipping a new relay today", "tags": []}), (False, ""))
+        self.assertFalse(detect_content_warning({"content": "Shipping a new relay today"})[0])
+
+        # --- End-to-end enrichment: flagged + reason surfaced on the note ---
+        flagged = make_event("cw_heur_1", 1, content="Explicit nsfw material", tags=[])
+        tree = build_thread_tree([flagged])
+        self.assertEqual(len(tree["roots"]), 1)
+        self.assertTrue(tree["roots"][0]["has_content_warning"])
+        self.assertEqual(tree["roots"][0]["warning_reason"], "Sensitive Content")
+
+        # sanitize_event_content classifier stays consistent
+        classifier = sanitize_event_content({"content": "free cam adult stream"})
+        self.assertTrue(classifier["has_content_warning"])
+        self.assertEqual(classifier["warning_reason"], "Sensitive Content")
+
+        # Contextual non-warning use of the word "tag" must NOT trip.
+        self.assertEqual(detect_content_warning({"content": "Here is the tag list for this note"}), (False, ""))
+
 
 class IsRenderableNoteTest(TestCase):
     """Phase 26: Feed Sanitization & P2P Discovery Noise Gate Tests."""
