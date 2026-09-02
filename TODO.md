@@ -307,6 +307,21 @@
   - Tests: `test_feed_interactions_carries_phase33_proxy_fallback`, `test_relay_pool_carries_phase33_toggle_schema`, `test_dashboard_renders_relay_switchboard_toggles`, plus `test_upload_proxy_success_returns_phase33_schema`, `test_blossom_proxy_route_accepts_uploads`, and `test_upload_proxy_uses_unverified_ssl_context_for_https_upstream`.
 - [x] **33.5 Validation:** CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite, `ruff check .`, `node --check` on `relay_pool.js`/`feed_interactions.js`/`dashboard.html` — all clean — **Done 2026-09-01**
 
+### Phase 34: Instant Shell Architecture, Progressive Stream Hydration & Scoped Avatar Brand Protection
+- [x] **34.1 Scoped Avatar Brand Protection (`static/img/mesh_avatar_default.svg`, `templates/includes/_thread_post.html`, `_quote_card.html`, `_feed_right_rail.html`, `static/js/feed_interactions.js`):**
+  - Added a neutral slate SVG globe milestone (`mesh_avatar_default.svg`) — slate-700 sphere (`#64748b` grid on `#1e293b` radial) with mesh-network node dots/lines — representing an unverified external mesh relay peer.
+  - Avatar fallbacks are now scoped strictly by origin in every note renderer: verified `author_avatar` wins; otherwise iyou-native/sovereign peers (`note.is_iyou_native`) get the protected `iyou_symbol.png` violet-brand mark, and every other external peer gets the neutral `mesh_avatar_default.svg` globe.
+  - Client-side `resolveAvatarUrl(note)` in `feed_interactions.js` mirrors the same server-side scoping inside `buildCardHtml()` with matching slate/violet ring/padding classes.
+
+- [x] **34.2 Instant Shell & Progressive Stream Hydration (`templates/feed.html`, `apps/core/views.py`, `static/js/feed_interactions.js`):**
+  - `feed.html` renders `#feed-skeleton-container` (3 pulsing placeholder cards mimicking headers/text/action bars) above an empty `#feed-container` flagged `data-hydrate="true"` whenever the stream has no server-rendered roots.
+  - `FeedView.get_context_data()` bounds the initial render to `INITIAL_FEED_SHELL_TIMEOUT` (1.2s) by threading a wall-clock `deadline` through `relay_req()` (hard per-call cap + skip past deadline), `fetch_unified_feed()`, `attach_social_counts()`, `attach_quoted_notes()`, `fetch_contact_pubkeys()`, and `fetch_thread()` — fast relays still yield a full server-rendered feed; slow/blackhole relays degrade to the instant shell instead of stalling the HTTP worker. `?async=1` requests the bare shell immediately with no relay I/O at all.
+  - `fetchInitialFeedStream()` runs on `DOMContentLoaded` when `#feed-container` carries `data-hydrate`; it pulls the first batch from `/api/feed/` (the dedicated async payload supplier), removes the skeleton, hydrates cards via `appendNoteToFeed()`, re-runs `trustLens.scan()`, `hydrateLocalTimestamps()`, clamping, and re-arms the infinite-scroll pagination observer — with an error path that clears the skeleton rather than hanging.
+
+- [x] **34.3 Tests & Docs:**
+  - `test_avatar_fallback_uses_iyou_symbol_only_for_native_peers`, `test_avatar_fallback_uses_mesh_default_for_external_peers`, `test_feed_renders_skeleton_placeholder_markup`, `test_feed_async_shell_skips_blocking_relay_io`, `test_feed_serializes_avatar_resolution_with_client_side_pool`; updated strict `relay_req` mocks for the new `timeout`/`deadline` kwargs.
+- [x] **34.4 Validation:** CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite, `ruff check .`, `node --check` on `feed_interactions.js` — all clean — **Done 2026-09-01**
+
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

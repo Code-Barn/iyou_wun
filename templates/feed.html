@@ -139,7 +139,27 @@
         {% include "includes/_post_composer.html" %}
 
         <!-- Root Posts Stream -->
-        <div id="feed-container" class="space-y-3">
+        {% if not notes %}
+        <!-- Instant Shell Skeleton — progressive stream hydration placeholder -->
+        <div id="feed-skeleton-container" class="space-y-4">
+          {% for i in "123" %}
+          <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 animate-pulse space-y-3">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-800"></div>
+              <div class="space-y-1.5 flex-1">
+                <div class="h-3.5 bg-slate-200 dark:bg-slate-800 rounded w-1/4"></div>
+                <div class="h-2.5 bg-slate-200 dark:bg-slate-800 rounded w-1/6"></div>
+              </div>
+            </div>
+            <div class="space-y-2">
+              <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-full"></div>
+              <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-5/6"></div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+        <div id="feed-container" class="space-y-3" {% if not notes %}data-hydrate="true"{% endif %}>
           {% for note in notes %}
           <div class="feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
                data-note-card-id="{{ note.id }}"

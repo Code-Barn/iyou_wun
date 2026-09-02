@@ -10,12 +10,17 @@
     {% if note.author_avatar %}
     <a href="{% url 'profile' npub=note.npub %}">
       <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}"
-           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
+           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-slate-800 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
+    </a>
+    {% elif note.is_iyou_native %}
+    <a href="{% url 'profile' npub=note.npub %}">
+      <img src="{% static 'img/iyou_symbol.png' %}" alt="iyou Sovereign Peer"
+           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-violet-950 p-1 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
     </a>
     {% else %}
     <a href="{% url 'profile' npub=note.npub %}">
-      <img src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar"
-           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-violet-950 p-1 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
+      <img src="{% static 'img/mesh_avatar_default.svg' %}" alt="Mesh Peer"
+           class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-slate-800 p-1 hover:ring-2 hover:ring-violet-400 transition shrink-0 aspect-square" />
     </a>
     {% endif %}
   </div>

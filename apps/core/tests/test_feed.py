@@ -1043,7 +1043,7 @@ class AttachSocialCountsTests(TestCase):
 
         captured_relays = []
 
-        def mock_relay_req(filter_obj, relay_urls=None):
+        def mock_relay_req(filter_obj, relay_urls=None, timeout=10, deadline=None):
             if "ids" in filter_obj and "target_reply" in filter_obj["ids"]:
                 return {"target_reply": target}
             if "ids" in filter_obj and "missing_parent_id" in filter_obj["ids"]:

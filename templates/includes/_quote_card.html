@@ -4,9 +4,11 @@
   <div class="flex items-center justify-between gap-2 mb-1.5">
     <div class="flex items-center gap-2 min-w-0">
       {% if quoted.author_avatar %}
-      <img src="{{ quoted.author_avatar }}" class="w-4 h-4 rounded-full object-cover shrink-0" />
+      <img src="{{ quoted.author_avatar }}" alt="{{ quoted.author_name|default:'Mesh Peer' }}" class="w-4 h-4 rounded-full object-cover shrink-0" />
+      {% elif quoted.is_iyou_native %}
+      <img src="{% static 'img/iyou_symbol.png' %}" alt="iyou Sovereign Peer" class="w-4 h-4 rounded-full object-cover bg-violet-900 p-0.5 shrink-0" />
       {% else %}
-      <img src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar" class="w-4 h-4 rounded-full object-cover bg-violet-900 p-0.5 shrink-0" />
+      <img src="{% static 'img/mesh_avatar_default.svg' %}" alt="Mesh Peer" class="w-4 h-4 rounded-full object-cover bg-slate-800 p-0.5 border border-slate-700/60 shrink-0" />
       {% endif %}
       <span class="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
         {{ quoted.author_name|default:quoted.npub|truncatechars:18 }}

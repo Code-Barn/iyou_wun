@@ -581,6 +581,18 @@
         return ' onerror="window.handleMediaError(this, \'' + sha + '\')"';
     }
 
+    /**
+     * Phase 34 — Scoped Avatar Brand Protection.
+     * External mesh peers with no verified avatar get the neutral slate globe
+     * (mesh_avatar_default.svg); only iyou-native / sovereign peers fall back
+     * to the protected iyou_symbol.png brand mark.
+     */
+    function resolveAvatarUrl(note) {
+        if (note.author_avatar && note.author_avatar.trim()) return note.author_avatar;
+        if (note.is_iyou_native || note.is_sovereign) return '/static/img/iyou_symbol.png';
+        return '/static/img/mesh_avatar_default.svg';
+    }
+
     function buildCardHtml(note) {
         if (!note) return "";
         if (!isRenderableNote(note)) {
@@ -655,9 +667,13 @@
             }
         }
 
-        var avatarHtml = authorAvatar ?
-            '<img src="' + escapeAttr(authorAvatar) + '" alt="' + escapeAttr(authorName) + '" class="w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 hover:ring-2 hover:ring-violet-400 transition" />' :
-            '<div class="w-10 h-10 bg-violet-100 dark:bg-violet-950/60 rounded-full flex items-center justify-center border border-violet-200 dark:border-violet-800"><span class="text-violet-600 dark:text-violet-400 font-mono text-sm font-bold">' + escapeHtml((authorName || "N").charAt(0).toUpperCase()) + '</span></div>';
+        var isNativePeer = !!(note.is_iyou_native || note.is_sovereign);
+        var avatarUrl = resolveAvatarUrl(note);
+        var avatarClasses = isNativePeer
+            ? "w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-violet-950 p-1 hover:ring-2 hover:ring-violet-400 transition aspect-square"
+            : "w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-slate-800 p-1 hover:ring-2 hover:ring-violet-400 transition aspect-square";
+        var avatarAlt = authorAvatar ? authorName : (isNativePeer ? "iyou Sovereign Peer" : "Mesh Peer");
+        var avatarHtml = '<img src="' + escapeAttr(avatarUrl) + '" alt="' + escapeAttr(avatarAlt) + '" class="' + avatarClasses + '" />';
 
         var nip05Badge = nip05 ?
             '<span class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 rounded border border-violet-200 dark:border-violet-800/60" title="' + escapeAttr(nip05) + '"><svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>' + escapeHtml(nip05) + '</span>' :
@@ -1000,6 +1016,83 @@
     // ---------- Cursor-Based Infinite Scroll & Load More ----------
 
     var _isLoadingFeedNotes = false;
+
+    // ---------- Phase 34: Progressive Stream Hydration ----------
+    // When the server renders the instant HTML shell (empty #feed-container
+    // flagged with data-hydrate), this async path pulls the first batch from
+    // /api/feed/ (the dedicated asynchronous batch payload supplier), removes
+    // the skeleton, and hydrates real cards — then rescans TrustLens and
+    // re-hydrates local timestamps.
+
+    var _hydratingInitialFeed = false;
+
+    function fetchInitialFeedStream() {
+        if (_hydratingInitialFeed) return;
+        var container = document.getElementById("feed-container");
+        if (!container || container.getAttribute("data-hydrate") !== "true") return;
+        _hydratingInitialFeed = true;
+
+        var urlParams = new URLSearchParams(window.location.search);
+        var circle = urlParams.get("circle") || "global";
+        var mode = urlParams.get("mode") || (circle === "global" ? "global" : "network");
+        var activeCircleBtn = document.querySelector(".circle-tab.active, .circle-tab[data-active='true']");
+        if (activeCircleBtn && activeCircleBtn.dataset && activeCircleBtn.dataset.circle) {
+            circle = activeCircleBtn.dataset.circle;
+        }
+        var tag = urlParams.get("tag") || "";
+
+        var queryUrl = "/api/feed?limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
+        if (tag) queryUrl += "&tag=" + encodeURIComponent(tag);
+
+        fetch(queryUrl)
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var skeleton = document.getElementById("feed-skeleton-container");
+                if (skeleton) skeleton.remove();
+
+                var notes = data.notes || [];
+                var repliesMap = data.replies || {};
+                notes.forEach(function (note) {
+                    appendNoteToFeed(note, container, repliesMap);
+                });
+
+                if (data.oldest_timestamp) {
+                    var sentinel = document.getElementById("feed-pagination-sentinel");
+                    if (sentinel && sentinel.dataset) {
+                        sentinel.dataset.oldestTimestamp = data.oldest_timestamp;
+                    }
+                }
+
+                var emptyState = document.getElementById("feed-empty-state");
+                if (notes.length === 0 && !emptyState) {
+                    var emptyDiv = document.createElement("div");
+                    emptyDiv.id = "feed-empty-state";
+                    emptyDiv.className = "text-center py-12 text-slate-400 font-mono text-xs";
+                    emptyDiv.textContent = "No notes found in this circle.";
+                    container.appendChild(emptyDiv);
+                }
+
+                container.removeAttribute("data-hydrate");
+
+                if (window.TrustLens && typeof window.TrustLens.scanDOM === "function") {
+                    window.TrustLens.scanDOM();
+                } else if (window.trustLens && typeof window.trustLens.scan === "function") {
+                    window.trustLens.scan(container);
+                }
+                hydrateLocalTimestamps(document);
+                checkAndApplyClamping(document);
+                initFeedPaginationObserver();
+            })
+            .catch(function (err) {
+                console.error("Failed to hydrate initial feed stream:", err);
+                var skeleton = document.getElementById("feed-skeleton-container");
+                if (skeleton) skeleton.remove();
+                container.removeAttribute("data-hydrate");
+            })
+            .finally(function () {
+                _hydratingInitialFeed = false;
+            });
+    }
 
     function loadMoreNotes() {
         if (_isLoadingFeedNotes) return;
@@ -2322,6 +2415,11 @@
 
     // Jump to Top button visibility & initialization listener
     document.addEventListener('DOMContentLoaded', function() {
+        // Phase 34 — Instant Shell progressive hydration: if the server rendered
+        // an empty shell (marked data-hydrate), kick off the background stream
+        // fetch immediately on DOMContentLoaded for fast perceived load.
+        fetchInitialFeedStream();
+
         // Apply "Read More" clamping to server-rendered note bodies
         checkAndApplyClamping(document);
 

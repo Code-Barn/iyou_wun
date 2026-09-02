@@ -1929,7 +1929,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
         captured_filter = {}
 
-        def mock_relay_req(filter_obj, relay_urls=None):
+        def mock_relay_req(filter_obj, relay_urls=None, timeout=10, deadline=None):
             captured_filter.update(filter_obj)
             return {
                 "note_iyou": make_event("note_iyou", 1, pubkey="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d", content="Local ecosystem note"),
@@ -1957,6 +1957,60 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-lang="es"')
+
+    def test_avatar_fallback_uses_iyou_symbol_only_for_native_peers(self):
+        from apps.core.views import did_to_pubkey
+        iyou_did = "did:key:z6Mkiyoubrandpeer"
+        iyou_user, _ = User.objects.get_or_create(username=iyou_did)
+        UserLinkDeck.objects.get_or_create(
+            user=iyou_user,
+            handle="iyoubrandom",
+            display_name="Iyou Brand Peer",
+            is_public=True,
+        )
+        native_pk = did_to_pubkey(iyou_did)
+        native_event = make_event(
+            "native_avatar_1", 1, pubkey=native_pk, content="A native sovereign peer without an avatar"
+        )
+        with patch("apps.core.views.relay_req", return_value={"native_avatar_1": native_event}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/static/img/iyou_symbol.png")
+        self.assertNotContains(response, "/static/img/mesh_avatar_default.svg")
+
+    def test_avatar_fallback_uses_mesh_default_for_external_peers(self):
+        external_event = make_event(
+            "external_avatar_1", 1, content="An unverified external mesh relay peer"
+        )
+        with patch("apps.core.views.relay_req", return_value={"external_avatar_1": external_event}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "/static/img/mesh_avatar_default.svg")
+
+    def test_feed_renders_skeleton_placeholder_markup(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed") + "?async=1")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="feed-skeleton-container"')
+        self.assertContains(response, "animate-pulse")
+        self.assertContains(response, 'data-hydrate="true"')
+        self.assertContains(response, 'id="feed-container"')
+
+    def test_feed_async_shell_skips_blocking_relay_io(self):
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay:
+            response = self.client.get(reverse("feed") + "?async=1")
+        self.assertEqual(response.status_code, 200)
+        mock_relay.assert_not_called()
+
+    def test_feed_serializes_avatar_resolution_with_client_side_pool(self):
+        src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()
+        self.assertIn("function resolveAvatarUrl(note)", src)
+        self.assertIn("/static/img/iyou_symbol.png", src)
+        self.assertIn("/static/img/mesh_avatar_default.svg", src)
+        self.assertIn("note.is_iyou_native || note.is_sovereign", src)
+        self.assertIn("function fetchInitialFeedStream", src)
+        self.assertIn('container.getAttribute("data-hydrate") !== "true"', src)
+        self.assertIn("/api/feed?limit=25", src)
 
     def test_thread_post_renders_translate_button_for_non_english(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"

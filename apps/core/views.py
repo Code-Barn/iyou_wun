@@ -421,51 +421,87 @@ class FeedView(TemplateView):
         thread_id = self.request.GET.get("thread") or self.request.GET.get("note") or self.request.GET.get("e")
         context["thread_id"] = thread_id
 
-        if thread_id:
-            thread_data = fetch_thread(thread_id, relay_urls=relays)
-            context["thread_mode"] = True
-            context["feed_mode"] = "thread"
-            context["thread_root"] = thread_data.get("thread_root") or {}
-            context["ancestors"] = thread_data.get("ancestors", [])
-            context["notes"] = []  # Empty so flat feed loop never executes in thread mode
-            context["thread_replies"] = thread_data.get("replies", {})
-            context["thread_reply_count"] = thread_data.get("total_replies", 0)
-            context["oldest_timestamp"] = None
+        # Phase 34 — Instant Shell Architecture.
+        # `?async=1` requests the bare HTML shell immediately (no blocking relay
+        # I/O); the browser then hydrates the stream from /api/feed/ (the
+        # dedicated asynchronous batch payload supplier). Otherwise the initial
+        # render is bounded to INITIAL_FEED_SHELL_TIMEOUT seconds: fast relays
+        # still produce a server-rendered feed, slow/blackhole relays degrade to
+        # the instant shell instead of stalling the HTTP worker.
+        instant_shell = self.request.GET.get("async") == "1"
 
-            _root = context["thread_root"]
-            if _root:
-                enrich_image_grid(_root)
-                for _r in (_root.get("replies") or []):
-                    enrich_image_grid(_r)
-            for _a in context["ancestors"]:
-                enrich_image_grid(_a)
-            for _replies in (thread_data.get("replies") or {}).values():
-                for _r in _replies:
-                    enrich_image_grid(_r)
+        if thread_id:
+            if instant_shell:
+                context["thread_mode"] = True
+                context["feed_mode"] = "thread"
+                context["thread_root"] = {}
+                context["ancestors"] = []
+                context["notes"] = []
+                context["thread_replies"] = {}
+                context["thread_reply_count"] = 0
+                context["oldest_timestamp"] = None
+            else:
+                thread_data = fetch_thread(thread_id, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT)
+                context["thread_mode"] = True
+                context["feed_mode"] = "thread"
+                context["thread_root"] = thread_data.get("thread_root") or {}
+                context["ancestors"] = thread_data.get("ancestors", [])
+                context["notes"] = []  # Empty so flat feed loop never executes in thread mode
+                context["thread_replies"] = thread_data.get("replies", {})
+                context["thread_reply_count"] = thread_data.get("total_replies", 0)
+                context["oldest_timestamp"] = None
+
+                _root = context["thread_root"]
+                if _root:
+                    enrich_image_grid(_root)
+                    for _r in (_root.get("replies") or []):
+                        enrich_image_grid(_r)
+                for _a in context["ancestors"]:
+                    enrich_image_grid(_a)
+                for _replies in (thread_data.get("replies") or {}).values():
+                    for _r in _replies:
+                        enrich_image_grid(_r)
         else:
             circle = self.request.GET.get("circle") or self.request.GET.get("mode") or "global"
             context["feed_mode"] = circle
             context["feed_circle"] = circle
 
-            if circle == "iyou":
+            if instant_shell:
+                notes = []
+                feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
+            elif circle == "iyou":
                 iyou_pks = get_iyou_pubkeys()
                 if not iyou_pks:
                     feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
                 else:
-                    feed_data = fetch_unified_feed(authors=iyou_pks, relay_urls=relays)
+                    feed_data = fetch_unified_feed(
+                        authors=iyou_pks, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                    )
             elif circle in ("following", "network") and user_pubkey:
-                contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
+                contacts = fetch_contact_pubkeys(
+                    user_pubkey, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                )
                 if contacts:
-                    feed_data = fetch_unified_feed(authors=contacts, relay_urls=relays)
+                    feed_data = fetch_unified_feed(
+                        authors=contacts, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                    )
                 else:
-                    feed_data = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
+                    feed_data = fetch_unified_feed(
+                        authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                    )
             elif circle in ("following", "network") and not user_pubkey:
-                feed_data = fetch_unified_feed(authors=CURATED_AUTHORS, relay_urls=relays)
+                feed_data = fetch_unified_feed(
+                    authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                )
             else:
-                feed_data = fetch_unified_feed(relay_urls=relays)
+                feed_data = fetch_unified_feed(
+                    relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                )
 
             notes = feed_data["roots"]
-            notes = attach_social_counts(notes, relay_urls=relays)
+            notes = attach_social_counts(
+                notes, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+            )
             timestamps = []
             for n in notes:
                 ts = n.get("created_at")
@@ -1377,14 +1413,14 @@ INDEXING_FALLBACK_RELAYS = [
 ]
 
 
-def fetch_thread(thread_id, relay_urls=None):
+def fetch_thread(thread_id, relay_urls=None, deadline=None):
     """Fetch a target event (Hero), its full root→…→parent ancestor chain, and direct 1-level replies."""
     from .nip10 import parse_nip10_tags, resolve_ancestor_ids
 
-    target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=relay_urls)
+    target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=relay_urls, deadline=deadline)
     if not target_raw:
         fallback_pool = list(dict.fromkeys((relay_urls or DEFAULT_RELAYS) + INDEXING_FALLBACK_RELAYS))
-        target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=fallback_pool)
+        target_raw = relay_req({"ids": [thread_id], "limit": 1}, relay_urls=fallback_pool, deadline=deadline)
 
     if not target_raw:
         return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
@@ -1412,6 +1448,7 @@ def fetch_thread(thread_id, relay_urls=None):
             fetched = relay_req(
                 {"ids": batch, "kinds": [1, 1111], "limit": 20},
                 relay_urls=ancestor_relay_pool,
+                deadline=deadline,
             )
             pool.update(fetched)
             seen.update(fetched)
@@ -1430,7 +1467,7 @@ def fetch_thread(thread_id, relay_urls=None):
     if root_id and root_id != thread_id:
         query_ids.append(root_id)
 
-    descendants_raw = relay_req({"#e": query_ids, "kinds": [1, 1111], "limit": 100}, relay_urls=relay_urls)
+    descendants_raw = relay_req({"#e": query_ids, "kinds": [1, 1111], "limit": 100}, relay_urls=relay_urls, deadline=deadline)
 
     combined = {**pool, **descendants_raw}
 
@@ -1449,7 +1486,7 @@ def fetch_thread(thread_id, relay_urls=None):
 
     profiles = {}
     if pubkeys:
-        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]}, relay_urls=relay_urls)
+        profile_events = relay_req({"kinds": [0], "authors": list(pubkeys)[:100]}, relay_urls=relay_urls, deadline=deadline)
         for e in profile_events.values():
             pk = e.get("pubkey", "")
             try:
@@ -1566,6 +1603,12 @@ DEFAULT_RELAYS = [
     "ws://127.0.0.1:9003",
 ]
 
+# Phase 34 — Instant Shell Architecture: the initial Feed page render is
+# bounded to this many seconds. Remote relay resolution that cannot complete
+# inside the window defers to the instant HTML shell + progressive hydration
+# via /api/feed/ (the dedicated asynchronous batch payload supplier).
+INITIAL_FEED_SHELL_TIMEOUT = 1.2
+
 
 
 CURATED_AUTHORS = [
@@ -1629,8 +1672,14 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
     return events
 
 
-def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None):
-    """Try multiple relays with autonomous failover, returning events from first responsive one."""
+def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None, deadline=None):
+    """Try multiple relays with autonomous failover, returning events from first responsive one.
+
+    `deadline` (optional wall-clock epoch seconds) hard-caps total time spent
+    across ALL relay attempts. Once the deadline passes, remaining relays are
+    skipped and whatever was gathered so far is returned — letting the caller
+    render an instant shell instead of stalling an HTTP worker on a blackhole.
+    """
     if sub_id is None:
         sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
 
@@ -1638,8 +1687,15 @@ def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None):
         relay_urls = DEFAULT_RELAYS
 
     for relay_url in relay_urls:
+        if deadline is not None:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            effective_timeout = min(timeout, remaining)
+        else:
+            effective_timeout = timeout
         try:
-            events = _connect_relay(relay_url, sub_id, filter_obj, timeout)
+            events = _connect_relay(relay_url, sub_id, filter_obj, effective_timeout)
             if events:
                 return events
         except Exception as e:
@@ -1826,7 +1882,7 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     }
 
 
-def attach_social_counts(notes, relay_urls=None):
+def attach_social_counts(notes, relay_urls=None, timeout=10, deadline=None):
     """
     Unified batch social-counts query.
 
@@ -1848,9 +1904,8 @@ def attach_social_counts(notes, relay_urls=None):
         "limit": 800,
     }
 
-    raw_events = relay_req(filter_obj, relay_urls=relays)
+    raw_events = relay_req(filter_obj, relay_urls=relays, timeout=timeout, deadline=deadline)
     events = list(raw_events.values()) if isinstance(raw_events, dict) else (raw_events if isinstance(raw_events, list) else [])
-
     reply_counts = {rid: 0 for rid in root_ids}
     repost_counts = {rid: 0 for rid in root_ids}
     like_counts = {rid: 0 for rid in root_ids}
@@ -1918,7 +1973,7 @@ def attach_reaction_counts(notes, relay_urls=None):
     return attach_social_counts(notes, relay_urls=relay_urls)
 
 
-def attach_quoted_notes(roots, relay_urls=None):
+def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None):
     """Batch-fetch NIP-18/NIP-27 quoted events and attach enriched `quoted_note` to each root.
 
     Notes with a `quoted_id` get their referenced event fetched (and profile
@@ -1945,7 +2000,7 @@ def attach_quoted_notes(roots, relay_urls=None):
         return roots
 
     try:
-        raw_quoted = relay_req({"ids": list(quoted_ids), "limit": len(quoted_ids)}, relay_urls=relay_urls) or {}
+        raw_quoted = relay_req({"ids": list(quoted_ids), "limit": len(quoted_ids)}, relay_urls=relay_urls, timeout=timeout, deadline=deadline) or {}
     except Exception:
         raw_quoted = {}
 
@@ -1961,7 +2016,7 @@ def attach_quoted_notes(roots, relay_urls=None):
     profiles = {}
     if authors:
         try:
-            profile_events = relay_req({"kinds": [0], "authors": list(authors)[:100]}, relay_urls=relay_urls) or {}
+            profile_events = relay_req({"kinds": [0], "authors": list(authors)[:100]}, relay_urls=relay_urls, timeout=timeout, deadline=deadline) or {}
         except Exception:
             profile_events = {}
         for e in profile_events.values():
@@ -1992,12 +2047,14 @@ def attach_quoted_notes(roots, relay_urls=None):
     return roots
 
 
-def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
     Phase 1: Fetch kinds [1, 7, 1063, 1111] with optional authors filter.
     Phase 2: Fetch Kind 0 metadata for all unique pubkeys discovered.
     Returns a structured feed with author_name/author_avatar populated.
+
+    `deadline` optionally bounds the total wall-clock time (Phase 34 instant shell).
     """
     if authors is not None and not authors:
         return {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
@@ -2006,7 +2063,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
     if authors:
         filter_obj["authors"] = authors
 
-    raw_events = relay_req(filter_obj, relay_urls=relay_urls)
+    raw_events = relay_req(filter_obj, relay_urls=relay_urls, timeout=timeout, deadline=deadline)
 
     # Filter out non-renderable events (empty notes, P2P discovery beacons)
     from .nip10 import is_renderable_note
@@ -2026,6 +2083,8 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
         profile_events = relay_req(
             {"kinds": [0], "authors": list(pubkeys)[:100]},
             relay_urls=relay_urls,
+            timeout=timeout,
+            deadline=deadline,
         )
         for e in profile_events.values():
             pk = e.get("pubkey", "")
@@ -2035,13 +2094,20 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None):
                 profiles.setdefault(pk, {})
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit)
-    feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relay_urls)
+    feed_data["roots"] = attach_quoted_notes(
+        feed_data["roots"], relay_urls=relay_urls, timeout=timeout, deadline=deadline
+    )
     return feed_data
 
 
-def fetch_contact_pubkeys(user_pubkey, relay_urls=None):
+def fetch_contact_pubkeys(user_pubkey, relay_urls=None, timeout=10, deadline=None):
     """Fetch Kind 3 (Contact List) for a user and return followed pubkeys."""
-    events = relay_req({"kinds": [3], "authors": [user_pubkey], "limit": 1}, relay_urls=relay_urls)
+    events = relay_req(
+        {"kinds": [3], "authors": [user_pubkey], "limit": 1},
+        relay_urls=relay_urls,
+        timeout=timeout,
+        deadline=deadline,
+    )
     for e in events.values():
         tags = e.get("tags", [])
         return [tag[1] for tag in tags if tag and tag[0] == "p" and len(tag) > 1]
