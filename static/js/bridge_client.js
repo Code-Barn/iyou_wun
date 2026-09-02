@@ -66,6 +66,15 @@
         return match ? decodeURIComponent(match[2]) : "";
     }
 
+    function getCsrfToken() {
+        var cookieToken = getCookie("csrftoken");
+        if (cookieToken && cookieToken.length >= 32) return cookieToken;
+        var input = document.querySelector("[name=csrfmiddlewaretoken]");
+        var inputToken = input && input.value ? input.value : "";
+        if (inputToken && inputToken.length >= 32) return inputToken;
+        return "";
+    }
+
     function getRelays() {
         if (typeof window !== "undefined" && window.relayPool && typeof window.relayPool.getRelays === "function") {
             return sanitizeRelays(window.relayPool.getRelays());
@@ -525,7 +534,9 @@
             persona_name: String(name),
             level: level
         };
-        var csrfToken = (typeof getCookie === "function") ? getCookie("csrftoken") : "";
+        var csrfToken = (typeof getCsrfToken === "function")
+            ? getCsrfToken()
+            : ((typeof getCookie === "function") ? getCookie("csrftoken") : "");
 
         fetch("/api/auth/persona-switch/", {
             method: "POST",
@@ -1102,6 +1113,7 @@
     window.escapeHtml = escapeHtml;
     window.escapeAttr = escapeAttr;
     window.getCookie = getCookie;
+    window.getCsrfToken = getCsrfToken;
     window.getRelays = getRelays;
     window.setRelays = setRelays;
     window.showToast = window.showToast || showToast;

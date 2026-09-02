@@ -269,7 +269,6 @@
     window.userNpub = "{{ user_npub }}";
     window.userDid = "{{ user_did }}";
 </script>
-<script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"></script>
 <script src="{% static 'js/feed_interactions.js' %}"
         data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"
         data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>

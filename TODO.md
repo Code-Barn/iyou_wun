@@ -337,6 +337,22 @@
   - Existing `test_profile_page_uses_iyou_symbol_when_profile_has_no_picture` migrated to `test_profile_hero_avatar_uses_mesh_default_for_external_peers` (avatarless external peers no longer receive the protected brand mark).
 - [x] **35.5 Validation:** CSS build via direct tailwind CLI, `manage.py check`, full `apps.core` suite (434 passing), `ruff check .` — all clean — **Done 2026-09-01**
 
+### Phase 36: Global Bridge Client Ingestion, CSRF Persona-Switch Hardening & Chat Import Fix
+- [x] **36.1 Hoist `bridge_client.js` to `base.html` (`templates/base.html`, `templates/feed.html`, `templates/dashboard.html`):**
+  - `bridge_client.js` is now injected globally in `base.html` right after `toast_manager.js`, so a single singleton `TauriBridgeClient` serves every view (feed, dashboard, gallery, chat, profile) with no duplicate WebSocket instances.
+  - `base.html` also renders `window.CURRENT_SESSION_DID` so all sub-pages carry the active session identity context (guarded with `||` to preserve the earlier `_standard_header.html` value).
+  - Removed the redundant per-page `<script src="...bridge_client.js">` tags from `feed.html` and `dashboard.html`; each page keeps its inline `window.TAURI_SIGNING_BRIDGE` (bridge WebSocket) so `getBridgeUrl()` resolves exactly as before.
+- [x] **36.2 CSRF Cookie & Persona-Switch Hardening (`apps/core/views.py`, `static/js/bridge_client.js`):**
+  - `api_persona_switch` is now `@csrf_exempt` so the local bridge can re-anchor the session even when the `csrftoken` cookie is absent on a first connect (POST guarded by `request.user.is_authenticated`).
+  - App-shell views (`FeedView`, `ChatView`, `GalleryView`, `ProfileView`) plus the `dashboard` function are decorated with `ensure_csrf_cookie` so every shell response seeds the CSRF cookie for subsequent fetch mutation endpoints.
+  - Added `getCsrfToken()` fallback in `bridge_client.js` — prefers the `csrftoken` cookie, else a `csrfmiddlewaretoken` input, requiring `>= 32` chars; `handlePersonaChanged` now uses it and it's exported as `window.getCsrfToken`.
+- [x] **36.3 Converse.js ESM Syntax Fix (`templates/chat.html`):**
+  - Replaced the broken `import converse from '...converse.min.js'` (UMD bundle has no default ESM export → SyntaxError) with the classic UMD `<script src="...converse.min.js">` build in `extra_head` and an ES-module-safe `const converse = window.converse || self.converse;` bootstrap.
+- [x] **36.4 Tests & Docs:**
+  - `GlobalBridgeClientContractTest`: `test_base_loads_bridge_client_globally_and_session_did`, `test_feed_and_dashboard_do_not_duplicate_bridge_script`, `test_persona_switch_accepts_post_without_csrf_token` (enforce_csrf_checks stub), `test_bridge_client_carries_csrf_fallback_and_global_session_did`.
+  - Updated `test_chat_renders_script_type_module` (UMD/`window.converse`) and hardened `test_chat_jid_uses_pubkey_hex` to assert the rendered pubkey-based JID without the brittle `split("jid:")[1]` heuristic that the base.html session-DID injection disturbed.
+- [x] **36.5 Validation:** `node --check static/js/bridge_client.js`, `manage.py check`, full `apps.core` suite (438 passing), `ruff check .` — all clean — **Done 2026-09-01**
+
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

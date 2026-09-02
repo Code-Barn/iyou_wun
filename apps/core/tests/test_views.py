@@ -238,8 +238,13 @@ class ChatViewTest(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("chat"))
         content = response.content.decode()
-        self.assertIn("jid:", content)
-        self.assertNotIn("did:key:", content.split("jid:")[1].split("@")[0])
+        # The Converse JID localpart must be the 64-char pubkey hex derived from
+        # the DID, not the raw `did:key:...` string.
+        from apps.core.views import did_to_pubkey
+        pubkey_hex = did_to_pubkey("did:key:z6Mkjidtest")
+        self.assertTrue(pubkey_hex)
+        self.assertIn(f"{pubkey_hex}@127.0.0.1", content)
+        self.assertNotIn("did:key:z6Mkjidtest@", content)
 
     def test_chat_renders_embedded_layout_and_loading_spinner(self):
         user = User.objects.create_user(username="did:key:z6Mkspin123")
@@ -271,7 +276,11 @@ class ChatViewTest(TestCase):
         response = self.client.get(reverse("chat"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<script type="module">')
-        self.assertContains(response, "import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js'")
+        # Converse loads via the UMD build (window.converse) — no broken ESM
+        # default import from the minified bundle.
+        self.assertContains(response, "cdn.conversejs.org/10.1.7/dist/converse.min.js")
+        self.assertNotContains(response, "import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js'")
+        self.assertContains(response, "const converse = window.converse || self.converse;")
         self.assertContains(response, "auto_join_private_chats: autoJoinChats")
 
     def test_chat_view_passes_peer_context(self):
@@ -915,6 +924,58 @@ class PersonaSessionSwitchTest(TestCase):
                 response,
                 f'window.CURRENT_SESSION_DID = "did:iyou:0x{self.ANCHOR_PK}";',
             )
+
+
+class GlobalBridgeClientContractTest(TestCase):
+    """Phase 36: bridge_client hoisted to base.html + persona-switch CSRF hardening."""
+
+    def _login(self, username):
+        user = User.objects.create_user(username=username)
+        self.client.force_login(user)
+        return user
+
+    def test_base_loads_bridge_client_globally_and_session_did(self):
+        self._login("did:key:z6Mkglobalbridge1")
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        content = response.content.decode()
+        # bridge_client.js ships once from base.html.
+        self.assertEqual(content.count("js/bridge_client.js"), 1)
+        # Sub-pages carry the active session identity context.
+        self.assertIn("window.CURRENT_SESSION_DID", content)
+        self.assertIn('CURRENT_SESSION_DID = "did:key:z6Mkglobalbridge1"', content)
+
+    def test_feed_and_dashboard_do_not_duplicate_bridge_script(self):
+        self._login("did:key:z6Mkglobalbridge2")
+        with patch("apps.core.views.relay_req", return_value={}):
+            feed_resp = self.client.get(reverse("feed"))
+            dash_resp = self.client.get(reverse("dashboard"))
+        # No per-page bridge_client.js tags remain in page-specific extra_js.
+        self.assertEqual(feed_resp.content.decode().count("js/bridge_client.js"), 1)
+        self.assertEqual(dash_resp.content.decode().count("js/bridge_client.js"), 1)
+
+    def test_persona_switch_accepts_post_without_csrf_token(self):
+        # CSRF enforcement skipped server-side, so the local bridge can re-anchor
+        # the session even when the csrftoken cookie is absent on first connect.
+        self._login("did:key:z6Mkglobalbridge3")
+        from django.test import Client as RawClient
+        raw = RawClient(enforce_csrf_checks=True)
+        raw.force_login(User.objects.get(username="did:key:z6Mkglobalbridge3"))
+        resp = raw.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": "did:key:z6Mkswitchtarget1", "persona_name": "Sov", "level": 2}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+
+    def test_bridge_client_carries_csrf_fallback_and_global_session_did(self):
+        src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
+        self.assertIn("function getCsrfToken", src)
+        self.assertIn('getCookie("csrftoken")', src)
+        self.assertIn("name=csrfmiddlewaretoken", src)
+        self.assertIn("window.CURRENT_SESSION_DID", src)
+        self.assertIn("window.getCsrfToken = getCsrfToken", src)
 
 
 class BackupGraphTest(TestCase):

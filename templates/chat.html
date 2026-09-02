@@ -6,6 +6,8 @@
 {% block extra_head %}
 <!-- Converse.js CSS -->
 <link rel="stylesheet" href="https://cdn.conversejs.org/dist/converse.min.css">
+<!-- Converse.js UMD build (attaches window.converse) -->
+<script src="https://cdn.conversejs.org/10.1.7/dist/converse.min.js"></script>
 <style>
   /* Prevent Converse CSS from blowing out theme typography */
   #conversejs-wrap {
@@ -41,7 +43,11 @@
   window.peerTarget = "{{ peer_target|default:'' }}";
 </script>
 <script type="module">
-  import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js';
+  // Converse is loaded via the UMD build above (window.converse). The
+  // previous `import converse from '...min.js'` failed because that bundle is
+  // UMD (no default ESM export), throwing a SyntaxError. Resolve from the
+  // global here so initialization stays ES-module-safe.
+  const converse = window.converse || self.converse;
 
   document.addEventListener("DOMContentLoaded", function() {
     const wsFallback = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";

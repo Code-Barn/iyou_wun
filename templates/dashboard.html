@@ -448,10 +448,10 @@
 {% endblock %}
 
 {% block extra_js %}
-<script src="{% static 'js/bridge_client.js' %}" data-bridge-url="{{ idp_home_ws_url|escapejs }}"></script>
 <script>
   var userPubkey = "{{ user_pubkey|default:''|escapejs }}";
   window.userPubkey = userPubkey;
+  window.TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url|escapejs }}";
   var userHandle = "{{ deck.handle|default:''|escapejs }}";
   var pendingEvent = null;
   var isProcessing = false;

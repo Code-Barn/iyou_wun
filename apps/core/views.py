@@ -40,7 +40,7 @@ from django.http import HttpResponsePermanentRedirect, HttpResponseBadRequest, H
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET
 from django.views.generic import TemplateView
 from django.views import View
@@ -216,6 +216,7 @@ def api_backup_import(request):
     )
 
 
+@csrf_exempt
 def api_persona_switch(request):
     """Re-anchor the active browser session to a different sovereign persona DID.
 
@@ -298,6 +299,7 @@ def home(request):
 
 
 @login_required
+@ensure_csrf_cookie
 def dashboard(request):
     user_pubkey = did_to_pubkey(request.user.username)
     user_npub = did_to_npub(request.user.username)
@@ -398,6 +400,7 @@ def enrich_image_grid(note):
     return note
 
 
+@method_decorator(ensure_csrf_cookie, name='dispatch')
 class FeedView(TemplateView):
     template_name = "feed.html"
 
@@ -560,6 +563,7 @@ class FeedView(TemplateView):
         return super().get(request, *args, **kwargs)
 
 
+@method_decorator(ensure_csrf_cookie, name='dispatch')
 class ChatView(LoginRequiredMixin, TemplateView):
     template_name = "chat.html"
 
@@ -2409,6 +2413,7 @@ def fetch_user_nip65_relays(pubkey, relay_urls=None):
     }
 
 
+@method_decorator(ensure_csrf_cookie, name='dispatch')
 class GalleryView(TemplateView):
     template_name = "gallery.html"
 
@@ -2525,6 +2530,7 @@ def api_gallery(request):
     })
 
 
+@method_decorator(ensure_csrf_cookie, name='dispatch')
 class ProfileView(TemplateView):
     template_name = "profile.html"
 
