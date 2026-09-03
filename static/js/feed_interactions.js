@@ -986,7 +986,12 @@
     function appendNoteToFeed(note, container, repliesMap) {
         if (!container || !note) return;
 
-        const activeCircle = window.CircleFilter?.activeCircle || 'iyou';
+        const activeCircle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === 'function')
+            ? window.circleFeedFilter.getActiveCircle()
+            : ((window.CircleFilter && window.CircleFilter.activeCircle)
+            || new URLSearchParams(window.location.search).get('circle')
+            || 'iyou');
+
         if (activeCircle === 'iyou') {
             const isIyouAuthor = (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(note.pubkey_hex)) || note.is_sovereign || note.author_did;
             if (!isIyouAuthor) {
@@ -1165,7 +1170,7 @@
             });
     }
 
-    function loadMoreNotes() {
+    function loadMoreNotes(isReset = false) {
         if (_isLoadingFeedNotes) return;
 
         var sentinel = document.getElementById("feed-pagination-sentinel");
@@ -1173,7 +1178,7 @@
         if (!container) return;
 
         var oldestTimestamp = sentinel && sentinel.dataset ? sentinel.dataset.oldestTimestamp : null;
-        if (!oldestTimestamp) {
+        if (!isReset && (!oldestTimestamp || isNaN(parseInt(oldestTimestamp, 10)))) {
             var cards = container.querySelectorAll(".feed-note-card");
             if (cards.length > 0) {
                 var lastCard = cards[cards.length - 1];
@@ -1181,7 +1186,7 @@
             }
         }
 
-        if (!oldestTimestamp || isNaN(parseInt(oldestTimestamp, 10))) {
+        if (!isReset && (!oldestTimestamp || isNaN(parseInt(oldestTimestamp, 10)))) {
             return;
         }
 
@@ -1193,15 +1198,22 @@
 
         if (btn) btn.classList.add("hidden");
         if (spinner) spinner.classList.remove("hidden");
+        if (endMsg) endMsg.classList.add("hidden");
+
+        const circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === 'function')
+            ? window.circleFeedFilter.getActiveCircle()
+            : ((window.CircleFilter && window.CircleFilter.activeCircle)
+            || new URLSearchParams(window.location.search).get('circle')
+            || 'iyou');
 
         var urlParams = new URLSearchParams(window.location.search);
-        var activeCircle = (window.CircleFilter && window.CircleFilter.activeCircle) || urlParams.get("circle") || "iyou";
-        var circle = activeCircle;
         var mode = urlParams.get("mode") || (circle === "global" ? "global" : "network");
         var tag = urlParams.get("tag") || "";
 
-        var until = parseInt(oldestTimestamp, 10) - 1;
-        var queryUrl = "/api/feed?until=" + until + "&limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
+        var queryUrl = "/api/feed?limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
+        if (!isReset && oldestTimestamp) {
+            queryUrl += "&until=" + (parseInt(oldestTimestamp, 10) - 1);
+        }
         if (tag) {
             queryUrl += "&tag=" + encodeURIComponent(tag);
         }
@@ -1218,33 +1230,36 @@
                 var notes = data.notes || [];
                 var repliesMap = data.replies || {};
 
-                if (!data.has_more || notes.length === 0) {
-                    if (window.feedObserver && sentinel) {
-                        window.feedObserver.unobserve(sentinel);
-                    }
-                    var spinnerEl = document.getElementById("feed-loading-spinner");
-                    var loadBtnEl = document.getElementById("load-more-btn");
-                    if (spinnerEl) spinnerEl.classList.add("hidden");
-                    if (loadBtnEl) loadBtnEl.classList.add("hidden");
-                    if (endMsg) endMsg.classList.remove("hidden");
-
-                    var visibleCards = container.querySelectorAll(".feed-note-card:not(.hidden)");
-                    if (visibleCards.length === 0) {
-                        var emptyState = document.getElementById("feed-empty-state");
-                        if (emptyState) emptyState.classList.remove("hidden");
-                        return;
-                    }
-                } else {
-                    if (btn) btn.classList.remove("hidden");
+                if (isReset) {
+                    container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
                 }
 
                 if (notes.length > 0) {
+                    var emptyState = document.getElementById("feed-empty-state");
+                    var circleEmpty = document.getElementById("circle-empty-state");
+                    if (emptyState) emptyState.classList.add("hidden");
+                    if (circleEmpty) circleEmpty.classList.add("hidden");
+
                     notes.forEach(function (note) {
                         appendNoteToFeed(note, container, repliesMap);
                     });
 
                     if (data.oldest_timestamp && sentinel) {
                         sentinel.dataset.oldestTimestamp = data.oldest_timestamp;
+                    }
+
+                    if (window.feedObserver && sentinel) {
+                        window.feedObserver.observe(sentinel);
+                    }
+
+                    if (data.has_more === false) {
+                        if (window.feedObserver && sentinel) {
+                            window.feedObserver.unobserve(sentinel);
+                        }
+                        if (btn) btn.classList.add("hidden");
+                        if (endMsg) endMsg.classList.remove("hidden");
+                    } else {
+                        if (btn) btn.classList.remove("hidden");
                     }
 
                     // Trigger TrustLens & CircleFilter re-scans on newly appended items
@@ -1254,10 +1269,22 @@
                         window.trustLens.scan(container);
                     }
 
-                    if (window.CircleFilter && typeof window.CircleFilter.applyFilters === "function") {
+                    if (window.circleFeedFilter && typeof window.circleFeedFilter.applyFilters === "function") {
+                        window.circleFeedFilter.applyFilters();
+                    } else if (window.CircleFilter && typeof window.CircleFilter.applyFilters === "function") {
                         window.CircleFilter.applyFilters();
-                    } else if (window.circleFilter && typeof window.circleFilter.applyFilter === "function") {
-                        window.circleFilter.applyFilter();
+                    }
+                } else {
+                    if (window.feedObserver && sentinel) {
+                        window.feedObserver.unobserve(sentinel);
+                    }
+                    if (btn) btn.classList.add("hidden");
+                    if (endMsg) endMsg.classList.remove("hidden");
+
+                    var visibleCards = container.querySelectorAll(".feed-note-card:not(.hidden)");
+                    if (visibleCards.length === 0) {
+                        var emptyStateEl = document.getElementById("feed-empty-state");
+                        if (emptyStateEl) emptyStateEl.classList.remove("hidden");
                     }
                 }
             })
@@ -1269,6 +1296,28 @@
                 _isLoadingFeedNotes = false;
                 if (spinner) spinner.classList.add("hidden");
             });
+    }
+
+    function reloadFeedForCircle(circleMode) {
+        var container = document.getElementById('feed-container');
+        var sentinel = document.getElementById('feed-pagination-sentinel');
+        if (!container) return;
+
+        // Clear existing cards
+        container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
+        if (sentinel) {
+            sentinel.dataset.oldestTimestamp = '';
+        }
+        var emptyState = document.getElementById('feed-empty-state');
+        if (emptyState) emptyState.classList.add('hidden');
+        var circleEmpty = document.getElementById('circle-empty-state');
+        if (circleEmpty) circleEmpty.classList.add('hidden');
+
+        var spinner = document.getElementById('feed-loading-spinner');
+        if (spinner) spinner.classList.remove('hidden');
+
+        // Trigger clean fetch for the new circle
+        loadMoreNotes(true);
     }
 
 
@@ -2180,6 +2229,7 @@
     window.toggleNoteClamp = toggleNoteClamp;
     window.appendNoteToFeed = appendNoteToFeed;
     window.loadMoreNotes = loadMoreNotes;
+    window.reloadFeedForCircle = reloadFeedForCircle;
     window.getBlossomBaseUrl = getBlossomBaseUrl;
     window.handleMediaSelected = handleMediaSelected;
     window.toggleGear = toggleGear;

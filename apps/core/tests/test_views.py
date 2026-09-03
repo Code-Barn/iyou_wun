@@ -749,6 +749,38 @@ class DashboardProfileTest(TestCase):
             filter_obj = mock_relay_req.call_args[0][0]
             self.assertNotIn("authors", filter_obj)
 
+    def test_api_feed_global_returns_non_empty_notes_without_authors_filter(self):
+        pk = "b1c6d3f8a2e94c705d2a97c13b6f4e283ad0f19c64e8b527a3d7f6c0e12ab845"
+        mock_events = {
+            "ev_global_1": {
+                "id": "ev_global_1",
+                "pubkey": pk,
+                "created_at": 1700000000,
+                "kind": 1,
+                "tags": [],
+                "content": "Global mesh broadcast note",
+                "sig": "sig_mock",
+            }
+        }
+        with patch("apps.core.views.relay_req", return_value=mock_events) as mock_relay_req:
+            response = self.client.get(reverse("api_feed") + "?circle=global")
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data.get("success"))
+            self.assertEqual(len(data.get("notes", [])), 1)
+            self.assertEqual(data["notes"][0]["id"], "ev_global_1")
+            self.assertTrue(mock_relay_req.called)
+            filter_obj = mock_relay_req.call_args[0][0]
+            self.assertNotIn("authors", filter_obj)
+
+    def test_api_feed_iyou_maintains_scoped_authors_requirement(self):
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=["pk1", "pk2"]), patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            response = self.client.get(reverse("api_feed") + "?circle=iyou")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(mock_relay_req.called)
+            filter_obj = mock_relay_req.call_args[0][0]
+            self.assertEqual(filter_obj.get("authors"), ["pk1", "pk2"])
+
 
 
 class DefaultAvatarFallbackTest(TestCase):
@@ -2444,6 +2476,46 @@ class SearchAPITests(TestCase):
         data_tag = response_tag.json()
         handles_tag = [p["handle"] for p in data_tag["results"]["profiles"]]
         self.assertIn("alice", handles_tag)
+
+    def test_api_search_handles_queries_resiliently_on_sqlite(self):
+        response = self.client.get(reverse("api_search") + "?q=alice")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertGreaterEqual(data["counts"]["profiles"], 1)
+        profile = data["results"]["profiles"][0]
+        self.assertEqual(profile["handle"], "alice")
+        self.assertIn("display_name", profile)
+        self.assertIn("avatar_url", profile)
+        self.assertIn("nip05", profile)
+
+    def test_api_search_empty_query_returns_clean_schema(self):
+        response = self.client.get(reverse("api_search") + "?q=")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["counts"]["profiles"], 0)
+        self.assertEqual(data["counts"]["tags"], 0)
+        self.assertEqual(data["results"]["profiles"], [])
+        self.assertEqual(data["results"]["tags"], [])
+
+    def test_api_search_postgresql_branch_uses_search_rank_and_vector(self):
+        with patch("django.db.connection.vendor", "postgresql"), \
+             patch("django.contrib.postgres.search.SearchVector") as mock_vector, \
+             patch("django.contrib.postgres.search.SearchQuery") as mock_query, \
+             patch("django.contrib.postgres.search.SearchRank") as mock_rank:
+            mock_qs = [self.deck_alice]
+            with patch.object(UserLinkDeck.objects, "filter") as mock_filter:
+                mock_filter.return_value.annotate.return_value.filter.return_value.order_by.return_value.__getitem__.return_value = mock_qs
+                response = self.client.get(reverse("api_search") + "?q=alice")
+                self.assertEqual(response.status_code, 200)
+                data = response.json()
+                self.assertTrue(data["success"])
+                self.assertEqual(data["counts"]["profiles"], 1)
+                self.assertEqual(data["results"]["profiles"][0]["handle"], "alice")
+                mock_vector.assert_called()
+                mock_query.assert_called()
+                mock_rank.assert_called()
 
     def test_nav_search_dropdown_elements_render(self):
         with patch("apps.core.views.relay_req", return_value={}):

@@ -571,8 +571,10 @@
         if (tabGroup) {
             const tabs = tabGroup.querySelectorAll(".circle-tab");
             tabs.forEach((tab) => {
-                const targetCircle = tab.getAttribute("data-circle");
-                if (targetCircle === activeCircle) {
+                const targetCircle = tab.getAttribute("data-circle") || tab.dataset.circle;
+                const isActive = targetCircle === activeCircle;
+                tab.setAttribute("data-active", isActive ? "true" : "false");
+                if (isActive) {
                     INACTIVE_TAB_CLASSES.forEach(cls => tab.classList.remove(cls));
                     ACTIVE_TAB_CLASSES.forEach(cls => tab.classList.add(cls));
                 } else {
@@ -611,6 +613,13 @@
         }
 
         applyFilters();
+
+        if (!suppressCircleToasts) {
+            window.dispatchEvent(new CustomEvent('circleChanged', { detail: { circle: activeCircle } }));
+            if (typeof window.reloadFeedForCircle === 'function') {
+                window.reloadFeedForCircle(activeCircle);
+            }
+        }
     }
 
     function setSearchQuery(query) {
@@ -936,12 +945,15 @@
         updateNsfwShieldStatusUI: updateNsfwShieldStatusUI,
         applyNsfwBlurState: applyNsfwBlurState,
         checkCircleMatch: checkCircleMatch,
-        getActiveCircle: () => activeCircle
+        getActiveCircle: () => activeCircle,
+        get activeCircle() { return activeCircle; }
     };
 
     global.circleFeedFilter = circleFeedFilter;
+    global.CircleFilter = circleFeedFilter;
     global.checkCircleMatch = checkCircleMatch;
     global.applyCircleFilter = setCircle;
+    global.setCircle = setCircle;
     global.toggleNsfwFilter = toggleNsfwFilter;
     global.filterByTag = filterByTag;
 

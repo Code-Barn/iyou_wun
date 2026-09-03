@@ -455,6 +455,16 @@
 - [x] **41.4 Unit Tests (`apps/core/tests/test_contacts.py`):**
   - Added `ContactFollowAPITests` testing auth requirement (302/401), follow appending `["p", target_pubkey, "", ""]`, unfollow removing target, self-follow rejection (400), and invalid pubkey format rejection (400).
 
+### Phase 42: Resilient PostgreSQL Full-Text Search with SQLite Fallback
+- [x] **42.1 Resilient Backend Search Execution (`apps/core/views.py`):**
+  - Updated `api_search` to detect active database engine (`connection.vendor == "postgresql"`).
+  - Implemented PostgreSQL full-text search with `SearchVector` (weights on handle, display name, and headline), `SearchQuery`, and `SearchRank(rank__gte=0.1)`.
+  - Implemented automatic fallback to SQLite-compatible `Q(icontains)` matching across handle, display name, headline, and NIP-05.
+- [x] **42.2 Unit Tests (`apps/core/tests/test_views.py`):**
+  - Added `test_api_search_handles_queries_resiliently_on_sqlite` verifying 200 OK and profile schema fields.
+  - Added `test_api_search_empty_query_returns_clean_schema` verifying empty queries return clean count/results schema.
+  - Added `test_api_search_postgresql_branch_uses_search_rank_and_vector` testing PostgreSQL FTS branch invocation.
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

@@ -34,7 +34,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Max, Q
 from django.http import HttpResponsePermanentRedirect, HttpResponseBadRequest, Http404, JsonResponse
 from django.shortcuts import redirect, render
@@ -689,19 +689,42 @@ def api_search(request):
         })
 
     clean_tag = q.lstrip("#").strip()
+    query = clean_tag
 
-    # 1. Profiles Query (UserLinkDeck) - database-agnostic lookups
-    profile_filter = (
-        Q(handle__icontains=clean_tag)
-        | Q(display_name__icontains=clean_tag)
-        | Q(nip05__icontains=clean_tag)
-        | Q(headline__icontains=clean_tag)
-    )
-    matching_decks = (
-        UserLinkDeck.objects.filter(is_public=True)
-        .filter(profile_filter)
-        .order_by("-is_verified", "handle")[:limit]
-    )
+    # 1. Profiles Query (UserLinkDeck) - PostgreSQL FTS with SQLite fallback
+    is_postgres = connection.vendor == "postgresql"
+    matching_decks = []
+
+    if is_postgres:
+        try:
+            from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
+
+            search_vector = (
+                SearchVector("handle", weight="A")
+                + SearchVector("display_name", weight="A")
+                + SearchVector("headline", weight="B")
+            )
+            search_query = SearchQuery(query)
+            deck_qs = (
+                UserLinkDeck.objects.filter(is_public=True)
+                .annotate(rank=SearchRank(search_vector, search_query))
+                .filter(rank__gte=0.1)
+                .order_by("-rank", "-is_verified", "handle")[:limit]
+            )
+            matching_decks = list(deck_qs)
+        except Exception:
+            is_postgres = False
+
+    if not is_postgres:
+        matching_decks = list(
+            UserLinkDeck.objects.filter(
+                Q(handle__icontains=query)
+                | Q(headline__icontains=query)
+                | Q(display_name__icontains=query)
+                | Q(nip05__icontains=query),
+                is_public=True,
+            ).order_by("-is_verified", "handle")[:limit]
+        )
 
     profiles_data = []
     for deck in matching_decks:
