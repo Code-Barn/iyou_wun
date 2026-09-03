@@ -763,6 +763,10 @@
                 if (this._onMessage) {
                     this._onMessage(this.pendingEvent || signedEvent, signedEvent);
                 }
+                if (this._signResolvers && this._signResolvers.length) {
+                    var resolver = this._signResolvers.shift();
+                    resolver(this.pendingEvent || signedEvent);
+                }
             }
 
         } catch (err) {
@@ -774,11 +778,23 @@
 
     TauriBridgeClient.prototype.signEvent = function (event) {
         this.pendingEvent = event;
+        var self = this;
+        var promise = new Promise(function (resolve) {
+            self._signResolvers = self._signResolvers || [];
+            self._signResolvers.push(resolve);
+            setTimeout(function () {
+                var idx = self._signResolvers.indexOf(resolve);
+                if (idx !== -1) {
+                    self._signResolvers.splice(idx, 1);
+                    resolve(self.pendingEvent || event);
+                }
+            }, SOCKET_POLL_TIMEOUT + 1000);
+        });
+
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
             this.connect();
         }
 
-        var self = this;
         var request = { type: "sign_event", event: event };
         var checkSocket = setInterval(function () {
             if (self.socket && self.socket.readyState === WebSocket.OPEN) {

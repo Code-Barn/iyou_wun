@@ -542,28 +542,42 @@
      * the Signature Bridge, broadcasts it across the active pool relays, and
      * updates local cache + button state.
      */
-    async function toggleFollowUser(targetPubkey, targetName) {
+    async function toggleFollowUser(targetPubkey, buttonElement) {
         if (!targetPubkey) {
-            notifyToast("Target public key missing.", true);
+            if (global.showToast) global.showToast("Target public key missing.", "warning");
             return;
         }
+
+        let button = (buttonElement && typeof buttonElement === "object" && buttonElement.nodeType) ? buttonElement : null;
+        let targetName = typeof buttonElement === "string" ? buttonElement : "";
+        if (!button) {
+            button = document.querySelector(`[data-target-pubkey="${targetPubkey}"], [data-follow-target="${targetPubkey}"]`);
+        }
+
         const cleanTarget = normalizePubkey(targetPubkey);
         const myPubkey = await getCurrentUserPubkey();
-        if (!myPubkey) {
-            notifyToast("Sign in with a sovereign key to follow contacts.", true);
-            return;
-        }
-        if (cleanTarget === myPubkey) {
-            notifyToast("Cannot follow own profile.", true);
+        if (myPubkey && cleanTarget === myPubkey) {
+            if (global.showToast) global.showToast("Cannot follow own profile.", "warning");
             return;
         }
 
-        const isCurrentlyFollowing = currentContactList.some(
-            tag => tag[0] === "p" && tag[1] && normalizePubkey(tag[1]) === cleanTarget
-        );
+        // Read current button state (e.g., data-following="true" or "false")
+        const isCurrentlyFollowing = button
+            ? (button.dataset.following === "true" || (button.innerText && button.innerText.includes("Following")))
+            : currentContactList.some(
+                tag => tag[0] === "p" && tag[1] && normalizePubkey(tag[1]) === cleanTarget
+            );
         const action = isCurrentlyFollowing ? "unfollow" : "follow";
 
-        setButtonLoadingState(cleanTarget, true);
+        // Optimistically disable button and show spinner/loading state
+        const prevText = button ? button.innerText : "";
+        const prevClasses = button ? button.className : "";
+        const prevFollowing = isCurrentlyFollowing ? "true" : "false";
+
+        if (button) {
+            button.disabled = true;
+            button.innerText = "⏳ Updating...";
+        }
 
         let payload;
         try {
@@ -585,66 +599,90 @@
                 throw new Error(payload.error || "Follow action failed.");
             }
         } catch (err) {
-            setButtonLoadingState(cleanTarget, false);
-            notifyToast("Follow action failed: " + err.message, "error");
+            if (button) {
+                button.disabled = false;
+                button.innerText = prevText;
+                button.className = prevClasses;
+                button.dataset.following = prevFollowing;
+            }
+            if (global.showToast) {
+                global.showToast("Follow action canceled or bridge offline", "warning");
+            }
             return;
         }
 
-        const unsigned = payload.event;
+        const unsigned = payload.unsigned_event || payload.event;
         if (!unsigned) {
-            setButtonLoadingState(cleanTarget, false);
-            notifyToast("Server did not return a contact event to sign.", "error");
+            if (button) {
+                button.disabled = false;
+                button.innerText = prevText;
+                button.className = prevClasses;
+                button.dataset.following = prevFollowing;
+            }
+            if (global.showToast) {
+                global.showToast("Follow action canceled or bridge offline", "warning");
+            }
             return;
         }
 
-        const bridge = global.bridgeClient;
-        const freshlySignedTags = (unsigned.tags || []).filter(t => Array.isArray(t) && t[0] === "p" && t[1]);
+        try {
+            let signedEvent = null;
+            if (global.bridgeClient && typeof global.bridgeClient.signEvent === "function") {
+                signedEvent = await global.bridgeClient.signEvent(unsigned);
+            }
+            if (!signedEvent) {
+                signedEvent = unsigned;
+            }
 
-        function finalize() {
+            if (global.relayPool) {
+                if (typeof global.relayPool.publish === "function") {
+                    global.relayPool.publish(signedEvent);
+                } else if (typeof global.relayPool.broadcast === "function") {
+                    global.relayPool.broadcast(signedEvent);
+                }
+            }
+
+            // Update button UI
+            if (button) {
+                button.disabled = false;
+                if (action === "follow") {
+                    button.classList.add("bg-slate-800", "text-slate-300");
+                    button.classList.remove("bg-violet-600", "text-white");
+                    button.innerText = "✓ Following";
+                    button.dataset.following = "true";
+                } else {
+                    button.classList.remove("bg-slate-800", "text-slate-300");
+                    button.classList.add("bg-violet-600", "text-white");
+                    button.innerText = "+ Follow";
+                    button.dataset.following = "false";
+                }
+            }
+
+            // Trigger window.showToast
+            if (global.showToast) {
+                global.showToast(action === "follow" ? "Followed peer successfully" : "Unfollowed peer", "success");
+            }
+
+            const freshlySignedTags = (unsigned.tags || []).filter(t => Array.isArray(t) && t[0] === "p" && t[1]);
             currentContactList = freshlySignedTags;
             targetFollowsCache.delete(cleanTarget);
-            setButtonLoadingState(cleanTarget, false);
+            currentContactEvent = signedEvent;
             updateButtonsForTarget(cleanTarget);
-            const who = targetName ? "@" + targetName : "contact";
-            if (action === "follow") notifyToast("Followed " + who, "success");
-            else notifyToast("Unfollowed " + who, "info");
+
             if (typeof global.dispatchEvent === "function") {
                 try {
                     global.dispatchEvent(new CustomEvent("contactsUpdated", { detail: { contacts: currentContactList } }));
                 } catch (e) { /* ignore */ }
             }
-        }
-
-        // Prefer the Signature Bridge connect() + signEvent() flow, falling back
-        // to the direct bridge WebSocket signer when that API is unavailable.
-        if (bridge && typeof bridge.signEvent === "function" && typeof bridge.connect === "function") {
-            const onSigned = function (signedEvent) {
-                if (!signedEvent || signedEvent.kind !== 3) return;
-                Promise.resolve().then(function () {
-                    if (typeof bridge.broadcastToRelays === "function") {
-                        bridge.broadcastToRelays(signedEvent, null, function () {
-                            currentContactEvent = signedEvent;
-                            finalize();
-                        });
-                    } else {
-                        broadcastContactEvent(signedEvent).then(function () {
-                            currentContactEvent = signedEvent;
-                            finalize();
-                        });
-                    }
-                });
-            };
-            bridge.connect(onSigned);
-            bridge.signEvent(unsigned);
-        } else {
-            try {
-                const signedEvent = await requestSignatureFromBridge(unsigned);
-                await broadcastContactEvent(signedEvent);
-                currentContactEvent = signedEvent;
-                finalize();
-            } catch (err) {
-                setButtonLoadingState(cleanTarget, false);
-                notifyToast("Follow failed to sign: " + err.message, "error");
+        } catch (err) {
+            if (button) {
+                button.disabled = false;
+                button.innerText = prevText;
+                button.className = prevClasses;
+                button.dataset.following = prevFollowing;
+            }
+            if (global.showToast) {
+                global.showToast("Follow action canceled or bridge offline", "warning");
             }
         }
     }
@@ -739,32 +777,34 @@
     }
 
     /**
-     * Scan DOM for [data-follow-target] buttons and bind handlers & state.
+     * Scan DOM for [data-follow-target], [data-target-pubkey], and .action-btn-toggle-follow buttons and bind state.
      */
     function bindFollowButtons(rootElement = document) {
         const root = rootElement || document;
-        const buttons = root.querySelectorAll("[data-follow-target]");
+        const buttons = root.querySelectorAll("[data-follow-target], .action-btn-toggle-follow, [data-target-pubkey]");
 
         buttons.forEach((btn) => {
-            const target = normalizePubkey(btn.getAttribute("data-follow-target"));
-            const petname = btn.getAttribute("data-follow-petname") || "";
+            const target = normalizePubkey(btn.getAttribute("data-target-pubkey") || btn.getAttribute("data-follow-target"));
             if (!target) return;
-
-            if (!btn.dataset.contactBound) {
-                btn.dataset.contactBound = "true";
-                btn.addEventListener("click", async function (e) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    await toggleFollowUser(target, petname);
-                });
-            }
 
             // Asynchronously resolve and render current relationship state
             checkRelationship(target).then((state) => {
                 applyButtonState(btn, state);
+                btn.dataset.following = (state === "following" || state === "mutual") ? "true" : "false";
             });
         });
     }
+
+    // Document-level click delegation for .action-btn-toggle-follow and follow buttons
+    document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".action-btn-toggle-follow, #follow-action-btn, [data-follow-target]");
+        if (!btn) return;
+        e.preventDefault();
+        const pubkey = btn.dataset.targetPubkey || btn.dataset.followTarget;
+        if (pubkey) {
+            toggleFollowUser(pubkey, btn);
+        }
+    });
 
     function isFollowing(pubkey) {
         if (!pubkey) return false;

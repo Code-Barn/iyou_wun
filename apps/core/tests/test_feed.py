@@ -1457,3 +1457,16 @@ class LanguageDetectionCalibrationTest(TestCase):
         # Cyrillic text
         self.assertEqual(detect_language("Привет, мир!"), "ru")
 
+
+class ApiFeedIyouCircleTests(TestCase):
+    def test_api_feed_iyou_returns_empty_and_no_more_without_ecosystem_keys(self):
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req") as mock_relay:
+            response = self.client.get("/api/feed?circle=iyou")
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data.get("success"))
+            self.assertEqual(data.get("notes"), [])
+            self.assertFalse(data.get("has_more"))
+            mock_relay.assert_not_called()
+
+

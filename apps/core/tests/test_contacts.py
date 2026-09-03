@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import json
 from unittest.mock import patch
 
 from django.contrib.auth.models import User
@@ -142,4 +143,89 @@ class KeyDerivationTests(TestCase):
         self.assertTrue(sample_npub.startswith("npub1"))
         hex_pubkey = npub_to_hex(sample_npub)
         self.assertEqual(hex_pubkey, sample_hex)
+
+
+class ContactFollowAPITests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="did:key:z6Mkfollowuser1")
+        self.user_pubkey = did_to_pubkey(self.user.username)
+        self.target_pubkey = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        self.other_target_pubkey = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+
+    def test_follow_action_requires_authentication(self):
+        response = self.client.post(
+            reverse("api_contacts_follow"),
+            data=json.dumps({"target_pubkey": self.target_pubkey, "action": "follow"}),
+            content_type="application/json",
+        )
+        self.assertIn(response.status_code, [302, 401])
+
+    def test_follow_action_appends_target_pubkey_to_kind3_tags(self):
+        self.client.force_login(self.user)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.post(
+                reverse("api_contacts_follow"),
+                data=json.dumps({"target_pubkey": self.target_pubkey, "action": "follow"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["action"], "follow")
+        self.assertEqual(data["target_pubkey"], self.target_pubkey)
+        unsigned = data["unsigned_event"]
+        self.assertEqual(unsigned["kind"], 3)
+        self.assertEqual(unsigned["pubkey"], self.user_pubkey)
+        self.assertIn(["p", self.target_pubkey, "", ""], unsigned["tags"])
+
+    def test_unfollow_action_removes_target_pubkey(self):
+        self.client.force_login(self.user)
+        existing_event = {
+            "kind": 3,
+            "pubkey": self.user_pubkey,
+            "created_at": 1000,
+            "tags": [
+                ["p", self.target_pubkey, "", ""],
+                ["p", self.other_target_pubkey, "", ""],
+            ],
+            "content": "",
+        }
+        with patch("apps.core.views.relay_req", return_value={"relay1": existing_event}):
+            response = self.client.post(
+                reverse("api_contacts_follow"),
+                data=json.dumps({"target_pubkey": self.target_pubkey, "action": "unfollow"}),
+                content_type="application/json",
+            )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["action"], "unfollow")
+        unsigned = data["unsigned_event"]
+        self.assertNotIn(["p", self.target_pubkey, "", ""], unsigned["tags"])
+        self.assertIn(["p", self.other_target_pubkey, "", ""], unsigned["tags"])
+
+    def test_self_follow_rejected(self):
+        self.client.force_login(self.user)
+        response = self.client.post(
+            reverse("api_contacts_follow"),
+            data=json.dumps({"target_pubkey": self.user_pubkey, "action": "follow"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        data = response.json()
+        self.assertFalse(data["success"])
+        self.assertIn("own profile", data["error"])
+
+    def test_invalid_pubkey_format_rejected(self):
+        self.client.force_login(self.user)
+        for invalid_pubkey in ["not-a-hex", "1234", "zz" * 32, ""]:
+            response = self.client.post(
+                reverse("api_contacts_follow"),
+                data=json.dumps({"target_pubkey": invalid_pubkey, "action": "follow"}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 400)
+            data = response.json()
+            self.assertFalse(data["success"])
+
 

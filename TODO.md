@@ -441,6 +441,20 @@
   - Added `test_link_deck_json_returns_404_for_missing_handle` asserting 404 with JSON error.
   - Added `test_link_deck_json_content_negotiation_discriminated_handle`.
 
+### Phase 41: NIP-02 Follow Pipeline & Kind 3 Contact Management
+- [x] **41.1 Backend Endpoint (`apps/core/views.py`, `apps/core/urls.py`):**
+  - Implemented `api_contacts_follow` endpoint taking `{"target_pubkey": "<hex>", "action": "follow"|"unfollow"}`.
+  - Validated 64-char hex pubkey and self-follow rejection.
+  - Extracted latest Kind 3 tags/content, formatted unsigned event payload, and returned `unsigned_event` dictionary.
+- [x] **41.2 Client Follow Controller (`static/js/contact_manager.js`, `templates/base.html`):**
+  - Updated `window.toggleFollowUser(targetPubkey, buttonElement)` with optimistic button updates, CSRF-authenticated POST, bridge signing (`window.bridgeClient.signEvent`), relay pool broadcast (`window.relayPool.publish`), and user toast feedback.
+  - Bound global document click delegation for `.action-btn-toggle-follow` and `#follow-action-btn`.
+  - Moved `contact_manager.js` into canonical global scripts bundle in `base.html`.
+- [x] **41.3 Template Wiring (`templates/profile.html`, `templates/link_deck.html`):**
+  - Attached `.action-btn-toggle-follow`, `data-target-pubkey="{{ target_nostr_pubkey_hex }}"`, and `data-following="false"` to follow action buttons.
+- [x] **41.4 Unit Tests (`apps/core/tests/test_contacts.py`):**
+  - Added `ContactFollowAPITests` testing auth requirement (302/401), follow appending `["p", target_pubkey, "", ""]`, unfollow removing target, self-follow rejection (400), and invalid pubkey format rejection (400).
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

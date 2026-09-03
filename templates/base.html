@@ -67,6 +67,7 @@
     <script src="{% static 'js/bridge_client.js' %}"></script>
     <script src="{% static 'js/relay_pool.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
+    <script src="{% static 'js/contact_manager.js' %}"></script>
     
     <!-- Page-Specific Extensions -->
     {% block extra_js %}{% endblock %}
@@ -76,7 +77,6 @@
       window.CURRENT_SESSION_DID = window.CURRENT_SESSION_DID || "{{ current_session_did|escapejs }}";
     </script>
     <script src="{% static 'js/notification_manager.js' %}" defer></script>
-    <script src="{% static 'js/contact_manager.js' %}" defer></script>
     <script src="{% static 'js/circle_feed_filter.js' %}" defer></script>
     <!-- Fullscreen Media Lightbox Modal -->
     <div id="image-lightbox-modal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4" onclick="closeImageModal()">

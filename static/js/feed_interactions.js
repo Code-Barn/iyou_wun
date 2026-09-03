@@ -986,6 +986,14 @@
     function appendNoteToFeed(note, container, repliesMap) {
         if (!container || !note) return;
 
+        const activeCircle = window.CircleFilter?.activeCircle || 'iyou';
+        if (activeCircle === 'iyou') {
+            const isIyouAuthor = (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(note.pubkey_hex)) || note.is_sovereign || note.author_did;
+            if (!isIyouAuthor) {
+                return; // Discard non-ecosystem notes before touching the DOM
+            }
+        }
+
         try {
             if (note.id) {
                 var existing = document.querySelector('[data-note-card-id="' + note.id + '"]') || document.querySelector('.feed-note-card[data-note-id="' + note.id + '"]');
@@ -1187,13 +1195,10 @@
         if (spinner) spinner.classList.remove("hidden");
 
         var urlParams = new URLSearchParams(window.location.search);
-        var circle = urlParams.get("circle") || "global";
+        var activeCircle = (window.CircleFilter && window.CircleFilter.activeCircle) || urlParams.get("circle") || "iyou";
+        var circle = activeCircle;
         var mode = urlParams.get("mode") || (circle === "global" ? "global" : "network");
         var tag = urlParams.get("tag") || "";
-        var activeCircleBtn = document.querySelector(".circle-tab.active, .circle-tab[data-active='true']");
-        if (activeCircleBtn && activeCircleBtn.dataset && activeCircleBtn.dataset.circle) {
-            circle = activeCircleBtn.dataset.circle;
-        }
 
         var until = parseInt(oldestTimestamp, 10) - 1;
         var queryUrl = "/api/feed?until=" + until + "&limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
@@ -1213,9 +1218,22 @@
                 var notes = data.notes || [];
                 var repliesMap = data.replies || {};
 
-                if (notes.length === 0 || data.has_more === false) {
-                    if (btn) btn.classList.add("hidden");
+                if (!data.has_more || notes.length === 0) {
+                    if (window.feedObserver && sentinel) {
+                        window.feedObserver.unobserve(sentinel);
+                    }
+                    var spinnerEl = document.getElementById("feed-loading-spinner");
+                    var loadBtnEl = document.getElementById("load-more-btn");
+                    if (spinnerEl) spinnerEl.classList.add("hidden");
+                    if (loadBtnEl) loadBtnEl.classList.add("hidden");
                     if (endMsg) endMsg.classList.remove("hidden");
+
+                    var visibleCards = container.querySelectorAll(".feed-note-card:not(.hidden)");
+                    if (visibleCards.length === 0) {
+                        var emptyState = document.getElementById("feed-empty-state");
+                        if (emptyState) emptyState.classList.remove("hidden");
+                        return;
+                    }
                 } else {
                     if (btn) btn.classList.remove("hidden");
                 }
@@ -1256,13 +1274,35 @@
 
     // ---------- Sentinel Observer for Infinite Scroll ----------
 
+    var _isObserverThrottled = false;
+
     function initFeedPaginationObserver() {
         var sentinel = document.getElementById("feed-pagination-sentinel");
         if (!sentinel || typeof IntersectionObserver === "undefined") return;
 
-        var observer = new IntersectionObserver(function (entries) {
+        if (window.feedObserver) {
+            try { window.feedObserver.disconnect(); } catch (e) {}
+        }
+
+        window.feedObserver = new IntersectionObserver(function (entries) {
             entries.forEach(function (entry) {
                 if (entry.isIntersecting) {
+                    if (_isObserverThrottled) return;
+
+                    var emptyState = document.getElementById("feed-empty-state");
+                    var container = document.getElementById("feed-container") || document.getElementById("feedContainer");
+                    var cards = container ? container.querySelectorAll(".feed-note-card:not(.hidden)") : [];
+
+                    // If #feed-empty-state is visible or no cards are rendered, do not trigger loadMoreNotes()
+                    if ((emptyState && !emptyState.classList.contains("hidden")) || cards.length === 0) {
+                        return;
+                    }
+
+                    _isObserverThrottled = true;
+                    setTimeout(function () {
+                        _isObserverThrottled = false;
+                    }, 1500);
+
                     loadMoreNotes();
                 }
             });
@@ -1272,7 +1312,7 @@
             threshold: 0.1
         });
 
-        observer.observe(sentinel);
+        window.feedObserver.observe(sentinel);
     }
 
 

@@ -807,7 +807,9 @@ def api_feed(request):
             return JsonResponse({
                 "success": True,
                 "notes": [],
+                "replies": {},
                 "thread_replies": {},
+                "total_replies": 0,
                 "thread_reply_count": 0,
                 "oldest_timestamp": None,
                 "has_more": False,
@@ -2264,19 +2266,31 @@ def fetch_contact_pubkeys(user_pubkey, relay_urls=None, timeout=10, deadline=Non
     return []
 
 
-def _fetch_latest_kind3_tags(user_pubkey, relay_urls=None):
-    """Fetch the newest Kind 3 event tags for a user across relays, or []."""
+def _fetch_latest_kind3_event(user_pubkey, relay_urls=None):
+    """Fetch the newest Kind 3 event for a user across relays, or None."""
     events = relay_req({"kinds": [3], "authors": [user_pubkey], "limit": 5}, relay_urls=relay_urls)
     latest = None
-    for e in events.values():
+    if isinstance(events, dict):
+        events_iter = events.values()
+    elif isinstance(events, list):
+        events_iter = events
+    else:
+        events_iter = []
+    for e in events_iter:
         if not isinstance(e, dict):
             continue
         created = e.get("created_at") or 0
         if latest is None or created > (latest.get("created_at") or 0):
             latest = e
+    return latest
+
+
+def _fetch_latest_kind3_tags(user_pubkey, relay_urls=None):
+    """Fetch the newest Kind 3 event tags for a user across relays, or []."""
+    latest = _fetch_latest_kind3_event(user_pubkey, relay_urls=relay_urls)
     if not latest:
         return []
-    return [t for t in latest.get("tags", []) if isinstance(t, list) and t]
+    return [list(t) for t in latest.get("tags", []) if isinstance(t, list) and t]
 
 
 @login_required
@@ -2301,7 +2315,7 @@ def api_contacts_follow(request):
 
     try:
         data = json.loads(request.body or b"{}")
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         return HttpResponseBadRequest(json.dumps({"success": False, "error": "invalid JSON"}))
 
     target_pubkey = (data.get("target_pubkey") or "").strip().lower()
@@ -2318,12 +2332,14 @@ def api_contacts_follow(request):
             {"success": False, "error": "action must be 'follow' or 'unfollow'."},
             status=400,
         )
-    if target_pubkey == pubkey_hex:
+    if target_pubkey == pubkey_hex.lower():
         return JsonResponse(
             {"success": False, "error": "Cannot follow your own profile."}, status=400
         )
 
-    tags = _fetch_latest_kind3_tags(pubkey_hex)
+    latest_event = _fetch_latest_kind3_event(pubkey_hex)
+    tags = [list(t) for t in latest_event.get("tags", []) if isinstance(t, list) and t] if latest_event else []
+    existing_content = latest_event.get("content", "") if latest_event else ""
 
     def _is_tagging(t):
         return bool(t and t[0] == "p" and len(t) > 1 and t[1].lower() == target_pubkey)
@@ -2331,7 +2347,8 @@ def api_contacts_follow(request):
     is_already = any(_is_tagging(t) for t in tags)
     if action == "follow":
         if not is_already:
-            tags.append(["p", target_pubkey, "wss://relay.iyou.me", target_name or ""])
+            relay_url = "wss://relay.iyou.me" if target_name else ""
+            tags.append(["p", target_pubkey, relay_url, target_name or ""])
     else:  # unfollow
         tags = [t for t in tags if not _is_tagging(t)]
 
@@ -2340,17 +2357,18 @@ def api_contacts_follow(request):
         "pubkey": pubkey_hex,
         "created_at": int(time.time()),
         "tags": tags,
-        "content": "",
+        "content": existing_content or "",
     }
 
     contact_pubkeys = [t[1] for t in tags if t and t[0] == "p" and len(t) > 1]
     return JsonResponse(
         {
             "success": True,
+            "unsigned_event": unsigned_event,
+            "event": unsigned_event,
             "action": action,
             "target_pubkey": target_pubkey,
             "already_following": is_already if action == "follow" else True,
-            "event": unsigned_event,
             "contacts": contact_pubkeys,
             "contacts_count": len(contact_pubkeys),
         }

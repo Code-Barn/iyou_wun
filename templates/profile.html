@@ -65,8 +65,10 @@
           </a>
           {% elif request.user.is_authenticated %}
           <button id="follow-action-btn" type="button" 
-                  class="px-3.5 py-1.5 bg-violet-600/90 hover:bg-violet-600 backdrop-blur-md text-white rounded-lg text-xs font-mono font-semibold transition shadow-lg border border-violet-400/30"
-                  data-follow-target="{{ target_pubkey_hex }}"
+                  class="action-btn-toggle-follow px-3.5 py-1.5 bg-violet-600/90 hover:bg-violet-600 backdrop-blur-md text-white rounded-lg text-xs font-mono font-semibold transition shadow-lg border border-violet-400/30"
+                  data-target-pubkey="{{ target_nostr_pubkey_hex }}"
+                  data-follow-target="{{ target_nostr_pubkey_hex }}"
+                  data-following="false"
                   data-follow-petname="{{ profile.name|default:'' }}">
             <span class="btn-spinner hidden animate-spin">⏳</span>
             <span class="btn-label">+ Follow</span>

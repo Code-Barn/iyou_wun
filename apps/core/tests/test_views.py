@@ -2871,13 +2871,15 @@ class Phase24ViewsTest(TestCase):
 
     def test_iyou_feed_zero_bleed_when_empty(self):
         url = reverse("api_feed") + "?circle=iyou"
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]):
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req") as mock_relay:
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
             data = response.json()
+            self.assertTrue(data.get("success"))
             self.assertEqual(data["notes"], [])
-            self.assertEqual(data["thread_replies"], {})
+            self.assertEqual(data["replies"], {})
             self.assertFalse(data["has_more"])
+            mock_relay.assert_not_called()
 
     def test_api_translate_endpoint_post(self):
         """Asserts POST /api/translate/ returns 200 with JSON payload."""

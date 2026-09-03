@@ -721,6 +721,10 @@
         });
     };
 
+    RelayPool.prototype.publish = function (signedEvent, targetRelays, timeoutMs) {
+        return this.broadcast(signedEvent, targetRelays, timeoutMs);
+    };
+
     RelayPool.prototype.onStatusChange = function (callback) {
         if (typeof callback === "function") {
             this.listeners.push(callback);
