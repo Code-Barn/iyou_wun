@@ -229,6 +229,72 @@ class DeckRoutingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Alice Sovereign")
 
+    def test_link_deck_renders_message_button_for_authenticated_viewer(self):
+        # 1. Authenticated peer viewing alice's deck sees message button
+        self.client.force_login(self.bob)
+        response, _ = self._get_with_relays_down("/@alice")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "action-btn-direct-message")
+        self.assertContains(response, "💬")
+        self.assertContains(response, "Message")
+
+        # 2. Owner viewing own deck does not see message button
+        self.client.force_login(self.alice)
+        owner_response, _ = self._get_with_relays_down("/@alice")
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertNotContains(owner_response, "action-btn-direct-message")
+
+        # 3. Anonymous user does not see message button
+        self.client.logout()
+        anon_response, _ = self._get_with_relays_down("/@alice")
+        self.assertEqual(anon_response.status_code, 200)
+        self.assertNotContains(anon_response, "action-btn-direct-message")
+
+    def test_link_deck_json_content_negotiation_accept_header(self):
+        deck = self.alice_deck
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(f"/@{deck.handle}", HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        data = response.json()
+        self.assertEqual(data["did"], deck.user.username)
+        self.assertEqual(data["handle"], deck.handle)
+        self.assertEqual(data["discriminator"], 0)
+        self.assertEqual(data["canonical_handle"], "@alice")
+        self.assertIn("items", data)
+        self.assertIn("profile", data)
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_link_deck_json_format_query_parameter(self):
+        deck = self.alice_deck
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(f"/@{deck.handle}?format=json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        data = response.json()
+        self.assertEqual(data["handle"], deck.handle)
+        self.assertEqual(data["did"], deck.user.username)
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_link_deck_json_returns_404_for_missing_handle(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get("/@nonexistentuser", HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.headers["Content-Type"], "application/json")
+        data = response.json()
+        self.assertIn("error", data)
+        self.assertEqual(data["error"], "Deck not found")
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "*")
+
+    def test_link_deck_json_content_negotiation_discriminated_handle(self):
+        deck = self.bob_deck
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(f"/@{deck.handle}[1]", HTTP_ACCEPT="application/json")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["canonical_handle"], "@alice[1]")
+        self.assertEqual(data["discriminator"], 1)
+
 
 class DeckItemAPITests(TestCase):
     @classmethod

@@ -1273,10 +1273,18 @@ class FeedPhase24Test(TestCase):
         pk = "c" * 64
         event = make_event("mesh_test_note_1", 1, pubkey=pk, content="Public relay note test", tags=[])
         with patch("apps.core.views.relay_req", return_value={"e1": event}):
-            response = self.client.get(reverse("feed"))
+            response = self.client.get(reverse("feed") + "?circle=global")
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Public relay note test")
         self.assertNotContains(response, "🌐 Mesh")
+
+    def test_default_landing_circle_is_iyou(self):
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=["3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"]) as mock_get_iyou:
+            with patch("apps.core.views.relay_req", return_value={}):
+                response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_circle"], "iyou")
+        self.assertTrue(mock_get_iyou.called)
 
     def test_detect_content_warning_flags_nip36_and_heuristics(self):
         from apps.core.nip10 import detect_content_warning, sanitize_event_content, build_thread_tree

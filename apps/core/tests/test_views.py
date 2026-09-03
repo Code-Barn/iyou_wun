@@ -27,7 +27,7 @@ from django.contrib.auth.models import User
 from django.urls import reverse
 from django.conf import settings
 
-from .helpers import make_event
+from .helpers import make_event, VALID_PUBKEY_HEX
 from apps.core.views import hex_to_npub
 from apps.core.models import UserLinkDeck, UserLinkItem
 
@@ -500,9 +500,11 @@ class ProfileViewTest(TestCase):
         self.assertContains(response, "https://example.com/db_banner.png")
         self.assertContains(response, "master@iyou.me")
 
-    def test_profile_renders_direct_message_button(self):
+    def test_profile_renders_message_button_for_authenticated_viewer(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         npub = hex_to_npub(pk)
+
+        # 1. Authenticated user viewing another profile sees .action-btn-direct-message with valid data-chat-target-pubkey
         peer_user = User.objects.create_user(username="did:key:z6Mkpeeruser2")
         self.client.force_login(peer_user)
 
@@ -510,9 +512,32 @@ class ProfileViewTest(TestCase):
             response = self.client.get(reverse("profile", kwargs={"npub": npub}))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f"openDockedChat('{npub}'")
+        self.assertContains(response, "action-btn-direct-message")
+        self.assertContains(response, f'data-chat-target-pubkey="{pk}"')
         self.assertContains(response, "💬")
         self.assertContains(response, "Message")
+
+        # 2. Authenticated user viewing their own profile does not render the button
+        owner_user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        self.client.force_login(owner_user)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            owner_response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+        self.assertEqual(owner_response.status_code, 200)
+        self.assertNotContains(owner_response, "action-btn-direct-message")
+
+        # 3. Unauthenticated user does not render the button
+        self.client.logout()
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            anon_response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+        self.assertEqual(anon_response.status_code, 200)
+        self.assertNotContains(anon_response, "action-btn-direct-message")
+
+    def test_profile_renders_direct_message_button(self):
+        self.test_profile_renders_message_button_for_authenticated_viewer()
 
     def test_base_template_omits_floating_chat_dock_for_anonymous_users(self):
         with patch("apps.core.views.relay_req", return_value={}):
@@ -1261,6 +1286,7 @@ class FeedViewTrustLensContractTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
+        User.objects.create_user(username=f"did:iyou:0x{VALID_PUBKEY_HEX}")
         cls.relay_events = {
             "e1": make_event("e1", 1, content="trust lens fixture note"),
         }
@@ -1309,6 +1335,7 @@ class FeedViewTwoTierToolbarTest(TestCase):
 
     @classmethod
     def setUpTestData(cls):
+        User.objects.create_user(username=f"did:iyou:0x{VALID_PUBKEY_HEX}")
         cls.relay_events = {
             "e1": make_event("e1", 1, content="circle filter test note", tags=[["t", "nostr"], ["t", "mesh"]]),
         }
@@ -1375,6 +1402,9 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
     """Verifies feed modernization, external identity attribution, and 5-button action bar."""
 
+    def setUp(self):
+        User.objects.create_user(username=f"did:iyou:0x{VALID_PUBKEY_HEX}")
+
     def test_external_relay_note_does_not_contain_synthetic_did_or_static_verified_badge(self):
         # External relay note (e.g. jb55 from nos.lol)
         external_pubkey = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
@@ -1382,7 +1412,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             "ext_note_1": make_event("ext_note_1", 1, pubkey=external_pubkey, content="Hello decentralized world!"),
         }
         with patch("apps.core.views.relay_req", return_value=relay_events):
-            response = self.client.get(reverse("feed"))
+            response = self.client.get(reverse("feed") + "?circle=global")
 
         self.assertEqual(response.status_code, 200)
         # Verify no synthetic did:iyou:0x appears in the HTML
@@ -1994,11 +2024,14 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "Shield:")
 
     def test_nav_renders_iyou_circle_pill(self):
-        with patch("apps.core.views.relay_req", return_value={}):
-            response = self.client.get(reverse("feed"))
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=["3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"]) as mock_get_iyou:
+            with patch("apps.core.views.relay_req", return_value={}):
+                response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-circle="iyou"')
         self.assertContains(response, "⚡ iyou")
+        self.assertEqual(response.context["selected_circle"], "iyou")
+        self.assertTrue(mock_get_iyou.called)
 
     def test_iyou_circle_scopes_feed_to_linkdeck_authors(self):
         from django.contrib.auth import get_user_model
@@ -2019,14 +2052,32 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
                 "note_iyou": make_event("note_iyou", 1, pubkey="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d", content="Local ecosystem note"),
             }
 
-        # 1. Test FeedView context GET ?circle=iyou
+        # 1. Test FeedView context GET without parameters defaults to iyou
         with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
-            response = self.client.get(reverse("feed") + "?circle=iyou")
+            response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_circle"], "iyou")
         self.assertIn("authors", captured_filter)
         self.assertTrue(len(captured_filter["authors"]) > 0)
 
-        # 2. Test api_feed JSON GET ?circle=iyou
+        # 2. Test FeedView context GET ?circle=iyou
+        captured_filter.clear()
+        with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
+            response = self.client.get(reverse("feed") + "?circle=iyou")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["selected_circle"], "iyou")
+        self.assertIn("authors", captured_filter)
+        self.assertTrue(len(captured_filter["authors"]) > 0)
+
+        # 3. Test api_feed JSON GET without parameters defaults to iyou
+        captured_filter.clear()
+        with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
+            response_api = self.client.get(reverse("api_feed"))
+        self.assertEqual(response_api.status_code, 200)
+        self.assertIn("authors", captured_filter)
+        self.assertTrue(len(captured_filter["authors"]) > 0)
+
+        # 4. Test api_feed JSON GET ?circle=iyou
         captured_filter.clear()
         with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
             response_api = self.client.get(reverse("api_feed") + "?circle=iyou")
@@ -2937,6 +2988,9 @@ class Phase24ViewsTest(TestCase):
 class TranslationUITest(TestCase):
     """Phase 27: Translation UI Tests."""
 
+    def setUp(self):
+        User.objects.create_user(username=f"did:iyou:0x{VALID_PUBKEY_HEX}")
+
     def test_thread_post_omits_translate_button_for_english_notes(self):
         """Asserts notes with lang='en' do not render .translate-btn."""
         from unittest.mock import patch
@@ -2965,6 +3019,9 @@ class TranslationUITest(TestCase):
 
 class Phase36RelaySyncTest(TestCase):
     """Phase 36: Relay Switchboard Sync tests."""
+
+    def setUp(self):
+        User.objects.create_user(username=f"did:iyou:0x{VALID_PUBKEY_HEX}")
 
     def test_api_feed_respects_client_relays_parameter(self):
         """Test that api_feed endpoint uses client-provided relays when available."""

@@ -16,7 +16,7 @@
 (function (global) {
     "use strict";
 
-    let activeCircle = "global";
+    let activeCircle = "iyou";
     let activeSearchQuery = "";
 
     const CIRCLE_LABELS = {
@@ -122,6 +122,14 @@
     }
 
     function checkCircleMatch(circleMode, pubkey, did, card) {
+        if (circleMode && typeof circleMode === "object" && typeof pubkey === "string") {
+            card = circleMode;
+            circleMode = pubkey;
+            const d = getCardNoteData(card);
+            pubkey = d.pubkey;
+            did = d.did;
+        }
+
         if (circleMode === "global") {
             return true;
         }
@@ -556,7 +564,7 @@
 
     function setCircle(circleMode) {
         const previousCircle = activeCircle;
-        activeCircle = circleMode || "global";
+        activeCircle = circleMode || "iyou";
 
         // Update tabs UI
         const tabGroup = document.getElementById("circle-filter-group");
@@ -592,9 +600,9 @@
         }
 
         // Update URL search params gracefully on feed and gallery
-        if (window.location.pathname.startsWith("/feed") || window.location.pathname.startsWith("/gallery")) {
+        if (window.location.pathname.startsWith("/feed") || window.location.pathname.startsWith("/gallery") || window.location.pathname === "/") {
             const url = new URL(window.location.href);
-            if (activeCircle === "global") {
+            if (activeCircle === "iyou") {
                 url.searchParams.delete("circle");
             } else {
                 url.searchParams.set("circle", activeCircle);
@@ -795,12 +803,21 @@
     function initCircleFeedFilter() {
         // 1. Check URL parameters
         const urlParams = new URLSearchParams(window.location.search);
-        const urlCircle = urlParams.get("circle");
+        const initialCircle = urlParams.get('circle') || 'iyou';
         const urlQuery = urlParams.get("q");
 
-        if (urlCircle && CIRCLE_LABELS[urlCircle]) {
-            activeCircle = urlCircle;
+        if (initialCircle && CIRCLE_LABELS[initialCircle]) {
+            activeCircle = initialCircle;
+        } else {
+            activeCircle = 'iyou';
         }
+
+        // Initial client scan for cards against initialCircle
+        const cards = getNoteCards();
+        cards.forEach((card) => {
+            if (card.id === "circle-empty-state") return;
+            checkCircleMatch(card, initialCircle);
+        });
         if (urlQuery) {
             activeSearchQuery = urlQuery;
             const searchInput = document.getElementById("feed-search-input");
@@ -918,10 +935,12 @@
         toggleNsfwFilter: toggleNsfwFilter,
         updateNsfwShieldStatusUI: updateNsfwShieldStatusUI,
         applyNsfwBlurState: applyNsfwBlurState,
+        checkCircleMatch: checkCircleMatch,
         getActiveCircle: () => activeCircle
     };
 
     global.circleFeedFilter = circleFeedFilter;
+    global.checkCircleMatch = checkCircleMatch;
     global.applyCircleFilter = setCircle;
     global.toggleNsfwFilter = toggleNsfwFilter;
     global.filterByTag = filterByTag;

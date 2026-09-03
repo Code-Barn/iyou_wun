@@ -313,7 +313,7 @@
           </div>
         </div>
         <form onsubmit="sendDockedMessage(event, '${peerId}')" class="p-2 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 flex items-center gap-1.5">
-          <input type="text" class="docked-chat-input flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500" placeholder="Type a message..." />
+          <input type="text" id="dock-chat-input" class="docked-chat-input flex-1 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded px-2 py-1.5 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500" placeholder="Type a message..." />
           <button type="submit" class="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded text-xs font-semibold">Send</button>
         </form>
       </div>
@@ -355,6 +355,46 @@
     if (input) input.focus();
   }
 
+  function setActiveChatPeer(targetPubkey, targetHandle) {
+    if (!targetPubkey) return;
+    openDockedChat(targetPubkey, targetHandle);
+  }
+
+  function openDirectMessage(targetPubkey, targetHandle) {
+    // 1. Expand dock if collapsed
+    const dock = document.getElementById('floating-chat-dock');
+    if (dock && dock.classList.contains('hidden')) {
+      dock.classList.remove('hidden');
+    }
+    const root = document.getElementById('floating-chat-root');
+    if (root && root.classList.contains('hidden')) {
+      root.classList.remove('hidden');
+    }
+    // 2. Select or create peer conversation entry
+    if (typeof window.setActiveChatPeer === 'function') {
+      window.setActiveChatPeer(targetPubkey, targetHandle);
+    } else {
+      openDockedChat(targetPubkey, targetHandle);
+    }
+    // 3. Focus message input
+    const chatInput = document.getElementById('dock-chat-input') || document.querySelector('.docked-chat-input');
+    if (chatInput) {
+      chatInput.focus();
+    }
+  }
+
+  // Bind click delegation for .action-btn-direct-message buttons across the document
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.action-btn-direct-message');
+    if (!btn) return;
+    e.preventDefault();
+    const pubkey = btn.dataset.chatTargetPubkey;
+    const handle = btn.dataset.chatTargetHandle;
+    if (pubkey) {
+      window.openDirectMessage(pubkey, handle);
+    }
+  });
+
   function toggleMinimizeChat(peerId) {
     const win = activeWindows.get(peerId);
     if (!win) return;
@@ -390,6 +430,8 @@
 
   window.toggleChatRoster = toggleChatRoster;
   window.openDockedChat = openDockedChat;
+  window.setActiveChatPeer = setActiveChatPeer;
+  window.openDirectMessage = openDirectMessage;
   window.toggleMinimizeChat = toggleMinimizeChat;
   window.closeDockedChat = closeDockedChat;
   window.sendDockedMessage = sendDockedMessage;

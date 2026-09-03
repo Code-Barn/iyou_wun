@@ -404,6 +404,42 @@
   - `Phase36NIP05EndpointTest`: Added `test_nip05_well_known_resolves_discriminator_format`.
   - `Phase37GlobalScriptTest`: `test_base_html_renders_global_bridge_scripts_on_all_views`.
 
+### Phase 38: [ ⚡ iyou ] Default Landing Circle & Feed View
+- [x] **38.1 Backend Route & View Defaults (`apps/core/views.py`):**
+  - Updated fallback logic for `circle` in `FeedView.get_context_data()` and `FeedView.get()` to default to `"iyou"`.
+  - Added `selected_circle` context variable.
+  - Verified and enforced `fetch_text_notes()` and `api_feed()` default to `authors=get_iyou_pubkeys()` when no circle is specified.
+- [x] **38.2 Layer 2 Nav & Client Initialization (`templates/_nav.html`, `static/js/circle_feed_filter.js`, `templates/feed.html`):**
+  - Updated `#circle-filter-group` buttons in `_nav.html` to render `data-circle="iyou"` active with active pill styling and `data-circle="global"` inactive on initial load.
+  - Set default scope badge to `IYOU ECOSYSTEM`.
+  - Updated `static/js/circle_feed_filter.js` to resolve `initialCircle = urlParams.get('circle') || 'iyou'`.
+  - Scanned initial cards with `checkCircleMatch(card, initialCircle)` and updated empty states in feed template and JS filter for the `iyou` ecosystem.
+- [x] **38.3 Verification & Unit Tests (`apps/core/tests/test_views.py`, `apps/core/tests/test_feed.py`):**
+  - Added contract tests verifying `/feed` and `/api/feed` without parameters default to `selected_circle == 'iyou'` and invoke `get_iyou_pubkeys()`.
+  - Rebuilt CSS and verified full test suite passes.
+
+### Phase 39: Wire Direct Message Deep-Links to Docked Chat Interface
+- [x] **39.1 Profile & Link Deck Message Actions (`templates/profile.html`, `templates/link_deck.html`):**
+  - Added `.action-btn-direct-message` with `data-chat-target-pubkey`, `data-chat-target-did`, and `data-chat-target-handle` to `profile.html` and `link_deck.html` for authenticated non-owners.
+  - Embedded floating chat dock partial and script in `link_deck.html`.
+- [x] **39.2 Floating Chat Dock Deep-Link Handler (`static/js/floating_chat.js`, `templates/includes/_floating_chat_dock.html`):**
+  - Exposed `window.openDirectMessage(targetPubkey, targetHandle)` and `window.setActiveChatPeer(targetPubkey, targetHandle)`.
+  - Added `#floating-chat-dock` ID to master dock container and `#dock-chat-input` to input element.
+  - Bound global document click delegation for `.action-btn-direct-message` buttons.
+- [x] **39.3 Verification & Unit Tests (`apps/core/tests/test_views.py`, `apps/core/tests/test_deck.py`):**
+  - Added `test_profile_renders_message_button_for_authenticated_viewer` covering authenticated peer, profile owner, and unauthenticated viewer.
+  - Added `test_link_deck_renders_message_button_for_authenticated_viewer` covering authenticated peer, link deck owner, and unauthenticated viewer.
+
+### Phase 40: Implement Link Deck JSON Content Negotiation
+- [x] **40.1 Content Negotiation in `LinkDeckView` (`apps/core/views.py`):**
+  - Added detection of `Accept: application/json` and `?format=json`.
+  - Serialized resolved deck attributes, NIP-05, profile object, and active link items as structured JSON with `Access-Control-Allow-Origin: *`.
+  - Handled missing or non-public decks with `{"error": "Deck not found"}` and status 404.
+- [x] **40.2 Unit Tests (`apps/core/tests/test_deck.py`):**
+  - Added `test_link_deck_json_content_negotiation_accept_header` asserting 200, Content-Type, payload keys, and CORS header.
+  - Added `test_link_deck_json_format_query_parameter` asserting 200 with `format=json`.
+  - Added `test_link_deck_json_returns_404_for_missing_handle` asserting 404 with JSON error.
+  - Added `test_link_deck_json_content_negotiation_discriminated_handle`.
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

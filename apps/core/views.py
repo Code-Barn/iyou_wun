@@ -465,9 +465,13 @@ class FeedView(TemplateView):
                     for _r in _replies:
                         enrich_image_grid(_r)
         else:
-            circle = self.request.GET.get("circle") or self.request.GET.get("mode") or "global"
-            context["feed_mode"] = circle
-            context["feed_circle"] = circle
+            circle_param = self.request.GET.get("circle")
+            mode_param = self.request.GET.get("mode")
+            selected_circle = (circle_param or mode_param or "iyou").lower()
+            context["feed_mode"] = selected_circle
+            context["feed_circle"] = selected_circle
+            context["selected_circle"] = selected_circle
+            circle = selected_circle
 
             if instant_shell:
                 notes = []
@@ -551,6 +555,7 @@ class FeedView(TemplateView):
         return context
 
     def get(self, request, *args, **kwargs):
+        self.selected_circle = request.GET.get("circle", "iyou").lower()
         if request.user.is_authenticated and not request.session.get("has_seen_feed_welcome", False):
             from django.contrib import messages
 
@@ -747,7 +752,8 @@ def api_search(request):
 
 def api_feed(request):
     mode = request.GET.get("mode", "")
-    circle = request.GET.get("circle") or mode or "global"
+    circle_param = request.GET.get("circle")
+    circle = (circle_param or mode or "iyou").lower()
     until = request.GET.get("until")
     limit = request.GET.get("limit", 25)
     tag = request.GET.get("tag")
@@ -799,6 +805,7 @@ def api_feed(request):
         iyou_pks = get_iyou_pubkeys()
         if not iyou_pks:
             return JsonResponse({
+                "success": True,
                 "notes": [],
                 "thread_replies": {},
                 "thread_reply_count": 0,
@@ -1476,7 +1483,9 @@ def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
 
 def fetch_text_notes(authors=None, limit=20, relay_urls=None):
     """Fetch Kind 1 & 1063 notes for given authors, with profile and media enrichment."""
-    if authors is not None and not authors:
+    if authors is None:
+        authors = get_iyou_pubkeys()
+    if not authors:
         return []
 
     filter_obj = {"kinds": [1, 1063], "limit": limit}
@@ -2889,11 +2898,22 @@ class LinkDeckView(TemplateView):
         disc_raw = kwargs.get("disc")
         did_key = kwargs.get("did_key")
 
+        accept_header = request.headers.get("Accept", "") or request.META.get("HTTP_ACCEPT", "")
+        wants_json = (
+            "application/json" in accept_header
+            or request.GET.get("format", "").lower() == "json"
+        )
+
         if did_key:
             owner = UserModel.objects.filter(username=did_key).first()
             target_deck = getattr(owner, "link_deck", None) if owner else None
             if target_deck is not None and target_deck.is_public:
-                return HttpResponsePermanentRedirect(target_deck.canonical_path)
+                if not wants_json:
+                    return HttpResponsePermanentRedirect(target_deck.canonical_path)
+            elif wants_json:
+                response = JsonResponse({"error": "Deck not found"}, status=404)
+                response["Access-Control-Allow-Origin"] = "*"
+                return response
             owner_did = did_key
         else:
             disc = int(disc_raw) if disc_raw else 0
@@ -2903,6 +2923,10 @@ class LinkDeckView(TemplateView):
                 .first()
             )
             if target_deck is None or not target_deck.is_public:
+                if wants_json:
+                    response = JsonResponse({"error": "Deck not found"}, status=404)
+                    response["Access-Control-Allow-Origin"] = "*"
+                    return response
                 raise Http404("Unknown handle.")
             owner_did = target_deck.user.username
 
@@ -2911,6 +2935,41 @@ class LinkDeckView(TemplateView):
         profile = fetch_profile_data(hex_pubkey, relay_urls=relays) if hex_pubkey else {}
 
         items = list(target_deck.items.filter(is_active=True)) if target_deck else []
+
+        if wants_json:
+            target_npub = hex_to_npub(hex_pubkey) if hex_pubkey else owner_did
+            data = {
+                "did": target_deck.user.username,
+                "handle": target_deck.handle,
+                "discriminator": target_deck.discriminator,
+                "canonical_handle": (
+                    f"@{target_deck.handle}"
+                    if target_deck.discriminator == 0
+                    else f"@{target_deck.handle}[{target_deck.discriminator}]"
+                ),
+                "headline": target_deck.headline or "",
+                "nip05": getattr(target_deck, "nip05", None) or f"{target_deck.handle}@iyou.me",
+                "profile": {
+                    "display_name": profile.get("display_name") or target_deck.handle,
+                    "avatar": profile.get("picture") or "",
+                    "pubkey_hex": hex_pubkey or "",
+                    "npub": target_npub or "",
+                },
+                "items": [
+                    {
+                        "id": item.id,
+                        "title": item.title,
+                        "url": item.url,
+                        "icon_category": item.icon_category,
+                        "is_ecosystem_link": item.is_ecosystem_link,
+                        "order": item.order,
+                    }
+                    for item in items
+                ],
+            }
+            response = JsonResponse(data, status=200)
+            response["Access-Control-Allow-Origin"] = "*"
+            return response
 
         context = {
             "deck": target_deck,

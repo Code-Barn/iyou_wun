@@ -194,7 +194,13 @@
             {% endif %}
           </div>
           {% empty %}
-          <div id="feed-empty-state" class="text-center py-12 text-slate-400 font-mono text-xs">No notes found in this circle.</div>
+          <div id="feed-empty-state" class="text-center py-12 text-slate-400 font-mono text-xs">
+            {% if feed_circle == 'iyou' or not feed_circle or selected_circle == 'iyou' %}
+            No notes from the iyou ecosystem yet. Notes posted by registered accounts will appear here.
+            {% else %}
+            No notes found in this circle.
+            {% endif %}
+          </div>
           {% endfor %}
         </div>
 
