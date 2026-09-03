@@ -61,11 +61,15 @@
     </main>
 
     {% block extra_body %}{% endblock %}
-    {% block extra_js %}{% endblock %}
+    
+    <!-- Canonical Global Controllers (Never overridden by child blocks) -->
     <script src="{% static 'js/toast_manager.js' %}"></script>
     <script src="{% static 'js/bridge_client.js' %}"></script>
     <script src="{% static 'js/relay_pool.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
+    
+    <!-- Page-Specific Extensions -->
+    {% block extra_js %}{% endblock %}
     <script>
       window.userPubkey = window.userPubkey || "{{ user_pubkey_hex|default:'' }}";
       window.userNpub = window.userNpub || "{{ user_npub|default:'' }}";

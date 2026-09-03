@@ -75,6 +75,18 @@ class UserLinkDeck(models.Model):
     def canonical_path(self):
         return f"/{self.display_handle}"
 
+    def save(self, *args, **kwargs):
+        """Automatically derive NIP-05 address from handle and discriminator."""
+        if self.handle:
+            clean_handle = self.handle.lower().lstrip("@").strip()
+            if self.discriminator and self.discriminator > 0:
+                self.nip05 = f"{clean_handle}_{self.discriminator}@iyou.me"
+            else:
+                self.nip05 = f"{clean_handle}@iyou.me"
+        if "update_fields" in kwargs and kwargs["update_fields"] is not None:
+            kwargs["update_fields"] = list(set(kwargs["update_fields"]) | {"nip05"})
+        super().save(*args, **kwargs)
+
 
 class UserLinkItem(models.Model):
     ICON_CATEGORY_CHOICES = [

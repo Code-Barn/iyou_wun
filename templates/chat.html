@@ -39,6 +39,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ block.super }}
 <script>
   window.peerTarget = "{{ peer_target|default:'' }}";
 </script>

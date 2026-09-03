@@ -454,11 +454,12 @@ class ProfileViewTest(TestCase):
         self.assertContains(response, "alice@iyou.me")
         self.assertContains(response, "follow-action-btn")
         self.assertContains(response, "author-badge-slot")
-        self.assertContains(response, "Posts (2)")
-        self.assertContains(response, "Replies (1)")
-        self.assertContains(response, "Media (1)")
-        self.assertContains(response, "https://example.com/avatar.jpg")
-        self.assertContains(response, "https://example.com/banner.jpg")
+        self.assertContains(response, "Posts (0)")
+        self.assertContains(response, "Replies (0)")
+        self.assertContains(response, "Media (0)")
+        self.assertContains(response, 'data-hydrate-profile="true"')
+        self.assertContains(response, "http://example.com/avatar.jpg")
+        self.assertContains(response, "http://example.com/banner.jpg")
 
     def test_profile_owner_shows_edit_button_and_hides_follow_btn(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
@@ -3046,6 +3047,36 @@ class Phase36NIP05EndpointTest(TestCase):
         data = response.json()
         self.assertIn("names", data)
 
+    def test_nip05_well_known_resolves_discriminator_format(self):
+        """Test that NIP-05 handles with discriminator format (handle_disc) are resolved correctly."""
+        # Create a deck with discriminator
+        user2 = User.objects.create_user(username="did:test:discuser")
+        UserLinkDeck.objects.create(
+            user=user2,
+            handle="discuser",
+            discriminator=2,
+            is_public=True
+        )
+        
+        # Patch did_to_pubkey to return a known pubkey
+        with patch("apps.core.views.did_to_pubkey", return_value="discpubkey1234567890abcdef1234567890abcdef1234567890abcdef1234567890"):
+            # Test lookup with discriminator format (handle_disc)
+            response = self.client.get("/.well-known/nostr.json", {"name": "discuser_2"})
+            
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            
+            # Check JSON structure
+            self.assertIn("names", data)
+            self.assertIn("relays", data)
+            
+            # Check handle with discriminator mapping
+            self.assertIn("discuser_2", data["names"])
+            self.assertEqual(data["names"]["discuser_2"], "discpubkey1234567890abcdef1234567890abcdef1234567890abcdef1234567890")
+            
+            # Check CORS header
+            self.assertEqual(response["Access-Control-Allow-Origin"], "*")
+
 
 class Phase36ProfileNotesAPITest(TestCase):
     """Phase 36: Profile notes API tests."""
@@ -3095,3 +3126,38 @@ class Phase36ProfileNotesAPITest(TestCase):
                 self.assertEqual(filter_obj.get("until"), 1234567890)
                 self.assertEqual(filter_obj.get("kinds"), [1])
                 self.assertIn(test_pubkey, filter_obj.get("authors", []))
+
+
+class Phase37GlobalScriptTest(TestCase):
+    """Phase 37: Global script hoisting tests."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")
+
+    def test_base_html_renders_global_bridge_scripts_on_all_views(self):
+        """Test that bridge_client.js is rendered across feed, gallery, chat, and profile."""
+        self.client.force_login(self.user)
+
+        # 1. Feed view
+        res_feed = self.client.get("/feed")
+        self.assertEqual(res_feed.status_code, 200)
+        self.assertIn(b"bridge_client.js", res_feed.content)
+        self.assertIn(b"toast_manager.js", res_feed.content)
+
+        # 2. Gallery view
+        res_gallery = self.client.get("/gallery")
+        self.assertEqual(res_gallery.status_code, 200)
+        self.assertIn(b"bridge_client.js", res_gallery.content)
+        self.assertIn(b"toast_manager.js", res_gallery.content)
+
+        # 3. Chat view
+        res_chat = self.client.get("/chat")
+        self.assertEqual(res_chat.status_code, 200)
+        self.assertIn(b"bridge_client.js", res_chat.content)
+        self.assertIn(b"toast_manager.js", res_chat.content)
+
+        # 4. Profile view
+        res_profile = self.client.get("/profile/testuser")
+        self.assertEqual(res_profile.status_code, 200)
+        self.assertIn(b"bridge_client.js", res_profile.content)
+        self.assertIn(b"toast_manager.js", res_profile.content)

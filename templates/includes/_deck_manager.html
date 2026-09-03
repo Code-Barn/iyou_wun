@@ -15,6 +15,16 @@
     </div>
   </div>
 
+  <!-- Automatic NIP-05 Identifier -->
+  <div class="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60">
+    <div class="text-[11px] font-mono text-slate-400">AUTOMATIC NIP-05 IDENTIFIER</div>
+    <div class="text-sm font-semibold text-violet-600 dark:text-violet-400 font-mono mt-0.5 flex items-center gap-1.5">
+      <span>🏷️ {{ deck.nip05|default:"Claim handle to activate @iyou.me" }}</span>
+      {% if deck.handle %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold">ACTIVE</span>{% endif %}
+    </div>
+    <p class="text-[11px] text-slate-400 mt-1">Globally verifiable across all external Nostr clients as your sovereign address.</p>
+  </div>
+
   <!-- Claim Handle Form -->
   <form onsubmit="return claimDeckHandle(event)" class="flex flex-wrap items-center gap-2">
     {% csrf_token %}

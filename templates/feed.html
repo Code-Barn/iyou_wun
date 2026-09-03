@@ -262,6 +262,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ block.super }}
 <script>
     window.TAURI_SIGNING_BRIDGE = "{{ idp_home_ws_url }}";
     window.BLOSSOM_SERVER_URL = "{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}";

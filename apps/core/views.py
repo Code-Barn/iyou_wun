@@ -1101,7 +1101,6 @@ def api_save_profile(request):
     about = data.get("about", "")
     picture = data.get("picture", "")
     banner = data.get("banner", "")
-    nip05 = data.get("nip05", "")
     lud16 = data.get("lud16", "")
 
     deck = UserLinkDeck.objects.filter(user=request.user).first()
@@ -1114,10 +1113,9 @@ def api_save_profile(request):
             deck.avatar_url = picture[:2048]
         if banner is not None:
             deck.banner_url = banner[:2048]
-        if nip05 is not None:
-            deck.nip05 = nip05[:300]
         if lud16 is not None:
             deck.lud16 = lud16[:300]
+        # Note: NIP-05 is automatically derived from handle and discriminator in save() method
         deck.save(update_fields=["display_name", "headline", "avatar_url", "banner_url", "nip05", "lud16"])
     else:
         # Create deck if not exists with a safe default handle
@@ -1130,9 +1128,9 @@ def api_save_profile(request):
             headline=about[:160],
             avatar_url=picture[:2048],
             banner_url=banner[:2048],
-            nip05=nip05[:300],
             lud16=lud16[:300],
         )
+        # The save() method will automatically set the nip05 field
 
     profile_data = {
         "name": deck.display_name or deck.handle or name,
@@ -1140,7 +1138,7 @@ def api_save_profile(request):
         "about": deck.headline or about,
         "picture": deck.avatar_url or picture,
         "banner": deck.banner_url or banner,
-        "nip05": deck.nip05 or nip05,
+        "nip05": deck.nip05,  # Use the automatically derived NIP-05
         "lud16": deck.lud16 or lud16,
     }
     request.session["user_profile_cache"] = profile_data
@@ -3324,12 +3322,30 @@ def nip05_well_known(request):
         root_pubkey = get_public_key_hex(get_node_signing_key())
         _store("_", root_pubkey)
     elif name:
+        # Try direct handle match first
         deck = (
             UserLinkDeck.objects.filter(is_public=True)
             .filter(Q(handle__iexact=name) | Q(user__username__iexact=name))
             .select_related("user")
             .first()
         )
+        
+        # If not found, try discriminator translation (handle_disc format -> handle[disc])
+        if not deck and "_" in name:
+            # Convert format like "handle_2" to "handle[2]" for lookup
+            alt_name = name.replace("_", "[") + "]"
+            try:
+                h_part = alt_name.split("[")[0]
+                disc_part = int(alt_name.split("[")[1].rstrip("]"))
+                deck = (
+                    UserLinkDeck.objects.filter(is_public=True)
+                    .filter(Q(handle__iexact=h_part) & Q(discriminator=disc_part))
+                    .select_related("user")
+                    .first()
+                )
+            except (ValueError, IndexError):
+                pass
+        
         if deck:
             _store(name, _resolve_deck_pubkey(deck))
     else:

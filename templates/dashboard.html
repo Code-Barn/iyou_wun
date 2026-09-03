@@ -88,11 +88,13 @@
                        placeholder="https://.../banner.jpg" maxlength="2048" oninput="updatePreview()"
                        class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
               </div>
-              <div>
-                <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">NIP-05 Identifier</label>
-                <input type="text" id="profileNip05" value="{% firstof deck.nip05 profile.nip05 '' %}"
-                       placeholder="user@domain.com" maxlength="300" oninput="updatePreview()"
-                       class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
+              <div class="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700/60">
+                <div class="text-[11px] font-mono text-slate-400">AUTOMATIC NIP-05 IDENTIFIER</div>
+                <div class="text-sm font-semibold text-violet-600 dark:text-violet-400 font-mono mt-0.5 flex items-center gap-1.5">
+                  <span>🏷️ <span id="deckNip05Display">{% firstof deck.nip05 "Claim handle to activate @iyou.me" %}</span></span>
+                  {% if deck and deck.handle %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold">ACTIVE</span>{% endif %}
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1">Globally verifiable across all external Nostr clients as your sovereign address.</p>
               </div>
             </div>
 
@@ -144,9 +146,7 @@
                 </h3>
                 <div class="flex items-center gap-1.5 mt-0.5">
                   <span class="text-[11px] font-mono text-slate-400">@{{ deck.handle|default:"user" }}</span>
-                  <span id="previewNip05Badge" class="inline-flex items-center gap-0.5 text-[10px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/60 px-1 py-0.5 rounded border border-violet-200 dark:border-violet-800/60 {% if not deck.nip05 and not profile.nip05 %}hidden{% endif %}">
-                    ✓ <span id="previewNip05Text">{% firstof deck.nip05 profile.nip05 '' %}</span>
-                  </span>
+                  {% if deck and deck.nip05 %}<span class="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-500 rounded border border-emerald-500/20 font-bold">NIP-05 ACTIVE</span>{% endif %}
                 </div>
                 <p id="previewBio" class="text-xs text-slate-600 dark:text-slate-300 mt-2 line-clamp-3 leading-relaxed">
                   {% firstof deck.headline profile.about "No bio provided." %}
@@ -448,6 +448,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ block.super }}
 <script>
   var userPubkey = "{{ user_pubkey|default:''|escapejs }}";
   window.userPubkey = userPubkey;
@@ -542,7 +543,6 @@
     var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
     var picture = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
     var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
-    var nip05 = (document.getElementById("profileNip05") ? document.getElementById("profileNip05").value : "").trim();
     var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
 
     var contentObj = {
@@ -551,8 +551,8 @@
       about: about,
       picture: picture,
       banner: banner,
-      nip05: nip05,
       lud16: lud16,
+      // NIP-05 is automatically derived from handle, so we don't send it from client
     };
     var csrfToken = document.querySelector("[name=csrfmiddlewaretoken]") ? document.querySelector("[name=csrfmiddlewaretoken]").value : "";
     fetch("/api/profile/save/", {
@@ -624,7 +624,6 @@
     var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
     var picture = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
     var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
-    var nip05 = (document.getElementById("profileNip05") ? document.getElementById("profileNip05").value : "").trim();
     var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
 
     var contentObj = {
@@ -634,8 +633,8 @@
       picture: picture,
     };
     if (banner) contentObj.banner = banner;
-    if (nip05) contentObj.nip05 = nip05;
     if (lud16) contentObj.lud16 = lud16;
+    // NIP-05 is automatically derived from handle, so we don't send it from client
 
     if (!userPubkey || userPubkey.length !== 64) {
       fallbackServerSave();
@@ -689,13 +688,10 @@
     var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
     var pic = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
     var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
-    var nip05 = (document.getElementById("profileNip05") ? document.getElementById("profileNip05").value : "").trim();
     var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
 
     var nameEl = document.getElementById("previewDisplayName");
     var aboutEl = document.getElementById("previewBio");
-    var nip05Badge = document.getElementById("previewNip05Badge");
-    var nip05Text = document.getElementById("previewNip05Text");
     var lud16Badge = document.getElementById("previewLud16Badge");
     var bannerEl = document.getElementById("previewBanner");
     var avatarImg = document.getElementById("previewAvatar");
@@ -723,12 +719,7 @@
       bannerEl.style.backgroundImage = banner ? "url('" + escapeAttr(banner) + "')" : "";
     }
 
-    if (nip05) {
-      if (nip05Text) nip05Text.textContent = nip05;
-      if (nip05Badge) nip05Badge.classList.remove("hidden");
-    } else if (nip05Badge) {
-      nip05Badge.classList.add("hidden");
-    }
+
 
     if (lud16) {
       if (lud16Badge) lud16Badge.classList.remove("hidden");

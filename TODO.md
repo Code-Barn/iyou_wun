@@ -376,6 +376,34 @@
 - [x] **36.13 Phase 36 Tests (`apps/core/tests/test_views.py`):**
   - Added `Phase36RelaySyncTest`, `Phase36NIP05EndpointTest`, `Phase36ProfileNotesAPITest` with comprehensive test coverage.
 
+### Phase 37: Automated Handle-to-NIP-05 Derivation, Global Script Isolation & Stacking Context Repair
+- [x] **37.1 Automated Handle-to-NIP-05 Derivation (`apps/core/models.py`):**
+  - Implemented `UserLinkDeck.save()` method to automatically derive NIP-05 address from handle and discriminator: `handle@iyou.me` or `handle_discriminator@iyou.me`.
+  - Normalizes handles to lowercase and strips `@` symbols for consistency.
+- [x] **37.2 Canonical NIP-05 in Profile Save (`apps/core/views.py`, `templates/dashboard.html`):**
+  - Updated `api_save_profile()` to use automatically derived NIP-05 from UserLinkDeck, ignoring client-provided NIP-05 values.
+  - Removed manual NIP-05 text input from dashboard in favor of automated badge display.
+- [x] **37.3 Discriminator Lookup Support (`apps/core/views.py`):**
+  - Enhanced `nip05_well_known()` to handle discriminator format lookups (`name.replace('_', '[') + ']'`), enabling resolution of handles like `alice_2` to decks with discriminator=2.
+- [x] **37.4 Automated NIP-05 Badge UI (`templates/dashboard.html`):**
+  - Replaced manual NIP-05 input with automated badge showing `🏷️ <deck.nip05>` with "ACTIVE" status indicator.
+  - Shows "Claim handle to activate @iyou.me" when no NIP-05 is available.
+- [x] **37.5 Global Script Hoisting (`templates/base.html`):**
+  - Moved `toast_manager.js`, `bridge_client.js`, `relay_pool.js`, `theme.js` completely outside of `{% block extra_js %}` with explicit comments.
+  - Added `{% block.super %}` to child template extra_js blocks in `dashboard.html`, `chat.html`, `profile.html`, `feed.html`.
+- [x] **37.6 Stacking Context Repair (`templates/includes/_standard_header.html`, `templates/_nav.html`):**
+  - Added `relative z-30` to Layer 1 header element for explicit stacking context.
+  - Retained `z-50` on `#persona-switcher-dropdown` for dropdown isolation.
+  - Added `relative z-10` to Layer 2 toolbar container (`<nav>` in `_nav.html`) to ensure persona menu opens cleanly over search toolbar.
+- [x] **37.7 Bridge Protocol Normalization (`static/js/bridge_client.js`):**
+  - Confirmed `getBridgeUrl()` already respects protocol: `wss://home.iyou.me:9001/` for HTTPS, `ws://127.0.0.1:9001/` for HTTP.
+  - Added `credentials: 'same-origin'` to persona switch POST request.
+  - Wrapped persona switch fetch call in `try...catch` with clean warning logging.
+- [x] **37.8 Phase 37 Tests (`apps/core/tests/test_deck.py`, `test_views.py`):**
+  - `Phase37NIP05DerivationTest`: `test_user_link_deck_automatically_derives_nip05_on_save`, `test_user_link_deck_derives_discriminator_nip05`, `test_user_link_deck_updates_nip05_on_handle_change`, `test_user_link_deck_handles_mixed_case_handle`, `test_user_link_deck_strips_at_symbol`.
+  - `Phase36NIP05EndpointTest`: Added `test_nip05_well_known_resolves_discriminator_format`.
+  - `Phase37GlobalScriptTest`: `test_base_html_renders_global_bridge_scripts_on_all_views`.
+
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

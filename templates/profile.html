@@ -257,6 +257,7 @@
 {% endblock %}
 
 {% block extra_js %}
+{{ block.super }}
 <script src="{% static 'js/feed_interactions.js' %}"></script>
 <script>
   window.userPubkey = window.userPubkey || "{{ user_pubkey_hex }}";
@@ -316,10 +317,10 @@
             if (window.appendNoteToFeed && typeof window.appendNoteToFeed === "function") {
               window.appendNoteToFeed(note, postsContainer, {});
             } else {
-              // Fallback: create a basic card for the note
               var noteDiv = document.createElement("div");
               noteDiv.className = "bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800";
-              noteDiv.innerHTML = '<div class="flex items-center gap-3"><img src="' + (note.author_avatar || "{% static 'img/mesh_avatar_default.svg' %}") + '" alt="" class="w-9 h-9 rounded-full object-cover"> <div><div class="font-medium text-sm text-slate-900 dark:text-slate-100">' + (note.author_name || "Anonymous") + '</div><div class="text-xs text-slate-400 font-mono">@' + (note.pubkey_hex || "").substring(0, 12) + '...</div></div></div><div class="mt-3 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-line">' + (note.display_content || note.content || "") + '</div>';
+              var avatarHtml = note.author_avatar ? '<img src="' + escapeAttr(note.author_avatar) + '" alt="" class="w-9 h-9 rounded-full object-cover">' : '<div class="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center font-mono text-xs">👤</div>';
+              noteDiv.innerHTML = '<div class="flex items-center gap-3">' + avatarHtml + ' <div><div class="font-medium text-sm text-slate-900 dark:text-slate-100">' + (note.author_name || "Anonymous") + '</div><div class="text-xs text-slate-400 font-mono">@' + (note.pubkey_hex || "").substring(0, 12) + '...</div></div></div><div class="mt-3 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-line">' + (note.display_content || note.content || "") + '</div>';
               postsContainer.appendChild(noteDiv);
             }
           });

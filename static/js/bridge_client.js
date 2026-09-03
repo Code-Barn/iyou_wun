@@ -538,33 +538,37 @@
             ? getCsrfToken()
             : ((typeof getCookie === "function") ? getCookie("csrftoken") : "");
 
-        fetch("/api/auth/persona-switch/", {
-            method: "POST",
-            credentials: "same-origin",
-            headers: {
-                "Content-Type": "application/json",
-                "X-CSRFToken": csrfToken
-            },
-            body: JSON.stringify(payload)
-        }).then(function (res) {
-            return res.json().catch(function () { return null; });
-        }).then(function (data) {
-            if (data && data.success) {
-                window.CURRENT_SESSION_DID = did;
-                window.dispatchEvent(new CustomEvent("persona:session-reanchored", { detail: data }));
-                var label = data.handle ? "@" + String(data.handle).replace(/^@/, "") : (name || did);
-                if (typeof showToast === "function") {
-                    showToast("Session re-anchored to " + label);
+        try {
+            fetch("/api/auth/persona-switch/", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrfToken
+                },
+                body: JSON.stringify(payload)
+            }).then(function (res) {
+                return res.json().catch(function () { return null; });
+            }).then(function (data) {
+                if (data && data.success) {
+                    window.CURRENT_SESSION_DID = did;
+                    window.dispatchEvent(new CustomEvent("persona:session-reanchored", { detail: data }));
+                    var label = data.handle ? "@" + String(data.handle).replace(/^@/, "") : (name || did);
+                    if (typeof showToast === "function") {
+                        showToast("Session re-anchored to " + label);
+                    }
+                    if (window.location.pathname !== "/dashboard") {
+                        window.location.reload();
+                    }
+                } else {
+                    console.warn("Persona re-anchor rejected:", data && data.error ? data.error : "unknown response");
                 }
-                if (window.location.pathname !== "/dashboard") {
-                    window.location.reload();
-                }
-            } else {
-                console.warn("Persona re-anchor rejected:", data && data.error ? data.error : "unknown response");
-            }
-        }).catch(function (err) {
-            console.error("Persona re-anchor failed:", err);
-        });
+            }).catch(function (err) {
+                console.error("Persona re-anchor failed:", err);
+            });
+        } catch (e) {
+            console.warn("Persona switch failed with exception:", e.message || e);
+        }
     };
 
     /**

@@ -805,3 +805,63 @@ class VerifiedBadgeRenderingTests(TestCase):
         self.assertContains(response, "Verify Profile / Claim Canonical Handle")
         self.assertContains(response, 'id="verifyModal"')
         self.assertContains(response, "link_deck_manager.js")
+
+
+class Phase37NIP05DerivationTest(TestCase):
+    """Phase 37: Automated Handle-to-NIP-05 Derivation tests."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username="did:test:user123")
+
+    def test_user_link_deck_automatically_derives_nip05_on_save(self):
+        """Test that claiming handle='alice' sets nip05='alice@iyou.me'."""
+        deck = UserLinkDeck.objects.create(
+            user=self.user,
+            handle="alice",
+            discriminator=0
+        )
+        self.assertEqual(deck.nip05, "alice@iyou.me")
+
+    def test_user_link_deck_derives_discriminator_nip05(self):
+        """Test that discriminator=2 yields 'alice_2@iyou.me'."""
+        deck = UserLinkDeck.objects.create(
+            user=self.user,
+            handle="alice",
+            discriminator=2
+        )
+        self.assertEqual(deck.nip05, "alice_2@iyou.me")
+
+    def test_user_link_deck_updates_nip05_on_handle_change(self):
+        """Test that updating handle updates NIP-05 automatically."""
+        deck = UserLinkDeck.objects.create(
+            user=self.user,
+            handle="alice",
+            discriminator=0
+        )
+        self.assertEqual(deck.nip05, "alice@iyou.me")
+        
+        # Change handle
+        deck.handle = "bob"
+        deck.save()
+        
+        # Refresh from DB
+        deck.refresh_from_db()
+        self.assertEqual(deck.nip05, "bob@iyou.me")
+
+    def test_user_link_deck_handles_mixed_case_handle(self):
+        """Test that mixed-case handles are normalized to lowercase."""
+        deck = UserLinkDeck.objects.create(
+            user=self.user,
+            handle="Alice",
+            discriminator=0
+        )
+        self.assertEqual(deck.nip05, "alice@iyou.me")
+
+    def test_user_link_deck_strips_at_symbol(self):
+        """Test that @ symbol is stripped from handle."""
+        deck = UserLinkDeck.objects.create(
+            user=self.user,
+            handle="@alice",
+            discriminator=0
+        )
+        self.assertEqual(deck.nip05, "alice@iyou.me")
