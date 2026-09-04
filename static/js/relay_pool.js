@@ -28,12 +28,23 @@
     }
 
     function buildBootstrapRelays() {
-        var relays = [
-            { url: "wss://relay.iyou.me", read: true, write: true, primary: true },
-            { url: "wss://nos.lol", read: true, write: true, primary: false },
-            { url: "wss://relay.damus.io", read: true, write: true, primary: false },
-            { url: "wss://relay.primal.net", read: true, write: true, primary: false }
+        const baseRelays = [
+            "wss://relay.iyou.me",
+            "wss://relay.primal.net",
+            "wss://relay.nostr.band",
+            "wss://purplerelay.com",
+            "wss://nostr.mom",
+            "wss://nos.lol",
+            "wss://relay.damus.io"
         ];
+        var relays = baseRelays.map(function (url, idx) {
+            return {
+                url: url,
+                read: true,
+                write: true,
+                primary: idx === 0
+            };
+        });
         // The sovereign local loopback relay is ALWAYS retained in the pool so the
         // diagnostics drawer never loses the local enclave entry. On an HTTPS origin
         // browsers block plain ws:// sockets (mixed content), so it simply renders

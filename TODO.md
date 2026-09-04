@@ -493,8 +493,20 @@
   - Hardened `claim_handle` defensively with atomic transactions, checking existing records on `(IntegrityError, OperationalError)` contention.
 - [x] **44.3 SQLite Connection Resilience (`config/settings.py`):**
   - Configured 20-second busy timeout and WAL journal mode (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`) in database `OPTIONS`.
-- [x] **44.4 Unit Tests (`apps/core/tests/test_views.py`):**
-  - Added `test_persona_switch_idempotent_when_already_active` and `test_persona_switch_handles_concurrent_linkdeck_creation`.
+### Phase 45: Session Hardening, High-Resilience Relay Pipeline & Feed Empty-State Unification
+- [x] **45.1 Session Hardening (`config/settings.py`, `apps/core/views.py`):**
+  - Set `SESSION_SAVE_EVERY_REQUEST = False` in `config/settings.py` so sessions only write to DB upon mutation.
+  - Enforced read-only session behavior at entry of `api_feed` and `api_profile_notes` (`request.session.modified = False; request.session.save = lambda *args, **kwargs: None`), eliminating `SessionInterrupted` on concurrent persona switches.
+- [x] **45.2 High-Resilience Relay Pipeline (`apps/core/views.py`, `static/js/relay_pool.js`):**
+  - Updated `DEFAULT_RELAYS` and `buildBootstrapRelays()` to prioritize responsive, indexed relays (`relay.primal.net`, `relay.nostr.band`, `purplerelay.com`, `nostr.mom`) ahead of unstable endpoints (`nos.lol`, `relay.damus.io`).
+  - Reduced `relay_req` default timeout from 10s to 2.5s and enforced a remaining deadline check (`remaining <= 0.2: break`).
+  - Added strict wall-clock deadline (`feed_deadline = time.time() + 4.0`) to `api_feed` with `timeout=1.5` for secondary queries.
+- [x] **45.3 Feed Empty-State Unification (`static/js/circle_feed_filter.js`, `static/js/feed_interactions.js`):**
+  - Excluded `#feed-empty-state` and `#feed-pagination-sentinel` from `getNoteCards()` in `circle_feed_filter.js`.
+  - Coordinated mutual exclusion between `#feed-empty-state` and `#circle-empty-state` in `ensureEmptyStateElement`, `applyFeedFilters`, `fetchInitialFeedStream`, and `loadMoreNotes`.
+- [x] **45.4 Unit Tests (`apps/core/tests/test_views.py`, `apps/core/tests/test_feed.py`):**
+  - Added `test_session_save_every_request_is_false` and `test_api_feed_does_not_fail_on_cycled_session` in `test_views.py`.
+  - Added `test_relay_req_respects_deadline_with_dead_relays` in `test_feed.py`.
 
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 

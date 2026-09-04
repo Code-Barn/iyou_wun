@@ -1140,12 +1140,21 @@
                 }
 
                 var emptyState = document.getElementById("feed-empty-state");
-                if (notes.length === 0 && !emptyState) {
-                    var emptyDiv = document.createElement("div");
-                    emptyDiv.id = "feed-empty-state";
-                    emptyDiv.className = "text-center py-12 text-slate-400 font-mono text-xs";
-                    emptyDiv.textContent = "No notes found in this circle.";
-                    container.appendChild(emptyDiv);
+                var circleEmpty = document.getElementById("circle-empty-state");
+                if (notes.length > 0) {
+                    if (emptyState) emptyState.classList.add("hidden");
+                    if (circleEmpty) circleEmpty.classList.add("hidden");
+                } else {
+                    if (circleEmpty) circleEmpty.classList.add("hidden");
+                    if (!emptyState) {
+                        var emptyDiv = document.createElement("div");
+                        emptyDiv.id = "feed-empty-state";
+                        emptyDiv.className = "text-center py-12 text-slate-400 font-mono text-xs";
+                        emptyDiv.textContent = "No notes found in this circle.";
+                        container.appendChild(emptyDiv);
+                    } else {
+                        emptyState.classList.remove("hidden");
+                    }
                 }
 
                 container.removeAttribute("data-hydrate");
@@ -1285,6 +1294,8 @@
                     if (visibleCards.length === 0) {
                         var emptyStateEl = document.getElementById("feed-empty-state");
                         if (emptyStateEl) emptyStateEl.classList.remove("hidden");
+                        var circleEmpty = document.getElementById("circle-empty-state");
+                        if (circleEmpty) circleEmpty.classList.add("hidden");
                     }
                 }
             })

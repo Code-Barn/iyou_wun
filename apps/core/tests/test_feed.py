@@ -1470,3 +1470,28 @@ class ApiFeedIyouCircleTests(TestCase):
             mock_relay.assert_not_called()
 
 
+class Phase45RelayDeadlineTests(TestCase):
+    def test_relay_req_respects_deadline_with_dead_relays(self):
+        """Pass mock relays that time out and assert relay_req returns within 4.0 seconds without hanging."""
+        import time
+        from apps.core.views import relay_req
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            time.sleep(min(timeout, 0.3))
+            return {}
+
+        deadline = time.time() + 0.8
+        start = time.time()
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            events = relay_req(
+                {"kinds": [1]},
+                relay_urls=["wss://r1", "wss://r2", "wss://r3", "wss://r4", "wss://r5", "wss://r6", "wss://r7"],
+                timeout=2.5,
+                deadline=deadline,
+            )
+        elapsed = time.time() - start
+        self.assertEqual(events, {})
+        self.assertLess(elapsed, 4.0)
+
+
+

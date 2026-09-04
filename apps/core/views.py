@@ -797,6 +797,10 @@ def api_search(request):
 
 
 def api_feed(request):
+    if hasattr(request, "session"):
+        request.session.modified = False
+        request.session.save = lambda *args, **kwargs: None
+
     mode = request.GET.get("mode", "")
     circle_param = request.GET.get("circle")
     circle = (circle_param or mode or "iyou").lower()
@@ -847,6 +851,8 @@ def api_feed(request):
         clean_tag = tag.lstrip("#")
         filter_obj["#t"] = [clean_tag]
 
+    feed_deadline = time.time() + 4.0
+
     if circle == "iyou":
         iyou_pks = get_iyou_pubkeys()
         if not iyou_pks:
@@ -862,7 +868,7 @@ def api_feed(request):
             })
         filter_obj["authors"] = iyou_pks
     elif circle in ("following", "network") and user_pubkey:
-        contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays)
+        contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays, timeout=1.5, deadline=feed_deadline)
         if contacts:
             filter_obj["authors"] = contacts
         else:
@@ -870,7 +876,12 @@ def api_feed(request):
     elif circle in ("following", "network") and not user_pubkey:
         filter_obj["authors"] = CURATED_AUTHORS
 
-    raw_events = relay_req(filter_obj, relay_urls=relays)
+    raw_events = relay_req(
+        filter_obj,
+        relay_urls=relays,
+        timeout=2.5,
+        deadline=feed_deadline,
+    )
 
     # Filter out non-renderable events (empty notes, P2P discovery beacons)
     from .nip10 import is_renderable_note
@@ -907,6 +918,8 @@ def api_feed(request):
         profile_events = relay_req(
             {"kinds": [0], "authors": list(pubkeys)[:100]},
             relay_urls=relays,
+            timeout=1.5,
+            deadline=feed_deadline,
         )
         for e in profile_events.values():
             pk = e.get("pubkey", "")
@@ -916,8 +929,15 @@ def api_feed(request):
                 profiles[pk] = {}
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit)
-    feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays)
-    feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays)
+    try:
+        feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline)
+    except TypeError:
+        feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays)
+
+    try:
+        feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline)
+    except TypeError:
+        feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays)
 
 
     def _serialize(note):
@@ -1030,6 +1050,10 @@ def api_profile_notes(request, identifier):
     Asynchronously fetches authored notes (Kind 1) from relays with a 2.0s deadline.
     Returns JSON: {"notes": [...], "has_more": bool}
     """
+    if hasattr(request, "session"):
+        request.session.modified = False
+        request.session.save = lambda *args, **kwargs: None
+
     hex_pubkey, _ = resolve_universal_identifier(identifier)
     if not hex_pubkey:
         return JsonResponse({"notes": [], "has_more": False, "error": "Invalid identifier"}, status=400)
@@ -1794,10 +1818,12 @@ def get_tag_value(tags, tag_name, index=1, default=""):
 
 DEFAULT_RELAYS = [
     "wss://relay.iyou.me",
-    "wss://nos.lol",
-    "wss://relay.damus.io",
     "wss://relay.primal.net",
     "wss://relay.nostr.band",
+    "wss://purplerelay.com",
+    "wss://nostr.mom",
+    "wss://nos.lol",
+    "wss://relay.damus.io",
     "ws://127.0.0.1:9003",
 ]
 
@@ -1870,7 +1896,7 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
     return events
 
 
-def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None, deadline=None):
+def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=None):
     """Try multiple relays with autonomous failover, returning events from first responsive one.
 
     `deadline` (optional wall-clock epoch seconds) hard-caps total time spent
@@ -1885,9 +1911,9 @@ def relay_req(filter_obj, sub_id=None, timeout=10, relay_urls=None, deadline=Non
         relay_urls = DEFAULT_RELAYS
 
     for relay_url in relay_urls:
-        if deadline is not None:
+        if deadline:
             remaining = deadline - time.time()
-            if remaining <= 0:
+            if remaining <= 0.2:
                 break
             effective_timeout = min(timeout, remaining)
         else:

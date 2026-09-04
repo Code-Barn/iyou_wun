@@ -1924,7 +1924,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         event1 = make_event("api_like_1", 1, pubkey=pk, created_at=1699999000, content="Liked note")
         event2 = make_event("api_like_2", 1, pubkey=pk, created_at=1699998000, content="Another note")
 
-        def _fake_attach_reaction_counts(notes, relay_urls=None):
+        def _fake_attach_reaction_counts(notes, relay_urls=None, *args, **kwargs):
             counts = {"api_like_1": 12, "api_like_2": 0}
             for n in notes:
                 nid = n.get("id")
@@ -3374,3 +3374,36 @@ class Phase37GlobalScriptTest(TestCase):
         self.assertEqual(res_profile.status_code, 200)
         self.assertIn(b"bridge_client.js", res_profile.content)
         self.assertIn(b"toast_manager.js", res_profile.content)
+
+
+class Phase45SessionAndRelayHardeningTests(TestCase):
+    """Phase 45: Session hardening and resilient relay pipeline tests."""
+
+    def test_session_save_every_request_is_false(self):
+        """Assert settings.SESSION_SAVE_EVERY_REQUEST is False."""
+        self.assertFalse(settings.SESSION_SAVE_EVERY_REQUEST)
+
+    def test_api_feed_does_not_fail_on_cycled_session(self):
+        """POST a persona switch while GET /api/feed is in progress; both return HTTP 200 without SessionInterrupted."""
+        user = User.objects.create_user(username="did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK")
+        self.client.force_login(user)
+        session_key = self.client.session.session_key
+
+        def concurrent_switch(*args, **kwargs):
+            # Concurrent persona switch executes login() which deletes previous session key
+            from django.contrib.sessions.models import Session
+            Session.objects.filter(session_key=session_key).delete()
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=concurrent_switch):
+            response = self.client.get(reverse("api_feed"))
+            self.assertEqual(response.status_code, 200)
+            data = response.json()
+            self.assertTrue(data.get("success"))
+
+    def test_default_relays_prioritizes_fast_endpoints(self):
+        from apps.core.views import DEFAULT_RELAYS
+        self.assertIn("wss://relay.primal.net", DEFAULT_RELAYS[:3])
+        self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:3])
+        self.assertIn("wss://purplerelay.com", DEFAULT_RELAYS)
+

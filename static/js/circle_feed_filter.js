@@ -65,7 +65,11 @@
 
         // Select top-level note elements or items with note data
         const directChildren = Array.from(container.children).filter(
-            el => el.id !== "circle-empty-state" && el.id !== "loadMoreSpinner" && el.id !== "loadMoreEnd"
+            el => el.id !== "circle-empty-state" &&
+                  el.id !== "feed-empty-state" &&
+                  el.id !== "feed-pagination-sentinel" &&
+                  el.id !== "loadMoreSpinner" &&
+                  el.id !== "loadMoreEnd"
         );
 
         if (directChildren.length > 0) {
@@ -250,6 +254,8 @@
             el.className = "text-center py-12 px-6 text-slate-500 dark:text-slate-400 font-mono text-xs border border-dashed border-slate-300 dark:border-slate-800 rounded-lg my-6";
             container.appendChild(el);
         }
+        const feedEmpty = document.getElementById("feed-empty-state");
+        if (feedEmpty) feedEmpty.classList.add("hidden");
         return el;
     }
 
@@ -465,6 +471,8 @@
         if (visibleCount === 0 && cards.length > 0) {
             emptyState.style.display = "";
             emptyState.classList.remove("hidden");
+            const feedEmpty = document.getElementById("feed-empty-state");
+            if (feedEmpty) feedEmpty.classList.add("hidden");
             if (activeSearchQuery) {
                 emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes match the active filter and search query.</p>' +
                     '<p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>';
