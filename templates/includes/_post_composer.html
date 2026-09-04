@@ -3,8 +3,8 @@
 <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800 shadow-sm">
     <div class="flex items-center justify-between gap-2 mb-3">
       <h2 class="text-sm font-semibold text-slate-800 dark:text-slate-200 font-mono">{% trans "Post to Nostr" %}</h2>
-      <span id="composer-active-persona-badge" class="text-[11px] font-mono px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60">
-        {% if user_handle %}Posting as: @{{ user_handle }} (L1){% elif user_display_name %}Posting as: {{ user_display_name }} (L1){% else %}Posting as: Primary (L1){% endif %}
+      <span id="composer-active-persona-badge" class="text-[11px] font-mono px-2 py-0.5 rounded {% if active_persona_level == 1 or not active_persona_level %}bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60{% else %}bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60{% endif %}">
+        {% if user_handle %}Posting as: @{{ user_handle }} (L{{ active_persona_level|default:1 }}){% elif user_display_name %}Posting as: {{ user_display_name }} (L{{ active_persona_level|default:1 }}){% else %}Posting as: Primary (L{{ active_persona_level|default:1 }}){% endif %}
       </span>
     </div>
     <textarea id="postContent" class="w-full border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-lg p-3 text-xs text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition resize-none overflow-x-hidden overflow-y-auto" rows="3" wrap="soft" placeholder="{% trans "What's on your mind?" %}"></textarea>

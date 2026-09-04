@@ -237,6 +237,8 @@
         this._aliasTimer = null;
         this._personaQueryTimer = null;        // enclave persona list query timeout
         this._personaQueryActive = false;      // waiting on an enclave persona list response
+        this._isSwitchingPersona = false;      // in-flight mutex lock for /api/auth/persona-switch/
+        this._lastSwitchedProfileId = null;    // frame deduplication cache
     }
 
     TauriBridgeClient.prototype._normalizeAliasKey = function (raw) {
@@ -394,6 +396,7 @@
 
     TauriBridgeClient.prototype.connect = function (onMessage) {
         this._onMessage = onMessage || null;
+        this.hydrateCachedPersona();
         if (this.connectionLock === "CONNECTING" || this.connectionLock === "OPEN") return;
         if (this.socket && this.socket.readyState <= 1) return;
 
@@ -464,8 +467,30 @@
         }
     };
 
+    TauriBridgeClient.prototype.hydrateCachedPersona = function () {
+        try {
+            var raw = localStorage.getItem('wun_active_persona');
+            if (!raw) return;
+            var cached = JSON.parse(raw);
+            if (!cached || !cached.did) return;
+            var sessionDid = (typeof window.CURRENT_SESSION_DID === "string") ? window.CURRENT_SESSION_DID : "";
+            if (sessionDid && cached.did !== sessionDid) return;
+            this.updateActivePersonaUI(cached);
+        } catch (e) { /* ignore parse error */ }
+    };
+
     TauriBridgeClient.prototype.updateActivePersonaUI = function (profile) {
         if (!profile) return;
+        if (profile && profile.did) {
+            try {
+                localStorage.setItem('wun_active_persona', JSON.stringify({
+                    name: profile.name || profile.profile_name || profile.label || '',
+                    handle: profile.handle || '',
+                    level: profile.level !== undefined ? profile.level : profile.derivation_index,
+                    did: profile.did
+                }));
+            } catch (e) { /* ignore storage quotas */ }
+        }
         var labelEl = document.getElementById("active-persona-display-name") || document.getElementById("active-persona-label");
         var altLabelEl = document.getElementById("active-persona-label");
         var levelEl = document.getElementById("active-persona-level");
@@ -499,7 +524,7 @@
         var levelStr = (level === 1) ? "L1" : (level ? "L" + level : "L2");
         if (levelEl) {
             levelEl.textContent = levelStr;
-            levelEl.className = "text-[10px] px-1 py-0.5 rounded font-bold " +
+            levelEl.className = "text-[10px] px-1 py-0.5 rounded font-bold transition-colors duration-150 " +
                 (levelStr === "L1" 
                     ? "bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300"
                     : "bg-amber-100 dark:bg-amber-950/80 text-amber-700 dark:text-amber-300");
@@ -525,6 +550,17 @@
         var sessionDid = (typeof window.CURRENT_SESSION_DID === "string") ? window.CURRENT_SESSION_DID : "";
         if (!did || !sessionDid || did === sessionDid) return;
 
+        if (this._isSwitchingPersona) {
+            console.warn("[Bridge] Persona switch already in flight, ignoring duplicate event");
+            return;
+        }
+        var profileId = profile.profile_id || profile.id || did;
+        if (this._lastSwitchedProfileId && profileId === this._lastSwitchedProfileId) {
+            return;
+        }
+        this._isSwitchingPersona = true;
+        this._lastSwitchedProfileId = profileId;
+
         var name = profile.name || profile.profile_name || profile.label || "";
         var level = profile.level !== undefined ? profile.level : (profile.derivation_index || 1);
         if (typeof level === "string") level = parseInt(level, 10) || 1;
@@ -538,6 +574,7 @@
             ? getCsrfToken()
             : ((typeof getCookie === "function") ? getCookie("csrftoken") : "");
 
+        var self = this;
         try {
             fetch("/api/auth/persona-switch/", {
                 method: "POST",
@@ -565,8 +602,11 @@
                 }
             }).catch(function (err) {
                 console.error("Persona re-anchor failed:", err);
+            }).finally(function () {
+                self._isSwitchingPersona = false;
             });
         } catch (e) {
+            this._isSwitchingPersona = false;
             console.warn("Persona switch failed with exception:", e.message || e);
         }
     };
@@ -1086,11 +1126,6 @@
             type: "set_active_profile",
             profile_id: profileId
         }));
-        socket.send(JSON.stringify({
-            type: "SET_ACTIVE_PERSONA",
-            profile_id: profileId,
-            persona_id: profileId
-        }));
         var dropdown = document.getElementById('persona-switcher-dropdown');
         if (dropdown) dropdown.classList.add('hidden');
         var btn = document.getElementById('persona-switcher-btn');
@@ -1130,6 +1165,12 @@
 
     window.bridgeClient = new TauriBridgeClient();
     window.tauriBridge = window.bridgeClient;
+    window.bridgeClient.hydrateCachedPersona();
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () {
+            if (window.bridgeClient) window.bridgeClient.hydrateCachedPersona();
+        });
+    }
     window.escapeHtml = escapeHtml;
     window.escapeAttr = escapeAttr;
     window.getCookie = getCookie;

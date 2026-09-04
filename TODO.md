@@ -465,6 +465,37 @@
   - Added `test_api_search_empty_query_returns_clean_schema` verifying empty queries return clean count/results schema.
   - Added `test_api_search_postgresql_branch_uses_search_rank_and_vector` testing PostgreSQL FTS branch invocation.
 
+### Phase 43: Eliminate Persona Badge Flash & Harmonize Standalone Template Script Bundles
+- [x] **43.1 Server Context Hydration (`apps/core/context_processors.py`):**
+  - Updated `user_identity(request)` to export `active_persona_level` and `active_persona_name` to template context.
+- [x] **43.2 Dynamic Template Markup (`templates/includes/_standard_header.html`, `_post_composer.html`):**
+  - Updated `#active-persona-level` in `_standard_header.html` with dynamic level evaluation (`L{{ active_persona_level|default:1 }}`) and reactive Tailwind color classes (violet for L1, amber for L2+).
+  - Updated `composer-active-persona-badge` in `_post_composer.html` to dynamically format level across all fallback branches.
+- [x] **43.3 Instant LocalStorage Hydration Cache (`static/js/bridge_client.js`):**
+  - Cached active persona snapshots in `localStorage` under `wun_active_persona` in `updateActivePersonaUI`.
+  - Implemented synchronous pre-hydration in `hydrateCachedPersona()` on initialization and DOMContentLoaded.
+- [x] **43.4 Standalone Template Script Bundles (`templates/gallery.html`, `link_deck.html`):**
+  - Added `relay_pool.js`, `notification_manager.js`, and `floating_chat.js` to `gallery.html`.
+  - Added `bridge_client.js`, `toast_manager.js`, and `notification_manager.js` to `link_deck.html`.
+- [x] **43.5 Filter Reflow Mitigation (`static/js/circle_feed_filter.js`):**
+  - Cached card search text on `card.dataset.searchCache` to prevent repetitive DOM queries.
+  - Batched DOM reads and writes in `applyFeedFilters()` into grouped arrays to eliminate layout thrashing.
+- [x] **43.6 Unit Tests (`apps/core/tests/test_views.py`):**
+  - Added tests verifying `active_persona_level` context exposure and dynamic amber/violet badge rendering.
+
+### Phase 44: Concurrency Lock for Persona Switching & SQLite Connection Resilience
+- [x] **44.1 In-Flight Mutex & Frame Deduplication (`static/js/bridge_client.js`):**
+  - Added `_isSwitchingPersona` and `_lastSwitchedProfileId` to `TauriBridgeClient`.
+  - Filtered duplicate switch frames in `handlePersonaChanged`, ensuring only one `/api/auth/persona-switch/` call is in flight at a time with lock release in `.finally()`.
+  - Sent only canonical `set_active_profile` in `switchPersona`, removing redundant `SET_ACTIVE_PERSONA` frame.
+- [x] **44.2 Idempotent Session Re-Anchoring & Defensive LinkDeck Claims (`apps/core/views.py`):**
+  - Updated `api_persona_switch` to return `reanchored: False` when the active user already matches the target DID without cycling session credentials.
+  - Hardened `claim_handle` defensively with atomic transactions, checking existing records on `(IntegrityError, OperationalError)` contention.
+- [x] **44.3 SQLite Connection Resilience (`config/settings.py`):**
+  - Configured 20-second busy timeout and WAL journal mode (`PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;`) in database `OPTIONS`.
+- [x] **44.4 Unit Tests (`apps/core/tests/test_views.py`):**
+  - Added `test_persona_switch_idempotent_when_already_active` and `test_persona_switch_handles_concurrent_linkdeck_creation`.
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

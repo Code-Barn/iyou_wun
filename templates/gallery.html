@@ -393,11 +393,18 @@
     </script>
     <script src="{% static 'js/toast_manager.js' %}"></script>
     <script src="{% static 'js/bridge_client.js' %}"></script>
+    <script src="{% static 'js/relay_pool.js' %}"></script>
     <script src="{% static 'js/contact_manager.js' %}"></script>
+    <script src="{% static 'js/notification_manager.js' %}"></script>
+    <script src="{% static 'js/floating_chat.js' %}"></script>
     <script src="{% static 'js/trust_lens.js' %}"></script>
     <script src="{% static 'js/circle_feed_filter.js' %}"></script>
     <script src="{% static 'js/gallery_player.js' %}"
             data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
+{% if user.is_authenticated %}
+    {% include "includes/_notification_drawer.html" %}
+    {% include "includes/_floating_chat_dock.html" %}
+{% endif %}
 </body>
 </html>

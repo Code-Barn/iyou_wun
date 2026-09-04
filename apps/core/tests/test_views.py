@@ -983,6 +983,88 @@ class PersonaSessionSwitchTest(TestCase):
                 f'window.CURRENT_SESSION_DID = "did:iyou:0x{self.ANCHOR_PK}";',
             )
 
+    def test_feed_view_exposes_active_persona_level_and_renders_amber_l2(self):
+        user = User.objects.create_user(username=f"did:iyou:0x{self.ANCHOR_PK}")
+        client = Client()
+        client.force_login(user)
+        session = client.session
+        session["active_persona_level"] = 2
+        session["active_persona_name"] = "Burner Persona"
+        session.save()
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context.get("active_persona_level"), 2)
+        self.assertEqual(response.context.get("active_persona_name"), "Burner Persona")
+        content = response.content.decode()
+        self.assertIn('id="active-persona-level"', content)
+        self.assertIn("L2", content)
+        self.assertIn("bg-amber-100", content)
+        self.assertIn("text-amber-700", content)
+
+    def test_feed_view_defaults_to_violet_l1_when_level_is_one(self):
+        user = User.objects.create_user(username=f"did:iyou:0x{self.ANCHOR_PK}")
+        client = Client()
+        client.force_login(user)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context.get("active_persona_level"), 1)
+        content = response.content.decode()
+        self.assertIn('id="active-persona-level"', content)
+        self.assertIn("L1", content)
+        self.assertIn("bg-violet-100", content)
+        self.assertIn("text-violet-700", content)
+
+    def test_persona_switch_idempotent_when_already_active(self):
+        did = f"did:iyou:0x{self.ANCHOR_PK}"
+        self._login(did)
+        initial_session_key = self.client.session.session_key
+
+        resp = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": did, "persona_name": "Anchor Sovereign", "level": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertFalse(data["reanchored"])
+        self.assertEqual(data["active_did"], did)
+        self.assertEqual(data["persona_name"], "Anchor Sovereign")
+        # Session key is not cycled/invalidated
+        self.assertEqual(self.client.session.session_key, initial_session_key)
+
+    def test_persona_switch_handles_concurrent_linkdeck_creation(self):
+        self._login(f"did:iyou:0x{self.ANCHOR_PK}")
+        target_did = "did:key:z6MkconcurrentDeck999"
+
+        # Switch to brand new persona without a link deck
+        resp = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": target_did, "persona_name": "Concurrent Persona", "level": 2}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertTrue(data["reanchored"])
+        self.assertTrue(UserLinkDeck.objects.filter(user__username=target_did).exists())
+
+        # Switch again to verify idempotent recovery and existing record reuse
+        resp2 = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": target_did, "persona_name": "Concurrent Persona", "level": 2}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        data2 = resp2.json()
+        self.assertTrue(data2["success"])
+        self.assertFalse(data2["reanchored"])
+        self.assertEqual(UserLinkDeck.objects.filter(user__username=target_did).count(), 1)
+
 
 class GlobalBridgeClientContractTest(TestCase):
     """Phase 36: bridge_client hoisted to base.html + persona-switch CSRF hardening."""

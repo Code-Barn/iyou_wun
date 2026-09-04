@@ -130,9 +130,15 @@
             <a href="{% url 'feed' %}" class="hover:text-indigo-500">&larr; omni-social feed</a>
         </p>
     </main>
+    {% if user.is_authenticated %}
+      {% include "includes/_notification_drawer.html" %}
+    {% endif %}
     {% include "includes/_floating_chat_dock.html" %}
+    <script src="{% static 'js/toast_manager.js' %}"></script>
+    <script src="{% static 'js/bridge_client.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="{% static 'js/contact_manager.js' %}" defer></script>
+    <script src="{% static 'js/notification_manager.js' %}" defer></script>
     <script src="{% static 'js/floating_chat.js' %}" defer></script>
 </body>
 

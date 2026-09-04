@@ -34,7 +34,7 @@ from django.contrib.auth import get_user_model, login
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.db.models import Max, Q
 from django.http import HttpResponsePermanentRedirect, HttpResponseBadRequest, Http404, JsonResponse
 from django.shortcuts import redirect, render
@@ -250,6 +250,24 @@ def api_persona_switch(request):
     if not did or not did.startswith("did:"):
         return JsonResponse({"error": "Invalid or missing did"}, status=400)
 
+    target_did = did
+
+    if request.user.is_authenticated and request.user.username == target_did:
+        # Already authenticated as this persona; update session metadata without cycling session ID
+        request.session["active_persona_name"] = persona_name
+        request.session["active_persona_level"] = level
+        request.session.modified = True
+        deck = UserLinkDeck.objects.filter(user=request.user).first()
+        return JsonResponse({
+            "success": True,
+            "reanchored": False,
+            "active_did": target_did,
+            "did": target_did,
+            "persona_name": persona_name,
+            "level": level,
+            "handle": deck.handle if deck else "",
+        })
+
     target_user, created = UserModel.objects.get_or_create(username=did)
     if created:
         target_user.set_unusable_password()
@@ -265,7 +283,10 @@ def api_persona_switch(request):
         if len(base) < 3:
             base = "persona"
         digest = hashlib.sha1(did.encode("utf-8")).hexdigest()[:8]
-        deck = claim_handle(target_user, f"{base[:20]}_{digest}")
+        try:
+            deck = claim_handle(target_user, f"{base[:20]}_{digest}")
+        except Exception:
+            deck = UserLinkDeck.objects.filter(user=target_user).first()
 
     login(request, target_user, backend="django.contrib.auth.backends.ModelBackend")
     request.session["active_persona_name"] = persona_name
@@ -274,10 +295,12 @@ def api_persona_switch(request):
 
     return JsonResponse({
         "success": True,
+        "reanchored": True,
+        "active_did": target_did,
         "did": did,
         "persona_name": persona_name,
         "level": level,
-        "handle": deck.handle,
+        "handle": deck.handle if deck else "",
     })
 
 
@@ -2908,9 +2931,15 @@ def claim_handle(user, raw_handle):
                 if created:
                     seed_default_deck_items(deck)
                 return deck
-        except IntegrityError:
+        except (IntegrityError, OperationalError):
+            existing = UserLinkDeck.objects.filter(user=user).first()
+            if existing is not None:
+                return existing
             continue
 
+    existing = UserLinkDeck.objects.filter(user=user).first()
+    if existing is not None:
+        return existing
     raise HandleValidationError("Handle claim failed due to contention. Try again.")
 
 

@@ -64,6 +64,8 @@ def user_identity(request):
 
     context.update(
         user_display_label=display_label,
+        active_persona_level=level,
+        active_persona_name=persona_name,
         current_session_did=request.user.username,
         user_pubkey_hex=pubkey,
         user_npub=npub,

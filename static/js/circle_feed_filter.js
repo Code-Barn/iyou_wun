@@ -103,7 +103,16 @@
         const mimeType = (root.getAttribute("data-mime") || "").toLowerCase();
         const altText = (root.getAttribute("data-alt") || "").toLowerCase();
         const author = (root.getAttribute("data-author") || "").toLowerCase();
-        const textContent = (card.textContent || "").toLowerCase() + " " + altText + " " + mimeType + " " + author;
+
+        let textContent = card.dataset ? card.dataset.searchCache : undefined;
+        if (textContent === undefined) {
+            const bodyEl = card.querySelector(".note-body-content");
+            const rawBody = (bodyEl ? bodyEl.textContent : card.textContent) || "";
+            textContent = (rawBody + " " + altText + " " + mimeType + " " + author).toLowerCase();
+            if (card.dataset) {
+                card.dataset.searchCache = textContent;
+            }
+        }
 
         return { root, pubkey, did, tagsRaw, mediaType, mimeType, altText, author, textContent };
     }
@@ -408,7 +417,9 @@
         if (!container) return;
 
         const cards = getNoteCards();
-        let visibleCount = 0;
+        const toShow = [];
+        const toHide = [];
+        const toSrHide = [];
 
         cards.forEach((card) => {
             if (card.id === "circle-empty-state") return;
@@ -418,7 +429,7 @@
             const bodyText = (card.querySelector('.note-body-content')?.textContent || '').trim();
             const hasMedia = card.querySelector('img, video, audio') !== null;
             if (!bodyText && !hasMedia) {
-                card.classList.add('sr-hidden');
+                toSrHide.push(card);
                 return;
             }
 
@@ -427,14 +438,25 @@
             const matchSafety = checkSafetyAndHygieneMatch(card, data);
 
             if (matchCircle && matchSearch && matchSafety) {
-                card.style.display = "";
-                card.classList.remove("hidden");
-                visibleCount++;
+                toShow.push(card);
             } else {
-                card.style.display = "none";
-                card.classList.add("hidden");
+                toHide.push(card);
             }
         });
+
+        // Batch DOM style writes to eliminate layout thrashing
+        toSrHide.forEach((card) => {
+            card.classList.add('sr-hidden');
+        });
+        toShow.forEach((card) => {
+            card.style.display = "";
+            card.classList.remove("hidden");
+        });
+        toHide.forEach((card) => {
+            card.style.display = "none";
+            card.classList.add("hidden");
+        });
+        const visibleCount = toShow.length;
 
         applyNsfwBlurState();
 
