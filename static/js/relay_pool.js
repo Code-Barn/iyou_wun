@@ -634,6 +634,18 @@
             ? targetRelays
             : this.getWriteRelays();
 
+        // Stage 1 (U14): Public persona publishing (kind:0 / kind:1 to public relays) is suppressed; events are local-cache only
+        var depCtx = (typeof window !== "undefined" && window.DEPENDENT_CONTEXT) ? window.DEPENDENT_CONTEXT : null;
+        if (depCtx && depCtx.is_dependent && String(depCtx.bracket || "").toUpperCase() === "U14") {
+            if (signedEvent && (signedEvent.kind === 0 || signedEvent.kind === 1)) {
+                relaysToUse = relaysToUse.filter(function (r) {
+                    var n = String(r).toLowerCase();
+                    return n.indexOf("127.0.0.1") !== -1 || n.indexOf("localhost") !== -1;
+                });
+                console.info("[RelayPool] Suppressed public relays for U14 dependent publishing (kind:" + signedEvent.kind + "). Local-only mode.");
+            }
+        }
+
         return new Promise(function (resolve) {
             var remaining = relaysToUse.length;
             var localSuccess = false;

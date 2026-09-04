@@ -78,10 +78,12 @@
       <!-- Circle Filter Pills -->
       <div class="flex flex-wrap items-center gap-1.5" id="circle-filter-group">
         <span class="text-slate-500 dark:text-slate-400 text-[10px] font-semibold mr-0.5">CIRCLES:</span>
+        {% if not is_dependent or dependent_bracket != "U14" %}
         <button type="button" data-circle="global" 
                 class="circle-tab px-2 py-0.5 rounded text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 bg-slate-200/80 dark:bg-slate-800/60 transition-colors">
           [ 🌐 {% trans "Global" %} ]
         </button>
+        {% endif %}
         <button type="button" data-circle="iyou" 
                 class="circle-tab px-2 py-0.5 rounded bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950 transition-colors">
           [ ⚡ iyou ]

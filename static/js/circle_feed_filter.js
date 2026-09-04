@@ -143,6 +143,29 @@
             did = d.did;
         }
 
+        // Dependent Trust Ladder Boundary Enforcement (DEP-202 & DEP-203)
+        const depCtx = global.DEPENDENT_CONTEXT || (global.wotGate && typeof global.wotGate.getContext === "function" ? global.wotGate.getContext() : null);
+        if (depCtx && depCtx.is_dependent) {
+            const bracket = String(depCtx.bracket || "ADULT").toUpperCase();
+            
+            // Stage 1 (U14): Global public timeline is strictly disabled
+            if (bracket === "U14" && circleMode === "global") {
+                return false;
+            }
+
+            // Check WoT distance
+            const authorKey = pubkey || did;
+            const gate = global.wotGate || global.WoTGate;
+            const dist = gate && typeof gate.getSenderWoTDistance === "function" ? gate.getSenderWoTDistance(authorKey) : Infinity;
+            const limit = typeof depCtx.wot_distance_limit === "number" ? depCtx.wot_distance_limit : (bracket === "U14" ? 1 : 2);
+
+            // Stage 1 (U14): notes exclusively from approved contacts (distance <= 1)
+            // Stage 2 (U14-U18): peer-circle discovery (distance <= 2); 3rd-degree and beyond dropped
+            if (dist > limit) {
+                return false;
+            }
+        }
+
         if (circleMode === "global") {
             return true;
         }
@@ -849,6 +872,15 @@
             activeCircle = initialCircle;
         } else {
             activeCircle = 'iyou';
+        }
+
+        const depCtx = global.DEPENDENT_CONTEXT || (global.wotGate && typeof global.wotGate.getContext === "function" ? global.wotGate.getContext() : null);
+        if (depCtx && depCtx.is_dependent && String(depCtx.bracket || "").toUpperCase() === "U14") {
+            if (activeCircle === "global") {
+                activeCircle = "iyou";
+            }
+            const globalTab = document.querySelector('[data-circle="global"]');
+            if (globalTab) globalTab.classList.add("hidden");
         }
 
         // Initial client scan for cards against initialCircle

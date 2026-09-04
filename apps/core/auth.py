@@ -50,15 +50,51 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             return UserModel.objects.none()
         return UserModel.objects.filter(username=sub)
 
+    def get_or_create_user(self, access_token, id_token, payload):
+        if payload and "dep" in payload:
+            dep_claim = payload.get("dep")
+            if isinstance(dep_claim, dict) and dep_claim.get("revoked") is True:
+                logger.warning(f"Rejecting authentication for revoked dependent: {payload.get('sub')}")
+                return None
+            if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+                from .context import store_dependent_context, DependentAttestationError
+                try:
+                    store_dependent_context(self.request.session, payload)
+                except DependentAttestationError as exc:
+                    logger.warning(f"Rejecting dependent login: {exc}")
+                    return None
+        elif id_token and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            from .context import store_dependent_context, DependentAttestationError
+            try:
+                store_dependent_context(self.request.session, id_token)
+            except DependentAttestationError as exc:
+                logger.warning(f"Rejecting dependent login: {exc}")
+                return None
+            except Exception:
+                pass
+        return super().get_or_create_user(access_token, id_token, payload)
+
     def create_user(self, claims):
         sub = claims.get("sub")
         user = UserModel.objects.create_user(username=sub, email=None)
         user.set_unusable_password()
         user.save()
         logger.info(f"Created new sovereign user via OIDC: {sub}")
+        if claims and "dep" in claims and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            from .context import store_dependent_context
+            try:
+                store_dependent_context(self.request.session, claims)
+            except Exception as e:
+                logger.debug(f"Failed to store dependent context in create_user: {e}")
         return self._evaluate_admin_elevation(user, claims)
 
     def update_user(self, user, claims):
+        if claims and "dep" in claims and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            from .context import store_dependent_context
+            try:
+                store_dependent_context(self.request.session, claims)
+            except Exception as e:
+                logger.debug(f"Failed to store dependent context in update_user: {e}")
         return self._evaluate_admin_elevation(user, claims)
 
     def get_username(self, claims):

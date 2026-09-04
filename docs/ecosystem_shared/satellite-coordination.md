@@ -113,8 +113,8 @@ Roadmap for `OMNI-DEP-GRAD-SPEC-V1` (`docs/specs/DEPENDENT_IDENTITY_AND_GRADUATI
 | Ticket | Target Repo | Status | Notes |
 |:---|:---|:---|:---|
 | DEP-201 — Stage 1 U14 safe-relay | iyou_safe | Open | Route outbound dependent messages through `iyou_safe` content screening (restorative, not punitive). |
-| DEP-202 — Inbound DM WoT filter | iyou_wun | Open | WoT distance ≤ 1 (U14) / ≤ 2 (U14-U18). Block 3rd-degree and beyond by default. |
-| DEP-203 — Circle feed defaults | iyou_wun | Open | Restrict feed to approved contacts for younger brackets. Enable Stage 2 peer-circle formation at U14-U18. |
+| DEP-202 — Inbound DM WoT filter | iyou_wun | Done | WoT distance ≤ 1 (U14) / ≤ 2 (U14-U18). Block 3rd-degree and beyond by default. |
+| DEP-203 — Circle feed defaults | iyou_wun | Done | Restrict feed to approved contacts for younger brackets. Enable Stage 2 peer-circle formation at U14-U18. |
 | DEP-204 — L2 burner persona derivation | iyou_home | Open | Allow dependent to derive L2 burners under `m/iyou/dependent/<index>/l2/<context_id>`; parent revocation per-burner. |
 | DEP-205 — Parent-visible connection audit log | iyou_wun | Open | Encrypted audit of new peer connections (DID + timestamp only, never content) delivered to parent. |
 

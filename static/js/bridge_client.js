@@ -951,6 +951,19 @@
     };
 
     TauriBridgeClient.prototype.broadcastToRelays = function (signedEvent, relayList, onDone) {
+        var depCtx = (typeof window !== "undefined" && window.DEPENDENT_CONTEXT) ? window.DEPENDENT_CONTEXT : null;
+        if (depCtx && depCtx.is_dependent && String(depCtx.bracket || "").toUpperCase() === "U14") {
+            if (signedEvent && (signedEvent.kind === 0 || signedEvent.kind === 1)) {
+                var filterLocal = function (list) {
+                    return (list || []).filter(function (r) {
+                        var n = String(r).toLowerCase();
+                        return n.indexOf("127.0.0.1") !== -1 || n.indexOf("localhost") !== -1;
+                    });
+                };
+                relayList = filterLocal(relayList || getRelays());
+            }
+        }
+
         if (typeof window !== "undefined" && window.relayPool && typeof window.relayPool.broadcast === "function") {
             window.relayPool.broadcast(signedEvent, relayList).then(function (res) {
                 if (res.localSuccess) showSovereignToast("Sovereign Copy Saved.");

@@ -76,6 +76,17 @@ class PKCEOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
         base_kwargs['pkce_code_verifier'] = self.request.session.pop('pkce_code_verifier', None)
         return base_kwargs
 
+    def login_success(self):
+        if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            raw_id_token = self.request.session.get("oidc_id_token")
+            if raw_id_token and "dependent_context" not in self.request.session:
+                from apps.core.context import store_dependent_context
+                try:
+                    store_dependent_context(self.request.session, raw_id_token)
+                except Exception as exc:
+                    logger.debug(f"Could not parse dependent context from oidc_id_token: {exc}")
+        return super().login_success()
+
 
 class PKCEOIDCLogoutView(OIDCLogoutView):
     """
@@ -86,6 +97,8 @@ class PKCEOIDCLogoutView(OIDCLogoutView):
         return self.post(request, *args, **kwargs)
 
     def post(self, request, *args, **kwargs):
+        from apps.core.context import clear_dependent_context
+        clear_dependent_context(request.session)
         logout(request)
         redirect_url = getattr(settings, "LOGOUT_REDIRECT_URL", "/")
         return redirect(redirect_url)

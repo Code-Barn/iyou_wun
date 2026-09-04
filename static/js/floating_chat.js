@@ -164,6 +164,12 @@
 
   function dispatchIncomingMessage(peerId, text, fromSelf) {
     if (fromSelf) return;
+    const gate = window.wotGate || window.WoTGate;
+    if (gate && typeof gate.interceptInboundMessage === 'function') {
+      if (!gate.interceptInboundMessage(peerId, false)) {
+        return; // Drop silently without alerting minor or exposing preview
+      }
+    }
     const win = activeWindows.get(peerId);
     if (win && !win.isMinimized && win.element.classList.contains('hidden') === false) {
       const bubble = document.createElement('div');
@@ -205,6 +211,15 @@
           if (!sender) return;
           const fromSelf = ev.pubkey === chatSession.pubkey_hex;
           if (fromSelf) return;
+
+          // WoT Gate interception before decryption or preview
+          const gate = window.wotGate || window.WoTGate;
+          if (gate && typeof gate.interceptInboundNostr === 'function') {
+            if (!gate.interceptInboundNostr(ev)) {
+              return; // Silently drop
+            }
+          }
+
           let content = ev.content;
           if (window.bridgeClient && typeof window.bridgeClient.nip04Decrypt === 'function') {
             try {
@@ -217,7 +232,7 @@
               if (dec && dec !== ev.content) content = dec;
             } catch (err) { /* leave encrypted */ }
           }
-          dispatchIncomingMessage(sender[1], content, false);
+          dispatchIncomingMessage(ev.pubkey || sender[1], content, false);
         });
       } catch (err) { /* relay pool handler not attachable */ }
     }
@@ -239,12 +254,37 @@
         xmppSocket.onmessage = function (evt) {
           try {
             const xml = new DOMParser().parseFromString(evt.data, 'text/xml');
+            
+            // Inbound handshake check (e.g. subscription request)
+            const presence = xml.getElementsByTagName('presence')[0];
+            if (presence) {
+              const pType = presence.getAttribute('type');
+              const pFrom = presence.getAttribute('from') || '';
+              if (pType === 'subscribe' && pFrom) {
+                const gate = window.wotGate || window.WoTGate;
+                if (gate && typeof gate.canAcceptChatHandshake === 'function') {
+                  if (!gate.canAcceptChatHandshake(pFrom)) {
+                    return; // Reject handshake
+                  }
+                }
+              }
+            }
+
             const body = xml.getElementsByTagName('body')[0];
             if (!body) return;
             const message = body.parentNode; // <message>
             const from = message.getAttribute ? message.getAttribute('from') || '' : '';
             const text = body.textContent || '';
             const clean = from.split('/')[0];
+
+            // WoT Gate check on sender
+            const gate = window.wotGate || window.WoTGate;
+            if (gate && typeof gate.interceptInboundXMPP === 'function') {
+              if (!gate.interceptInboundXMPP(clean, false)) {
+                return; // Silently drop
+              }
+            }
+
             dispatchIncomingMessage(clean, text, false);
           } catch (err) { /* non-message stanza */ }
         };

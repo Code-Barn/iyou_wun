@@ -508,6 +508,26 @@
   - Added `test_session_save_every_request_is_false` and `test_api_feed_does_not_fail_on_cycled_session` in `test_views.py`.
   - Added `test_relay_req_respects_deadline_with_dead_relays` in `test_feed.py`.
 
+### Phase 46: Dependent Inbound WoT Gate & Feed Filtering (DEP-202 & DEP-203)
+- [x] **46.1 Token Ingress & Session State (`apps/core/context.py`, `src/auth/session.ts`, `apps/core/auth.py`, `apps/core/auth_pkce.py`, `apps/core/context_processors.py`):**
+  - Implemented `parse_dependent_claim`, `store_dependent_context`, and `get_dependent_context` to parse `id_token.dep` on OIDC callback and persist `is_dependent`, `bracket` ("U14" | "U14-U18" | "U18" | "ADULT"), and `wot_distance_limit` (1, 2, 3, inf).
+  - Enforced fail-closed rejection for revoked (`dep.revoked == true`) or expired attestations (`dep.expires_at`).
+  - Added TypeScript companion module `src/auth/session.ts`.
+  - Exposed `window.DEPENDENT_CONTEXT` in `templates/base.html` and `user_identity` in `context_processors.py`.
+- [x] **46.2 Feed Filtering Policy (`apps/feed/selectors.py`, `src/components/Feed.tsx`, `apps/core/views.py`, `static/js/circle_feed_filter.js`, `templates/_nav.html`):**
+  - **Stage 1 (U14):** Disabled global public timeline (`is_feed_circle_allowed` returns `false`, `data-circle="global"` button hidden in `_nav.html`); feed displays notes exclusively from approved contacts (WoT distance <= 1, parent-whitelisted contacts); public persona publishing (`kind:0` / `kind:1` to public relays) is suppressed to local-cache only in `relay_pool.js`, `bridge_client.js`, and `selectors.py`.
+  - **Stage 2 (U14-U18):** Enabled peer-circle discovery (WoT distance <= 2); dropped notes from 3rd-degree connections and beyond before rendering.
+  - Implemented React/TS companion component `src/components/Feed.tsx`.
+- [x] **46.3 Inbound DM & Chat Filtering (`apps/core/wot_gate.py`, `src/chat/wot_gate.ts`, `static/js/wot_gate.js`, `static/js/floating_chat.js`):**
+  - Intercepted inbound Nostr encrypted DMs (`kind:4` / NIP-04) and XMPP stanzas.
+  - Queried local contact trust engine: rejected inbound chat handshakes and dropped unknown messages silently without alerting the minor or exposing message previews when sender distance > `wot_distance_limit`.
+- [x] **46.4 Unit & Integration Tests & Zero-PII Verification:**
+  - Added comprehensive test suite in `apps/core/tests/test_dependent_wot.py` (19 passing) and Node test runner `test/wot_gate.test.js` (3 passing).
+  - Verified feed returns empty/restricted list when authenticated with `bracket: "U14"` and viewing unapproved senders.
+  - Verified DM from WoT distance 2 is accepted for `U14-U18` but rejected for `U14`.
+  - Verified zero PII leakage during trust-distance checks.
+- [x] **46.5 Verification:** `npm run test`, `npm run lint`, `uv run python manage.py test apps.core.tests.test_dependent_wot`, `uv run pytest apps/core/tests/test_dependent_wot.py` — all clean — **Done 2026-09-04**
+
 - [ ] **Ecosystem Doc Organization:** Standardize repo layout to match iyou_wun precedent — root: `AGENT.md`, `README.md`; `docs/`: `DEVELOPER_GUIDE.md`, `DESIGN_DOC.md`, `TODO.md`, `ecosystem_shared/`, `archive/`. *(Progress: README + DEVELOPER_GUIDE + AGENT + TODO synced; `SPRINT_CHANGELOG.md` added; superseded audit reports archived to `docs/archive/`.)*
 
 ---

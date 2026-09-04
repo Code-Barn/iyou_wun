@@ -488,9 +488,18 @@ class FeedView(TemplateView):
                     for _r in _replies:
                         enrich_image_grid(_r)
         else:
+            from .context import get_dependent_context
+            from apps.feed.selectors import filter_feed_for_dependent, is_feed_circle_allowed
+
+            dep_ctx = get_dependent_context(self.request)
             circle_param = self.request.GET.get("circle")
             mode_param = self.request.GET.get("mode")
             selected_circle = (circle_param or mode_param or "iyou").lower()
+
+            # Stage 1 (U14): Global public timeline is disabled
+            if dep_ctx.get("is_dependent") and not is_feed_circle_allowed(selected_circle, dep_ctx):
+                selected_circle = "iyou"
+
             context["feed_mode"] = selected_circle
             context["feed_circle"] = selected_circle
             context["selected_circle"] = selected_circle
@@ -529,6 +538,12 @@ class FeedView(TemplateView):
                 )
 
             notes = feed_data["roots"]
+            if dep_ctx.get("is_dependent"):
+                notes = filter_feed_for_dependent(
+                    notes,
+                    dep_ctx,
+                    viewer_id=self.request.user.username if self.request.user.is_authenticated else None,
+                )
             notes = attach_social_counts(
                 notes, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
             )
@@ -809,6 +824,23 @@ def api_feed(request):
     tag = request.GET.get("tag")
     client_relays_json = request.GET.get("relays")
 
+    from .context import get_dependent_context
+    from apps.feed.selectors import filter_feed_for_dependent, is_feed_circle_allowed
+
+    dep_ctx = get_dependent_context(request)
+    if dep_ctx.get("is_dependent") and not is_feed_circle_allowed(circle, dep_ctx):
+        # Stage 1 (U14): Global public timeline is disabled
+        return JsonResponse({
+            "success": True,
+            "notes": [],
+            "replies": {},
+            "thread_replies": {},
+            "total_replies": 0,
+            "thread_reply_count": 0,
+            "oldest_timestamp": None,
+            "has_more": False,
+        })
+
     try:
         limit = int(limit)
     except (ValueError, TypeError):
@@ -1016,6 +1048,12 @@ def api_feed(request):
         return result
 
     roots = [_serialize(n) for n in feed_data["roots"]]
+    if dep_ctx.get("is_dependent"):
+        roots = filter_feed_for_dependent(
+            roots,
+            dep_ctx,
+            viewer_id=request.user.username if (request.user and request.user.is_authenticated) else None,
+        )
 
     # Serialize the flat reply map for JS client-side assembly
     replies_serialized = {}
@@ -1151,6 +1189,17 @@ def api_profile_notes(request, identifier):
         }
         notes.append(note)
     
+    from .context import get_dependent_context
+    from apps.feed.selectors import filter_feed_for_dependent
+
+    dep_ctx = get_dependent_context(request)
+    if dep_ctx.get("is_dependent"):
+        notes = filter_feed_for_dependent(
+            notes,
+            dep_ctx,
+            viewer_id=request.user.username if (request.user and request.user.is_authenticated) else None,
+        )
+
     # Get oldest timestamp for pagination
     oldest_timestamp = None
     if sorted_events and len(sorted_events) > 0:

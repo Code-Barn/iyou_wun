@@ -68,6 +68,7 @@
     <script src="{% static 'js/relay_pool.js' %}"></script>
     <script src="{% static 'js/theme.js' %}"></script>
     <script src="{% static 'js/contact_manager.js' %}"></script>
+    <script src="{% static 'js/wot_gate.js' %}"></script>
     
     <!-- Page-Specific Extensions -->
     {% block extra_js %}{% endblock %}
@@ -75,6 +76,12 @@
       window.userPubkey = window.userPubkey || "{{ user_pubkey_hex|default:'' }}";
       window.userNpub = window.userNpub || "{{ user_npub|default:'' }}";
       window.CURRENT_SESSION_DID = window.CURRENT_SESSION_DID || "{{ current_session_did|escapejs }}";
+      window.DEPENDENT_CONTEXT = window.DEPENDENT_CONTEXT || {
+        is_dependent: {{ is_dependent|yesno:"true,false" }},
+        bracket: "{{ dependent_bracket|default:'ADULT' }}",
+        wot_distance_limit: {{ wot_distance_limit_json|default:"Infinity" }},
+        parent_did: "{{ parent_did|default:''|escapejs }}"
+      };
     </script>
     <script src="{% static 'js/notification_manager.js' %}" defer></script>
     <script src="{% static 'js/circle_feed_filter.js' %}" defer></script>

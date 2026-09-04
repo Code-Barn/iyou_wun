@@ -62,6 +62,11 @@ def user_identity(request):
     elif request.user.username and not request.user.username.startswith("did:"):
         legacy_handle = request.user.username
 
+    from .context import get_dependent_context
+    dep_ctx = get_dependent_context(request)
+    limit = dep_ctx["wot_distance_limit"]
+    limit_json = "Infinity" if limit == float("inf") else str(limit)
+
     context.update(
         user_display_label=display_label,
         active_persona_level=level,
@@ -71,6 +76,11 @@ def user_identity(request):
         user_npub=npub,
         user_handle=legacy_handle,
         user_profile_url=f"/profile/{npub}/" if npub else "/dashboard",
+        is_dependent=dep_ctx["is_dependent"],
+        dependent_bracket=dep_ctx["bracket"],
+        wot_distance_limit=limit,
+        wot_distance_limit_json=limit_json,
+        parent_did=dep_ctx.get("parent_did") or "",
     )
     return context
 
