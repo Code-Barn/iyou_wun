@@ -1,7 +1,7 @@
 # Standard UI Specification: Sovereign Mesh Navigation & Persona Enclave
 
 **Canonical Reference for Layer 0 Ecosystem Bar, Layer 1 Standard Header, Modular Persona Enclave, Mascot Footer, and PWA Standards**  
-**Version:** 2.0.0  
+**Version:** 2.1.0  
 **Status:** Authoritative Ecosystem Specification  
 
 ---
@@ -15,7 +15,7 @@ The iYou ecosystem presentation tier is structured into strict horizontal layers
 │ Layer 0: Sovereign Ecosystem Bar (Hidden drawer, 4px visible activation)    │
 ├────────────────────────────────────────────────────────────────────────────┤
 │ Layer 1: Application Brand & Sovereign Identity Header                      │
-│   ├── Left: App Brand Lockup (iyou_{slug})                                 │
+│   ├── Left: App Brand Lockup (Squircle logo stamp + iyou_{slug})           │
 │   └── Right:                                                               │
 │       ├── [Optional] Notification Bell (#notification-bell-btn)            │
 │       ├── Modular Persona Enclave Partial (_persona_enclave.html)          │
@@ -113,7 +113,25 @@ The canonical `_standard_header.html` provides:
    ```javascript
    window.CURRENT_SESSION_DID = "{{ current_session_did|escapejs }}";
    ```
-2. **Brand Lockup**: `iyou` in neutral slate with `_{app_slug}` styled in the app accent color.
+2. **Brand Lockup with Squircle Stamp**: Leading compact squircle logo preceding `iyou` in neutral slate and `_{app_slug}` styled in the app accent color.
+   - **Anchor Wrapper**: `<a href="/" class="flex items-center gap-2.5 group transition-transform active:scale-95" title="iyou_{app_slug}">`
+   - **Asset Convention**: `static/img/logo_square_sm.png` (compact ~64px-96px optimized version) or fallback to `static/img/logo_square.png`.
+   - **Styling**: `w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-cover shadow-sm border border-slate-200 dark:border-slate-800 group-hover:scale-105 transition-transform duration-150`.
+   - **Template Lockup Implementation**:
+     ```html
+     <a href="/" class="flex items-center gap-2.5 group transition-transform active:scale-95" title="iyou_{app_slug}">
+       <!-- Compact Brand Squircle Stamp -->
+       <img
+         src="{% static 'img/logo_square_sm.png' %}"
+         onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
+         alt="{app_slug}"
+         class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-cover shadow-sm border border-slate-200 dark:border-slate-800 group-hover:scale-105 transition-transform duration-150"
+       />
+       <span class="text-xl font-bold tracking-tight">
+         <span class="text-slate-400 dark:text-gray-400 group-hover:text-slate-600 dark:group-hover:text-gray-200 transition-colors">iyou</span><span class="text-__COLOR__-400">_{app_slug}</span>
+       </span>
+     </a>
+     ```
 3. **Notification Bell**: Button `#notification-bell-btn` with unread badge ping `#notification-unread-dot`.
 4. **Modular Persona Enclave Partial**: Rendered via `{% include "includes/_persona_enclave.html" %}`.
 5. **Direct Actions**:
@@ -125,7 +143,17 @@ The canonical `_standard_header.html` provides:
    - Direct Sign In anchor linking to `{% url 'oidc_authentication_init' %}`
 7. **Theme Toggle**: `#theme-toggle` button on far right toggling `#icon-sun` and `#icon-moon`.
 
-### 3.2 Standard vs. Preserved Custom Designs
+### 3.2 Dual-Asset Logo Hierarchy
+To optimize performance and eliminate loading high-res square master assets (~512–768px) for a tiny 24px/28px rendering slot, satellites implement a dual-asset logo hierarchy:
+- **`static/img/logo_square_sm.png`**: 64×64 or 96×96 px — dedicated for the Layer 1 header squircle stamp. Minimizes network payload and ensures sharp rasterization on standard and Retina displays.
+- **`static/img/logo_square.png`**: High-res square master — dedicated for `_footer.html`, favicons, Apple Touch icons, and PWA icon generation.
+- **Graceful Fallback Invariant**: Standard headers must implement the `onerror` fallback:
+  ```html
+  onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
+  ```
+  This ensures satellites that haven't generated `logo_square_sm.png` yet safely resolve to `logo_square.png` without displaying a broken image box.
+
+### 3.3 Standard vs. Preserved Custom Designs
 While most satellites adhere strictly to the generated `_standard_header.html`, specific domain-critical satellites maintain specialized presentation requirements:
 
 ```python
@@ -418,7 +446,8 @@ static/
 ├── js/
 │   └── sw.js                  # Minimal offline Service Worker
 └── img/
-    ├── logo_square.png        # Default Favicon & Apple Touch Icon
+    ├── logo_square_sm.png     # Compact squircle header logo (64x64/96x96)
+    ├── logo_square.png        # Default Favicon & Apple Touch Icon (high-res master)
     ├── logo_square_dark.png   # Optional Dark Favicon
     ├── icon-192.png           # 192x192 PWA launcher icon (maskable)
     ├── icon-512.png           # 512x512 PWA splash / install icon (maskable)
@@ -455,7 +484,7 @@ static/
      ]
    }
    ```
-2. **`static/img/logo_square.png`**: Standard square logo used for default favicon and Apple touch icon.
+2. **`static/img/logo_square_sm.png` & `static/img/logo_square.png`**: `logo_square_sm.png` (~64-96px) serves as the compact Layer 1 header squircle stamp; `logo_square.png` serves as the high-res master for `_footer.html`, default favicon, and Apple touch icon.
 3. **`static/img/icon-192.png` & `static/img/icon-512.png`**: PWA homescreen and launcher icons.
 4. **`static/js/sw.js`**: Minimal offline service worker caching core static assets and runtime shell:
    ```javascript
