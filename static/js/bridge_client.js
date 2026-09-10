@@ -499,14 +499,14 @@
         var nameStr = "";
         if (profile.handle) {
             nameStr = "@" + String(profile.handle).replace(/^@/, "");
+        } else if (labelEl && labelEl.textContent && labelEl.textContent.trim().startsWith("@")) {
+            nameStr = labelEl.textContent.trim();
         } else if (profile.name || profile.profile_name || profile.label) {
             nameStr = profile.name || profile.profile_name || profile.label;
         } else if (profile.npub) {
             nameStr = profile.npub.slice(0, 14) + "...";
         } else if (profile.did) {
             nameStr = profile.did.slice(0, 16) + "...";
-        } else if (profile.nostr_pubkey_hex) {
-            nameStr = profile.nostr_pubkey_hex.slice(0, 12) + "...";
         } else {
             nameStr = "Sovereign";
         }
