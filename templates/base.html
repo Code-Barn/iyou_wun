@@ -38,7 +38,7 @@
     <meta name="theme-color" content="#8B5CF6">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Wun">
+    <meta name="apple-mobile-web-app-title" content="wun">
     <link rel="manifest" href="{% static 'manifest.json' %}">
     {% block og_tags %}
     <meta property="og:site_name" content="iyou_wun" />
@@ -56,9 +56,10 @@
     {% include "includes/_standard_header.html" %}
     {% include "_nav.html" %}
 
-    <main class="flex-1">
+    <main class="flex-1 w-full">
         {% block content %}{% endblock %}
     </main>
+    {% include "includes/_footer.html" %}
 
     {% block extra_body %}{% endblock %}
     
@@ -115,14 +116,6 @@
         if (e.key === 'Escape') closeImageModal();
       });
     </script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register("{% static 'js/sw.js' %}")
-            .catch((err) => console.debug('SW registration skipped:', err));
-        });
-      }
-    </script>
     {% include "includes/_toast_container.html" %}
     {% if user.is_authenticated %}
       {% include "includes/_notification_drawer.html" %}
@@ -144,6 +137,15 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 10l7-7m0 0l7 7m-7-7v18" />
       </svg>
     </button>
+
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register("{% static 'js/sw.js' %}")
+            .catch((err) => console.debug('SW registration skipped:', err));
+        });
+      }
+    </script>
 </body>
 
 

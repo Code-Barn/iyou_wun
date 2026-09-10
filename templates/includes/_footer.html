@@ -1,0 +1,37 @@
+{% load static %}
+<footer class="mt-auto border-t border-slate-200 dark:border-gray-800/80 bg-white/50 dark:bg-[#0B0F19]/50 backdrop-blur-sm py-10 transition-colors duration-200">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col items-center justify-center text-center">
+
+    <!-- Mascot / Emblem Presentation -->
+    <div class="relative group mb-4">
+      <img
+        src="{% static 'img/logo_square.png' %}"
+        alt="iyou_wun"
+        class="h-20 w-20 sm:h-24 sm:w-24 rounded-2xl object-cover shadow-md border border-slate-200 dark:border-gray-800 group-hover:scale-105 transition-transform duration-200"
+      />
+    </div>
+
+    <!-- Brand & Mission Statement -->
+    <div class="space-y-1 max-w-md">
+      <div class="flex items-center justify-center gap-1.5 font-bold tracking-tight">
+        <span class="text-slate-400 dark:text-slate-500">iyou</span><span class="text-violet-600 dark:text-violet-400">_wun</span>
+        <span class="text-xs font-mono font-normal px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200 dark:border-violet-800/60 ml-1">
+          v1.0 Greenfield
+        </span>
+      </div>
+      <p class="text-xs font-mono text-slate-500 dark:text-slate-400">
+        Decentralized Sovereign Social Fabric & Web Utility Nexus
+      </p>
+    </div>
+
+    <!-- Protocol & Network Metadata -->
+    <div class="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-[11px] font-mono text-slate-400 dark:text-slate-500">
+      <span>Relay: <span class="text-slate-600 dark:text-slate-400">wss://relay.iyou.me</span></span>
+      <span>•</span>
+      <span>Enclave Bridge: <span class="text-slate-600 dark:text-slate-400">127.0.0.1:9001</span></span>
+      <span>•</span>
+      <span>License: <span class="text-slate-600 dark:text-slate-400">AGPL-3.0</span></span>
+    </div>
+
+  </div>
+</footer>
