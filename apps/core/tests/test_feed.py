@@ -1346,6 +1346,17 @@ class IsRenderableNoteTest(TestCase):
         event = {"id": "e1", "kind": 1, "content": "", "tags": [["imeta", "url", "https://example.com/image.png"]]}
         self.assertTrue(is_renderable_note(event))
 
+    def test_is_renderable_note_allows_kind6_repost_with_emptied_content(self):
+        """NIP-18 kind 6 reposts carry their target in an 'e' tag; empty content must not suppress them."""
+        from ..nip10 import is_renderable_note
+        event = {"id": "e6", "kind": 6, "content": "", "tags": [["e", "abc123", "wss://relay.primal.net", "root"]]}
+        self.assertTrue(is_renderable_note(event))
+
+    def test_is_renderable_note_drops_barren_kind6_repost_without_target(self):
+        from ..nip10 import is_renderable_note
+        event = {"id": "e6b", "kind": 6, "content": "", "tags": []}
+        self.assertFalse(is_renderable_note(event))
+
     def test_is_renderable_note_drops_p2p_discovery_beacons(self):
         """Notes with ["t", "miasma-peer"] or ["multiaddr", "..."] return False even if non-empty."""
         from ..nip10 import is_renderable_note

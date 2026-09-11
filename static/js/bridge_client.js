@@ -612,6 +612,26 @@
     };
 
     /**
+     * Background POST of the enclave-synced Secp256k1 pubkey to the Django
+     * session so server-side relay queries always use the true signing identity
+     * instead of a DID-derived placeholder.  Best-effort — never blocks UI.
+     */
+    TauriBridgeClient.prototype.syncKeysToServer = function (nostrPubkeyHex) {
+        if (!nostrPubkeyHex || !isHex64(nostrPubkeyHex)) return;
+        try {
+            fetch("/api/auth/sync-keys/", {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCsrfToken()
+                },
+                body: JSON.stringify({ nostr_pubkey_hex: nostrPubkeyHex })
+            }).catch(function () { /* background sync is best-effort */ });
+        } catch (e) { /* ignore */ }
+    };
+
+    /**
      * Query the iyou_home enclave for the active persona list with a bounded
      * timeout. Arms a 2500ms timer; if the bridge never answers (or the socket
      * dies), the dropdown degrades to an explicit offline state.
@@ -767,6 +787,16 @@
                 if (prof) {
                     var previousPubkey = window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex) : null;
                     window.activeProfile = prof;
+
+                    // Persist the enclave's true Secp256k1 Nostr pubkey so every
+                    // downstream signature/query uses the real identity instead of a
+                    // DID-derived placeholder, and mirror it into the Django session.
+                    var syncedHex = prof.nostr_pubkey_hex || prof.pubkey_hex || prof.pubkey || "";
+                    if (isHex64(syncedHex)) {
+                        try { localStorage.setItem("nostr_pubkey_hex", syncedHex.toLowerCase()); } catch (e) { /* ignore storage quotas */ }
+                        this.syncKeysToServer(syncedHex.toLowerCase());
+                    }
+
                     this.updateActivePersonaUI(prof);
                     this.handlePersonaChanged(prof);
                     if (window.enclavePersonas && window.enclavePersonas.length > 0) {

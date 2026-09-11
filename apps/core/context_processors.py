@@ -30,7 +30,7 @@ def user_identity(request):
         context["user_display_label"] = ""
         context["current_session_did"] = ""
         return context
-    from .views import did_to_pubkey, hex_to_npub
+    from .views import hex_to_npub
     from .models import UserLinkDeck
 
     deck = UserLinkDeck.objects.filter(user=request.user).first()
@@ -54,7 +54,8 @@ def user_identity(request):
     else:
         display_label = f"{request.user.username[:16]}... (L{level})"
 
-    pubkey = did_to_pubkey(request.user.username)
+    from .views import get_effective_user_pubkey
+    pubkey = get_effective_user_pubkey(request)
     npub = hex_to_npub(pubkey) if pubkey else ""
     legacy_handle = ""
     if deck and deck.handle:

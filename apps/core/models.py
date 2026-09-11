@@ -44,6 +44,7 @@ class UserLinkDeck(models.Model):
     banner_url = models.CharField(max_length=2048, blank=True, default="")
     nip05 = models.CharField(max_length=300, blank=True, default="")
     lud16 = models.CharField(max_length=300, blank=True, default="")
+    nostr_pubkey = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
     default_view = models.CharField(
         max_length=8,

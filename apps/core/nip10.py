@@ -251,6 +251,21 @@ def is_renderable_note(event: dict) -> bool:
 
     content = (event.get("content") or "").strip()
     tags = event.get("tags") or []
+    kind = event.get("kind")
+    if kind is not None:
+        try:
+            kind = int(kind)
+        except (TypeError, ValueError):
+            kind = None
+
+    # Kindle 6 reposts (NIP-18) reference a root/quoted event via an "e" tag and
+    # may carry empty content; treat them as renderable so enclave reposts appear
+    # in authored profile streams parsed with kinds [1, 6, 30023].
+    if kind == 6 and not content:
+        for tag in tags:
+            if isinstance(tag, (list, tuple)) and len(tag) >= 2 and tag[0] == "e" and str(tag[1]).strip():
+                return True
+        return False
 
     # Suppress P2P mesh discovery tags and multiaddr beacons
     p2p_tags = {"miasma-peer", "p2p-beacon", "relay-ping", "node-discovery"}

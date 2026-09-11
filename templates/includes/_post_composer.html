@@ -54,6 +54,10 @@
         <button type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-mono text-slate-600 dark:text-slate-300 transition" onclick="openPollCreateModal()">
           🗳️ Poll
         </button>
+        <span class="text-[10px] font-mono text-slate-400 dark:text-slate-500 flex items-center gap-1.5" title="Every note is stamped with the iyou network tag so it is discoverable on iyou circle feeds.">
+          <span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-50 dark:bg-violet-950/60 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800/60">#iyou</span>
+          <span>auto-tagged</span>
+        </span>
         <span id="uploadStatus" class="text-xs text-slate-500 hidden"></span>
       </div>
       <button type="button" id="btn-publish-note" class="px-4 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed" onclick="publishPost()">

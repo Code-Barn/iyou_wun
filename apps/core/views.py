@@ -87,6 +87,7 @@ def _serialize_deck(deck):
         "banner_url": deck.banner_url,
         "nip05": deck.nip05,
         "lud16": deck.lud16,
+        "nostr_pubkey": getattr(deck, "nostr_pubkey", "") or "",
         "is_public": deck.is_public,
         "items": [
             {
@@ -164,6 +165,7 @@ def api_backup_import(request):
                 deck.banner_url = str(deck_data.get("banner_url") or "")[:2048]
                 deck.nip05 = str(deck_data.get("nip05") or "")[:300]
                 deck.lud16 = str(deck_data.get("lud16") or "")[:300]
+                deck.nostr_pubkey = str(deck_data.get("nostr_pubkey") or "")[:64]
                 deck.is_public = bool(deck_data.get("is_public", True))
                 deck.save()
 
@@ -304,6 +306,215 @@ def api_persona_switch(request):
     })
 
 
+@csrf_exempt
+def api_sync_keys(request):
+    """Persist the enclave's true Secp256k1 Nostr pubkey onto the user's link deck.
+
+    Called in the background by the Tauri signing bridge whenever a profile sync
+    reports a `nostr_pubkey_hex`. The stored key becomes the authoritative
+    signing identity for the user so authored notes and profile relay queries
+    never fall back to a DID-derived placeholder.
+    """
+    if request.method != "POST":
+        return JsonResponse({"error": "Method not allowed"}, status=405)
+
+    if not request.user.is_authenticated:
+        return JsonResponse(
+            {"error": "Authentication required (or a valid challenge signature from the DID)"},
+            status=401,
+        )
+
+    try:
+        payload = json.loads(request.body) if request.body else {}
+    except (json.JSONDecodeError, TypeError):
+        payload = request.POST.dict()
+
+    raw_pubkey = str(payload.get("nostr_pubkey_hex") or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", raw_pubkey):
+        return JsonResponse(
+            {"error": "nostr_pubkey_hex must be a 64-character secp256k1 hex pubkey"},
+            status=400,
+        )
+
+    deck = UserLinkDeck.objects.filter(user=request.user).first()
+    created = deck is None
+    if created:
+        base = re.sub(r"[^a-z0-9_-]", "", (str(payload.get("handle") or request.user.username)[:32]).lower()).strip("_-")
+        if len(base) < 3:
+            base = "persona"
+        try:
+            deck = claim_handle(request.user, base)
+        except Exception:
+            deck = UserLinkDeck.objects.filter(user=request.user).first() or UserLinkDeck.objects.create(
+                user=request.user, handle=base[:32]
+            )
+
+    deck.nostr_pubkey = raw_pubkey
+    deck.save(update_fields=["nostr_pubkey", "updated_at"])
+
+    request.session["nostr_pubkey_hex"] = raw_pubkey
+    if request.session.get("active_persona_level") is None:
+        request.session["active_persona_name"] = str(payload.get("persona_name") or deck.handle or "")[:80]
+        request.session["active_persona_level"] = 1
+    request.session.modified = True
+
+    return JsonResponse({
+        "success": True,
+        "nostr_pubkey_hex": raw_pubkey,
+        "deck_created": created,
+        "user_pubkey_hex": raw_pubkey,
+    })
+
+
+def get_effective_user_pubkey(request=None):
+    """Resolve the authenticated user's authoritative Secp256k1 hex pubkey.
+
+    Prefers the enclave-synced key (session snapshot or UserLinkDeck), and only
+    falls back to the OIDC DID-derived key while no explicit key has been synced.
+    """
+    if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+        return ""
+
+    synced = ""
+    if hasattr(request, "session"):
+        synced = str(request.session.get("nostr_pubkey_hex") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", synced):
+        deck_synced = ""
+        try:
+            deck = UserLinkDeck.objects.filter(user=request.user).first()
+            deck_synced = (deck.nostr_pubkey or "").strip() if deck else ""
+        except Exception:
+            deck_synced = ""
+        synced = deck_synced
+
+    if re.fullmatch(r"[0-9a-f]{64}", synced):
+        return synced.lower()
+    return did_to_pubkey(request.user.username) or ""
+
+
+def _find_user_by_pubkey(hex_pubkey):
+    """Locate the local User whose canonical or enclave key equals the given hex.
+
+    Returns a User instance (or None). Memoized per pubkey to keep repeated
+    profile/note resolutions cheap.
+    """
+    if not hex_pubkey or not re.fullmatch(r"[0-9a-f]{64}", str(hex_pubkey).lower()):
+        return None
+
+    lookup_cache = getattr(_find_user_by_pubkey, "_cache", None)
+    if lookup_cache is None:
+        _find_user_by_pubkey._cache = {}
+        lookup_cache = _find_user_by_pubkey._cache
+    if hex_pubkey in lookup_cache:
+        cached_username = lookup_cache[hex_pubkey]
+        if cached_username is None:
+            return None
+        return UserModel.objects.filter(username=cached_username).first()
+
+    try:
+        deck = UserLinkDeck.objects.filter(nostr_pubkey=hex_pubkey.lower()).select_related("user").first()
+        if deck is not None:
+            lookup_cache[hex_pubkey] = deck.user.username
+            return deck.user
+    except Exception:
+        pass
+
+    try:
+        coincident = UserModel.objects.filter(username=hex_pubkey.lower()).first()
+        if coincident is not None:
+            lookup_cache[hex_pubkey] = coincident.username
+            return coincident
+        matches = UserModel.objects.all()
+        for u in matches:
+            if did_to_pubkey(u.username) == hex_pubkey.lower() or u.username.lower() == hex_pubkey.lower():
+                lookup_cache[hex_pubkey] = u.username
+                return u
+    except Exception:
+        pass
+
+    lookup_cache[hex_pubkey] = None
+    return None
+
+
+def _resolve_profile_candidates(identifier):
+    """Resolve profile target & author-candidate keys, accommodating dual identity.
+
+    Returns (carried, owner_user, owner_deck, hex_pubkey, candidates).
+
+    The current registry stores the link-deck as the *DID-owned* identity; the
+    enclave returns the *key-derived* identity. Both coexist: a user can be the
+    owner of one deck and the signer of another. We treat the enclave-synced key
+    as the profile's own signature stream when it resolves to that deck; this
+    keeps sessions + relay anchors sovereign while the canonical profile key for
+    profile-page generation stays the DID-derived key (used to confirm the
+    browser origin).
+
+    ``candidates`` is the union of the deck pubkey, the DID-derived pubkey, and
+    the identifier itself (when already a 64-char hex).
+    """
+    identifier = str(identifier or "").strip()
+    candidates = []
+    owner_user = None
+    owner_deck = None
+    hex_pubkey = ""
+    carried = ""
+
+    if not identifier:
+        return carried, owner_user, owner_deck, hex_pubkey, candidates
+
+    if identifier.startswith("did:"):
+        found_user = UserModel.objects.filter(username=identifier).first()
+        if not found_user:
+            found_user = _find_user_by_pubkey(identifier)
+        if found_user:
+            owner_user = found_user
+            owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
+            hex_pubkey = did_to_pubkey(owner_user.username)
+            carried = "did"
+            candidates = list(filter(None, [
+                (owner_deck.nostr_pubkey if owner_deck else "") or "",
+                hex_pubkey,
+                identifier.strip().lower() if re.fullmatch(r"[0-9a-fA-F]{64}", identifier) else "",
+            ]))
+            return carried, owner_user, owner_deck, hex_pubkey, candidates
+
+    if re.fullmatch(r"[0-9a-fA-F]{64}", identifier):
+        hex_pubkey = identifier.lower()
+        carried = "hex"
+        found_user = _find_user_by_pubkey(hex_pubkey)
+        if found_user:
+            owner_user = found_user
+            owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
+            candidates = list(filter(None, [
+                (owner_deck.nostr_pubkey if owner_deck else "") or "",
+                did_to_pubkey(owner_user.username),
+                hex_pubkey,
+            ]))
+        else:
+            candidates = [hex_pubkey]
+        return carried, owner_user, owner_deck, hex_pubkey, candidates
+
+    # npub or NIP-05: resolve via the universal identifier resolver.
+    pubkey_candidate, _carried = resolve_universal_identifier(identifier)
+    if pubkey_candidate:
+        hex_pubkey = str(pubkey_candidate).strip().lower()
+        carried = _carried or "npub"
+        found_user = _find_user_by_pubkey(hex_pubkey)
+        if found_user:
+            owner_user = found_user
+            owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
+            candidates = list(filter(None, [
+                (owner_deck.nostr_pubkey if owner_deck else "") or "",
+                did_to_pubkey(owner_user.username),
+                hex_pubkey,
+            ]))
+        else:
+            candidates = [hex_pubkey]
+        return carried, owner_user, owner_deck, hex_pubkey, candidates
+
+    return carried, owner_user, owner_deck, hex_pubkey, candidates
+
+
 def get_relays_for_request(request=None):
     """Retrieve default relays, omitting unencrypted ws:// if request is served over HTTPS."""
     relays = DEFAULT_RELAYS
@@ -324,7 +535,7 @@ def home(request):
 @login_required
 @ensure_csrf_cookie
 def dashboard(request):
-    user_pubkey = did_to_pubkey(request.user.username)
+    user_pubkey = get_effective_user_pubkey(request)
     user_npub = did_to_npub(request.user.username)
     relays = get_relays_for_request(request)
     relay_objs = [{"url": url, "enabled": True} for url in relays]
@@ -430,7 +641,7 @@ class FeedView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        user_pubkey = did_to_pubkey(self.request.user.username) if self.request.user.is_authenticated else None
+        user_pubkey = get_effective_user_pubkey(self.request) if self.request.user.is_authenticated else None
         user_npub = did_to_npub(self.request.user.username) if self.request.user.is_authenticated else None
         relays = get_relays_for_request(self.request)
 
@@ -613,7 +824,7 @@ class ChatView(LoginRequiredMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         is_auth = self.request.user.is_authenticated
-        user_pubkey = did_to_pubkey(self.request.user.username) if is_auth else ""
+        user_pubkey = get_effective_user_pubkey(self.request) if is_auth else ""
         context["user_pubkey"] = user_pubkey
         context["user_did"] = self.request.user.username if is_auth else ""
 
@@ -655,7 +866,7 @@ def api_chat_session(request):
             {"success": False, "error": "Authentication required."}, status=401
         )
 
-    pubkey_hex = did_to_pubkey(request.user.username) or ""
+    pubkey_hex = get_effective_user_pubkey(request)
 
     level = getattr(settings, "WUN_USER_LEVEL", "2")
     if level == "1":
@@ -846,7 +1057,7 @@ def api_feed(request):
     except (ValueError, TypeError):
         limit = 25
 
-    user_pubkey = did_to_pubkey(request.user.username) if (request.user and request.user.is_authenticated) else None
+    user_pubkey = get_effective_user_pubkey(request) if (request.user and request.user.is_authenticated) else None
     
     # Handle client-provided relay URLs
     client_relays = None
@@ -1082,20 +1293,26 @@ def api_feed(request):
 
 
 def api_profile_notes(request, identifier):
-    """Async endpoint for fetching profile notes (Kind 1) from relays.
-    
+    """Async endpoint for fetching profile notes (kinds 1, 6, 30023) from relays.
+
     Route: GET /api/profile/<str:identifier>/notes/
-    Asynchronously fetches authored notes (Kind 1) from relays with a 2.0s deadline.
+    Asynchronously fetches authored notes from relays with a 2.0s deadline.
+    Queries both the link-deck's enclave-synced key and its DID-derived key so
+    notes signed by the true Secp256k1 identity surface on the profile.
     Returns JSON: {"notes": [...], "has_more": bool}
     """
     if hasattr(request, "session"):
         request.session.modified = False
         request.session.save = lambda *args, **kwargs: None
 
-    hex_pubkey, _ = resolve_universal_identifier(identifier)
-    if not hex_pubkey:
+    _carried, _owner_user, _owner_deck, hex_pubkey, author_candidates = _resolve_profile_candidates(identifier)
+    if not hex_pubkey or not author_candidates:
         return JsonResponse({"notes": [], "has_more": False, "error": "Invalid identifier"}, status=400)
-    
+
+    hex_pubkey = str(hex_pubkey).strip().lower()
+    # De-duplicate candidates; a bare hex identifier is always its own author.
+    author_candidates = list(set(str(c).strip().lower() for c in author_candidates if c))
+
     limit = request.GET.get("limit", 50)
     until = request.GET.get("until")
     
@@ -1108,7 +1325,7 @@ def api_profile_notes(request, identifier):
     except (ValueError, TypeError):
         limit = 50
     
-    filter_obj = {"kinds": [1], "authors": [hex_pubkey], "limit": limit}
+    filter_obj = {"kinds": [1, 6, 30023], "authors": list(set(author_candidates)), "limit": limit}
     if until:
         try:
             filter_obj["until"] = int(until)
@@ -1150,7 +1367,7 @@ def api_profile_notes(request, identifier):
     try:
         profile_deadline = time.time() + 0.5  # 500ms for profile fetch
         profile_events = relay_req(
-            {"kinds": [0], "authors": [hex_pubkey], "limit": 1},
+            {"kinds": [0], "authors": list(set(author_candidates)), "limit": 1},
             relay_urls=relays,
             deadline=profile_deadline
         )
@@ -1230,6 +1447,7 @@ def api_save_profile(request):
     picture = data.get("picture", "")
     banner = data.get("banner", "")
     lud16 = data.get("lud16", "")
+    nostr_pubkey = str(data.get("nostr_pubkey") or "").strip().lower()
 
     deck = UserLinkDeck.objects.filter(user=request.user).first()
     if deck:
@@ -1243,8 +1461,11 @@ def api_save_profile(request):
             deck.banner_url = banner[:2048]
         if lud16 is not None:
             deck.lud16 = lud16[:300]
+        if re.fullmatch(r"[0-9a-f]{64}", nostr_pubkey):
+            deck.nostr_pubkey = nostr_pubkey
+            request.session["nostr_pubkey_hex"] = nostr_pubkey
         # Note: NIP-05 is automatically derived from handle and discriminator in save() method
-        deck.save(update_fields=["display_name", "headline", "avatar_url", "banner_url", "nip05", "lud16"])
+        deck.save(update_fields=["display_name", "headline", "avatar_url", "banner_url", "nip05", "lud16", "nostr_pubkey"])
     else:
         # Create deck if not exists with a safe default handle
         default_handle = request.user.username.split(":")[-1][:32] or "user"
@@ -1257,8 +1478,11 @@ def api_save_profile(request):
             avatar_url=picture[:2048],
             banner_url=banner[:2048],
             lud16=lud16[:300],
+            nostr_pubkey=nostr_pubkey[:64],
         )
         # The save() method will automatically set the nip05 field
+        if re.fullmatch(r"[0-9a-f]{64}", nostr_pubkey):
+            request.session["nostr_pubkey_hex"] = nostr_pubkey
 
     profile_data = {
         "name": deck.display_name or deck.handle or name,
@@ -1361,7 +1585,11 @@ def fetch_profile_data(hex_pubkey, relay_urls=None):
     local_deck = None
     if hex_pubkey:
         for deck in UserLinkDeck.objects.select_related("user").all():
-            if did_to_pubkey(deck.user.username) == hex_pubkey or deck.user.username == hex_pubkey:
+            if (
+                (deck.nostr_pubkey and deck.nostr_pubkey.lower() == str(hex_pubkey).lower())
+                or did_to_pubkey(deck.user.username) == hex_pubkey
+                or deck.user.username == hex_pubkey
+            ):
                 local_deck = deck
                 break
 
@@ -2427,7 +2655,7 @@ def api_contacts_follow(request):
     if request.method != "POST":
         return JsonResponse({"success": False, "error": "POST required"}, status=405)
 
-    pubkey_hex = did_to_pubkey(request.user.username) or ""
+    pubkey_hex = get_effective_user_pubkey(request)
     if not pubkey_hex:
         return JsonResponse(
             {"success": False, "error": "Unable to derive a Nostr pubkey for this account."},
@@ -2647,7 +2875,7 @@ class NotificationsView(LoginRequiredMixin, TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        user_pubkey = did_to_pubkey(self.request.user.username)
+        user_pubkey = get_effective_user_pubkey(self.request)
         relays = get_relays_for_request(self.request)
 
         context["user_pubkey"] = user_pubkey
@@ -2822,60 +3050,45 @@ class ProfileView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         identifier = kwargs.get("npub")
-        hex_pubkey, target_npub = resolve_universal_identifier(identifier)
+
+        carried, owner_user, owner_deck, hex_pubkey, author_candidates = _resolve_profile_candidates(identifier)
+
         context["hex_pubkey"] = hex_pubkey or ""
         context["target_pubkey_hex"] = hex_pubkey or ""
         context["target_nostr_pubkey_hex"] = hex_pubkey or ""
-        context["npub"] = target_npub or identifier or ""
-        context["target_npub"] = target_npub or identifier or ""
+        context["npub"] = hex_to_npub(hex_pubkey) if hex_pubkey else identifier or ""
+        context["target_npub"] = context["npub"]
         context["og_image"] = og_fallback_image(self.request)
 
         if not hex_pubkey:
             context["error"] = f"Peer Not Found on Mesh: {identifier}"
             return context
 
-        # Instant Profile Shell: Resolve local metadata immediately without blocking on relays
-        # Set hydration flag for client-side async note loading
+        # Instant Profile Shell: resolve local metadata immediately without blocking on relays.
         context["hydrate_profile"] = True
+        context["candidates_json"] = json.dumps(
+            list(set(str(c).strip().lower() for c in author_candidates if c))
+        )
 
-        # Fast local profile resolution - use UserLinkDeck data if available
         profile = {}
-        owner_user = None
-        owner_deck = None
-        
-        # Try to find owner user more efficiently
-        try:
-            # Direct lookup by username if it matches hex_pubkey
-            if len(hex_pubkey) >= 32:
-                owner_user = UserModel.objects.filter(username=hex_pubkey).first()
-            if not owner_user:
-                # Try to find user by DID that maps to this pubkey
-                for candidate in UserModel.objects.only("username").iterator():
-                    if did_to_pubkey(candidate.username) == hex_pubkey:
-                        owner_user = candidate
-                        break
-        except Exception:
-            pass
 
-        if owner_user:
-            owner_deck = getattr(owner_user, "link_deck", None)
-            if owner_deck:
-                profile = {
-                    "name": getattr(owner_deck, "display_name", "") or owner_deck.handle or "",
-                    "display_name": getattr(owner_deck, "display_name", "") or "",
-                    "about": owner_deck.headline or "",
-                    "picture": owner_deck.avatar_url or "",
-                    "banner": owner_deck.banner_url or "",
-                    "nip05": getattr(owner_deck, "nip05", "") or "",
-                    "lud16": getattr(owner_deck, "lud16", "") or "",
-                }
-        
+        if owner_deck:
+            profile = {
+                "name": getattr(owner_deck, "display_name", "") or owner_deck.handle or "",
+                "display_name": getattr(owner_deck, "display_name", "") or "",
+                "about": owner_deck.headline or "",
+                "picture": owner_deck.avatar_url or "",
+                "banner": owner_deck.banner_url or "",
+                "nip05": getattr(owner_deck, "nip05", "") or "",
+                "lud16": getattr(owner_deck, "lud16", "") or "",
+            }
+
         # If no local deck found, try a quick relay fetch with deadline to avoid blocking
-        if not profile.get("name") and not profile.get("display_name"):
+        if not owner_deck and not profile.get("name") and not profile.get("display_name"):
             deadline = time.time() + 1.0  # 1 second deadline
             try:
                 quick_events = relay_req(
-                    {"kinds": [0], "authors": [hex_pubkey], "limit": 1}, 
+                    {"kinds": [0], "authors": list(set(author_candidates)), "limit": 1},
                     relay_urls=get_relays_for_request(self.request),
                     deadline=deadline
                 )
@@ -2900,7 +3113,7 @@ class ProfileView(TemplateView):
         is_owner = bool(
             self.request.user.is_authenticated and (
                 self.request.user.username == author_did
-                or did_to_pubkey(self.request.user.username) == hex_pubkey
+                or get_effective_user_pubkey(self.request) == hex_pubkey
             )
         )
         context["is_owner"] = is_owner
@@ -2918,7 +3131,7 @@ class ProfileView(TemplateView):
         context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
 
         context["user_pubkey"] = (
-            did_to_pubkey(self.request.user.username)
+            get_effective_user_pubkey(self.request)
             if self.request.user.is_authenticated
             else ""
         )
@@ -3131,7 +3344,7 @@ class LinkDeckView(TemplateView):
             "items": items,
             "feed_url": f"/feed?author={hex_pubkey}" if hex_pubkey else "/feed",
             "user_pubkey": (
-                did_to_pubkey(request.user.username)
+                get_effective_user_pubkey(request)
                 if request.user.is_authenticated
                 else ""
             ),

@@ -76,6 +76,14 @@
             if (attachedMedia.mimeType) tags.push(["m", attachedMedia.mimeType]);
             if (attachedMedia.size) tags.push(["size", String(attachedMedia.size)]);
         }
+        // Ecosystem tagging: every note authored in the composer is stamped with
+        // the iyou client + network tag so circle feeds & indexes can attribute it.
+        if (!tags.some(function (t) { return t[0] === "client" && t[1] === "iyou"; })) {
+            tags.push(["client", "iyou"]);
+        }
+        if (!tags.some(function (t) { return t[0] === "t" && t[1] === "iyou"; })) {
+            tags.push(["t", "iyou"]);
+        }
         var kind = (attachedMedia && !text) ? 1063 : 1;
         var event = {
             kind: kind,
@@ -186,10 +194,15 @@
             bridgeClient.isProcessing = false;
         } else {
 
+            // Optimistic render: surface the signed event in the local feed DOM
+            // immediately, without waiting for relay gossip round-trips.
+            var optimisticEvent = signedEvent || pendingEvent;
+            if (optimisticEvent && optimisticEvent.id) {
+                addNoteToFeed(optimisticEvent);
+            }
             bridgeClient.broadcastToRelays(pendingEvent, null, function (localOk, anyOk) {
                 if (anyOk) {
                     showToast("Sovereign Event Broadcasted Successfully.");
-                    addNoteToFeed(pendingEvent);
                 } else if (!localOk) {
                     showToast("Failed to broadcast to all relays. Event may not be visible.", true);
                 }

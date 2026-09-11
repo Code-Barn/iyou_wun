@@ -3337,7 +3337,7 @@ class Phase36ProfileNotesAPITest(TestCase):
                 
                 self.assertEqual(filter_obj.get("limit"), 25)
                 self.assertEqual(filter_obj.get("until"), 1234567890)
-                self.assertEqual(filter_obj.get("kinds"), [1])
+                self.assertEqual(filter_obj.get("kinds"), [1, 6, 30023])
                 self.assertIn(test_pubkey, filter_obj.get("authors", []))
 
 
@@ -3406,4 +3406,140 @@ class Phase45SessionAndRelayHardeningTests(TestCase):
         self.assertIn("wss://relay.primal.net", DEFAULT_RELAYS[:3])
         self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:3])
         self.assertIn("wss://purplerelay.com", DEFAULT_RELAYS)
+
+
+class Secp256k1PubkeyIngestionTests(TestCase):
+    """Enclave-synced Secp256k1 pubkey ingestion, dual-identity profile resolution & ecosystem tagging."""
+
+    SYNCPK = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    DIDPK = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+    def setUp(self):
+        self.user = User.objects.create_user(username=f"did:key:z6Mk{self.DIDPK[:28]}")
+
+    def _sync_keys_post(self, payload=None, login=True):
+        payload = payload or {"nostr_pubkey_hex": self.SYNCPK}
+        if login:
+            self.client.force_login(self.user)
+        return self.client.post(
+            reverse("api_sync_keys"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+    def test_sync_keys_persists_enclave_pubkey_onto_deck_and_session(self):
+        UserLinkDeck.objects.create(user=self.user, handle=f"sync_{self.DIDPK[:6]}")
+        resp = self._sync_keys_post()
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["nostr_pubkey_hex"], self.SYNCPK)
+
+        deck = UserLinkDeck.objects.get(user=self.user)
+        self.assertEqual(deck.nostr_pubkey, self.SYNCPK)
+        self.assertEqual(self.client.session["nostr_pubkey_hex"], self.SYNCPK)
+
+    def test_sync_keys_creates_deck_when_missing(self):
+        resp = self._sync_keys_post()
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["deck_created"])
+        deck = UserLinkDeck.objects.get(user=self.user)
+        self.assertEqual(deck.nostr_pubkey, self.SYNCPK)
+        self.assertTrue(deck.handle)
+
+    def test_sync_keys_rejects_invalid_hex(self):
+        resp = self._sync_keys_post(payload={"nostr_pubkey_hex": "not-a-hex-key"})
+        self.assertEqual(resp.status_code, 400)
+        deck = UserLinkDeck.objects.filter(user=self.user).first()
+        self.assertIsNone(deck)
+
+    def test_sync_keys_requires_authentication(self):
+        resp = self._sync_keys_post(login=False)
+        self.assertEqual(resp.status_code, 401)
+
+    def test_sync_keys_rejects_non_post(self):
+        resp = self.client.get(reverse("api_sync_keys"))
+        self.assertEqual(resp.status_code, 405)
+
+    def test_effective_user_pubkey_prefers_synced_key_over_did_derived(self):
+        from apps.core.views import get_effective_user_pubkey
+
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(user=owner, handle="enclaveholder", nostr_pubkey=self.SYNCPK)
+
+        # Deck-synced key resolves even without a session snapshot.
+        deck_request = type("Req", (), {"user": owner, "session": {}})()
+        self.assertEqual(get_effective_user_pubkey(deck_request), self.SYNCPK)
+
+        # Session snapshot wins over the deck too.
+        session_request = type("Req", (), {"user": owner, "session": {"nostr_pubkey_hex": self.SYNCPK}})()
+        self.assertEqual(get_effective_user_pubkey(session_request), self.SYNCPK)
+
+    def test_effective_user_pubkey_falls_back_to_did_derived(self):
+        from apps.core.views import get_effective_user_pubkey
+
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        request = type("Req", (), {"user": owner, "session": {}})()
+        self.assertEqual(get_effective_user_pubkey(request), pk)
+
+    def test_profile_is_owner_when_viewing_own_enclave_synced_key(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(user=owner, handle="enclaveholder")
+        self.client.force_login(owner)
+        session = self.client.session
+        session["nostr_pubkey_hex"] = self.SYNCPK
+        session.save()
+
+        with (
+            patch("apps.core.views.relay_req", return_value={}),
+            patch("apps.core.views.fetch_profile_data", return_value={}),
+        ):
+            response = self.client.get(reverse("profile", args=[hex_to_npub(self.SYNCPK)]))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["is_owner"])
+
+    def test_api_profile_notes_queries_dual_identity_candidates(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(user=owner, handle="dualidentity", nostr_pubkey=self.SYNCPK)
+
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            response = self.client.get(reverse("api_profile_notes", args=[self.SYNCPK]))
+        self.assertEqual(response.status_code, 200)
+
+        first_call_args = mock_relay_req.call_args_list[0]
+        filter_obj = first_call_args[0][0] if first_call_args and first_call_args[0] else {}
+        self.assertEqual(filter_obj.get("kinds"), [1, 6, 30023])
+        authors = set(filter_obj.get("authors", []))
+        self.assertIn(self.SYNCPK, authors)
+        self.assertIn(pk, authors)
+
+    def test_bridge_client_persists_synced_pubkey_and_syncs_to_server(self):
+        src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
+        self.assertIn("profile_sync", src)
+        self.assertIn('localStorage.setItem("nostr_pubkey_hex"', src)
+        self.assertIn("syncKeysToServer", src)
+        self.assertIn("/api/auth/sync-keys/", src)
+        self.assertIn("nostr_pubkey_hex", src)
+
+    def test_feed_interactions_injects_ecosystem_tags(self):
+        src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()
+        self.assertIn("client", src)
+        self.assertIn('["client", "iyou"]', src)
+        self.assertIn('["t", "iyou"]', src)
+
+    def test_composer_renders_ecosystem_tag_hint(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(user=owner, handle="composer", is_public=True)
+        self.client.force_login(owner)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "#iyou")
+        self.assertContains(response, "auto-tagged")
+        self.assertContains(response, 'id="btn-publish-note"')
 
