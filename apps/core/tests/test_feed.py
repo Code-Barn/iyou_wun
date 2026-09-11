@@ -1414,6 +1414,34 @@ class IsRenderableNoteTest(TestCase):
         self.assertNotIn("b1", root_ids)
         self.assertNotIn("e1", root_ids)
 
+    def test_fetch_unified_feed_merges_author_and_tag_queries_by_id(self):
+        """Phase 7: inclusive iyou circle merges the authors query with a #t
+        tag query and dedupes strictly by event id."""
+        from ..views import fetch_unified_feed
+        from unittest.mock import patch
+        from .helpers import make_event
+
+        author_only = make_event("author_note_1", 1, content="From an ecosystem author", pubkey="pk1")
+        tagged_only = make_event("tagged_note_1", 1, content="Client-tagged companion frame", tags=[["client", "iyou"]])
+        duplicate = make_event("dup_note_1", 1, content="Author note seen in both queries")
+
+        author_events = {"author_note_1": author_only, "dup_note_1": duplicate}
+        tagged_events = {"tagged_note_1": tagged_only, "dup_note_1": duplicate}
+
+        def fake_relay_req(filt, **kwargs):
+            if filt.get("#t") == ["iyou"]:
+                return tagged_events
+            return author_events
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            feed_data = fetch_unified_feed(authors=["pk1"], tags={"t": ["iyou"]}, limit=50)
+
+        root_ids = [r["id"] for r in feed_data["roots"]]
+        self.assertIn("author_note_1", root_ids)
+        self.assertIn("tagged_note_1", root_ids)
+        # The overlapping duplicate event appears exactly once.
+        self.assertEqual(root_ids.count("dup_note_1"), 1)
+
 
 class LanguageDetectionCalibrationTest(TestCase):
     """Phase 27: Language Detection Calibration Tests."""
@@ -1471,14 +1499,23 @@ class LanguageDetectionCalibrationTest(TestCase):
 
 class ApiFeedIyouCircleTests(TestCase):
     def test_api_feed_iyou_returns_empty_and_no_more_without_ecosystem_keys(self):
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req") as mock_relay:
+        # Phase 7: the iyou circle is inclusive — even with no registered
+        # ecosystem keys, the #t: iyou tag query is still issued server-side so
+        # client-tagged companion frames surface.
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req", return_value={}) as mock_relay:
             response = self.client.get("/api/feed?circle=iyou")
             self.assertEqual(response.status_code, 200)
             data = response.json()
             self.assertTrue(data.get("success"))
             self.assertEqual(data.get("notes"), [])
             self.assertFalse(data.get("has_more"))
-            mock_relay.assert_not_called()
+            self.assertTrue(mock_relay.called)
+            tag_filters = [
+                c[0][0] for c in mock_relay.call_args_list
+                if isinstance(c[0][0], dict) and c[0][0].get("#t") == ["iyou"]
+            ]
+            self.assertEqual(len(tag_filters), 1)
+            self.assertNotIn("authors", tag_filters[0])
 
 
 class Phase45RelayDeadlineTests(TestCase):

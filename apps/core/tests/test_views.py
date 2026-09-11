@@ -774,12 +774,18 @@ class DashboardProfileTest(TestCase):
             self.assertNotIn("authors", filter_obj)
 
     def test_api_feed_iyou_maintains_scoped_authors_requirement(self):
+        # Phase 7: the iyou circle keeps the ecosystem author-scope AND issues
+        # the inclusive #t: iyou tag query, then merges/dedupes by event id.
         with patch("apps.core.views.get_iyou_pubkeys", return_value=["pk1", "pk2"]), patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
             response = self.client.get(reverse("api_feed") + "?circle=iyou")
             self.assertEqual(response.status_code, 200)
             self.assertTrue(mock_relay_req.called)
-            filter_obj = mock_relay_req.call_args[0][0]
-            self.assertEqual(filter_obj.get("authors"), ["pk1", "pk2"])
+            self.assertEqual(len(mock_relay_req.call_args_list), 2)
+            authors_filter = mock_relay_req.call_args_list[0][0][0]
+            tag_filter = mock_relay_req.call_args_list[1][0][0]
+            self.assertEqual(tag_filter.get("#t"), ["iyou"])
+            self.assertNotIn("authors", tag_filter)
+            self.assertEqual(authors_filter.get("authors"), ["pk1", "pk2"])
 
 
 
@@ -1225,6 +1231,39 @@ class BackupGraphTest(TestCase):
         self.assertIn('"/api/media/upload/"', src)
         self.assertIn("handleMediaSelected", src)
         self.assertIn("SHA-256", src)
+
+    def test_relay_pool_carries_keep_alive_and_reconnect_contract(self):
+        src = (settings.BASE_DIR / "static" / "js" / "relay_pool.js").read_text()
+        # Phase 7: 25s keep-alive heartbeat + exponential-backoff auto-reconnect.
+        self.assertIn("KEEPALIVE_INTERVAL_MS = 25000", src)
+        self.assertIn("RECONNECT_BASE_MS = 2000", src)
+        self.assertIn("RECONNECT_MAX_MS = 30000", src)
+        self.assertIn("_startHeartbeat", src)
+        self.assertIn("_scheduleReconnect", src)
+        self.assertIn("_replaySubscriptions", src)
+        self.assertIn("ensureConnection", src)
+        self.assertIn("onReconnect", src)
+        self.assertIn("reloadFeedForCircle", src)
+
+    def test_feed_interactions_carries_signature_timeout_contract(self):
+        src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()
+        # Phase 7: a 15s ceiling on the iyou_home signature handshake restores
+        # the composer button and surfaces an unlock hint on expiry.
+        self.assertIn("SIGNATURE_WAIT_TIMEOUT_MS = 15000", src)
+        self.assertIn("armSignatureWait", src)
+        self.assertIn("cancelSignatureWait", src)
+        self.assertIn("Signature request timed out. Please ensure iyou_home is unlocked.", src)
+        self.assertIn('"warning"', src)
+
+    def test_circle_feed_filter_carries_inclusive_iyou_contract(self):
+        src = (settings.BASE_DIR / "static" / "js" / "circle_feed_filter.js").read_text()
+        # Phase 7: the iyou circle matches data-client="iyou" cards and root
+        # events tagged ["client","iyou"] or ["t","iyou"] in addition to the
+        # ecosystem author/DID set.
+        self.assertIn('getAttribute("data-client") === "iyou"', src)
+        self.assertIn('getCardTags(card).some(tagIsIyou)', src)
+        self.assertIn('key === "t" && value === "iyou"', src)
+        self.assertIn('key === "client" && value === "iyou"', src)
 
 
 class MediaUploadProxyViewTest(TestCase):
@@ -3024,8 +3063,11 @@ class Phase24ViewsTest(TestCase):
         self.assertIn("error", data)
 
     def test_iyou_feed_zero_bleed_when_empty(self):
+        # Phase 7: with zero registered ecosystem keys the authors scope is an
+        # empty query, but the inclusive #t: iyou tag query is still issued so
+        # client-tagged companion frames can surface. Zero notes either way.
         url = reverse("api_feed") + "?circle=iyou"
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req") as mock_relay:
+        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req", return_value={}) as mock_relay:
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
             data = response.json()
@@ -3033,7 +3075,13 @@ class Phase24ViewsTest(TestCase):
             self.assertEqual(data["notes"], [])
             self.assertEqual(data["replies"], {})
             self.assertFalse(data["has_more"])
-            mock_relay.assert_not_called()
+            self.assertTrue(mock_relay.called)
+            tag_filters = [
+                c[0][0] for c in mock_relay.call_args_list
+                if isinstance(c[0][0], dict) and c[0][0].get("#t") == ["iyou"]
+            ]
+            self.assertEqual(len(tag_filters), 1)
+            self.assertNotIn("authors", tag_filters[0])
 
     def test_api_translate_endpoint_post(self):
         """Asserts POST /api/translate/ returns 200 with JSON payload."""
@@ -3516,6 +3564,24 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         authors = set(filter_obj.get("authors", []))
         self.assertIn(self.SYNCPK, authors)
         self.assertIn(pk, authors)
+
+    def test_api_profile_notes_decodes_npub_candidates_to_hex(self):
+        # Relays reject npub1... in filter `authors` arrays, so any candidate
+        # that arrives as an npub (e.g. a deck key synced from the enclave) must
+        # be decoded to its 64-char hex form before the profile query is built.
+        deck_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{deck_pk}")
+        UserLinkDeck.objects.create(user=owner, handle="npubdeck", nostr_pubkey=hex_to_npub(deck_pk))
+
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            response = self.client.get(reverse("api_profile_notes", args=[hex_to_npub(deck_pk)]))
+        self.assertEqual(response.status_code, 200)
+
+        first_call_args = mock_relay_req.call_args_list[0]
+        filter_obj = first_call_args[0][0] if first_call_args and first_call_args[0] else {}
+        authors = set(filter_obj.get("authors", []))
+        self.assertIn(deck_pk, authors)
+        self.assertTrue(all(len(a) == 64 and all(c in "0123456789abcdef" for c in a) for a in authors))
 
     def test_bridge_client_persists_synced_pubkey_and_syncs_to_server(self):
         src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()

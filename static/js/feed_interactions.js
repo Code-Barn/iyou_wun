@@ -19,6 +19,15 @@
     var quotedTarget = null;
     var attachedMedia = null;
 
+    // 15-second ceiling for the iyou_home signature-approval handshake. If the
+    // bridge never returns a signed event inside this window (or its socket
+    // drops while waiting), the composer is restored and the user is told to
+    // unlock iyou_home.
+    var SIGNATURE_WAIT_TIMEOUT_MS = 15000;
+    var signatureWaitTimer = null;
+    var signatureWaitSocket = null;
+    var signatureWaitSocketHandler = null;
+
     window.pendingReply = null;
 
     // ---------- Renderability Check ----------
@@ -93,11 +102,60 @@
             tags: tags,
         };
         bridgeClient.signEvent(event);
+        armSignatureWait();
+    }
+
+    // ---------- Signature Wait Timeout ----------
+
+    function cancelSignatureWait() {
+        if (signatureWaitTimer) {
+            clearTimeout(signatureWaitTimer);
+            signatureWaitTimer = null;
+        }
+        if (signatureWaitSocket && signatureWaitSocketHandler) {
+            try { signatureWaitSocket.removeEventListener("close", signatureWaitSocketHandler); } catch (e) { /* ignore */ }
+            try { signatureWaitSocket.removeEventListener("error", signatureWaitSocketHandler); } catch (e) { /* ignore */ }
+        }
+        signatureWaitSocket = null;
+        signatureWaitSocketHandler = null;
+    }
+
+    function restoreAfterSignatureTimeout() {
+        cancelSignatureWait();
+        // Restore the composer button back to its idle "Post Note" state so the
+        // user is never stranded in the loading spinner after a silent fail.
+        setButtonLoading(false);
+        if (bridgeClient) {
+            bridgeClient.isProcessing = false;
+            bridgeClient.pendingEvent = null;
+        }
+        var toastFn = (typeof window.showToast === "function") ? window.showToast : null;
+        if (toastFn) {
+            toastFn("Signature request timed out. Please ensure iyou_home is unlocked.", "warning");
+        }
+    }
+
+    function armSignatureWait() {
+        cancelSignatureWait();
+        signatureWaitTimer = setTimeout(restoreAfterSignatureTimeout, SIGNATURE_WAIT_TIMEOUT_MS);
+
+        // Fail fast when the bridge socket drops while waiting for approval,
+        // instead of holding the user for the full 15s.
+        var sock = (bridgeClient && bridgeClient.socket) ? bridgeClient.socket : null;
+        if (sock) {
+            signatureWaitSocket = sock;
+            signatureWaitSocketHandler = function () { restoreAfterSignatureTimeout(); };
+            try { sock.addEventListener("close", signatureWaitSocketHandler); } catch (e) { /* ignore */ }
+            try { sock.addEventListener("error", signatureWaitSocketHandler); } catch (e) { /* ignore */ }
+        }
     }
 
     // ---------- Broadcast Callback ----------
 
     function handleSignedEvent(pendingEvent, signedEvent) {
+        // A signed event arrived: the approval handshake succeeded, so any
+        // pending 15-second wait timer is moot.
+        cancelSignatureWait();
         if (pendingReply) {
             var replyRootId = pendingReply.rootId;
             var replyBtn = document.getElementById("reply-btn-" + replyRootId);

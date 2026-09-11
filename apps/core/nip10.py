@@ -540,6 +540,37 @@ def parse_nip10_tags(tags):
 NOSTR_NOTE_URI_REGEX = re.compile(r"nostr:(note1|nevent1)[0-9a-z]+", re.IGNORECASE)
 
 
+def npub_to_hex(identifier):
+    """Decode a bech32 ``npub1...`` Nostr pubkey to its 64-char lowercase hex form.
+
+    Accepts either a ``npub1...`` identifier or a bare 64-character hex string
+    (returned as-is, normalized to lowercase). Returns ``None`` when the input
+    is not a valid Nostr public key. Relays reject ``npub1...`` in filter
+    ``authors`` arrays, so this is the canonical normalization point before a
+    profile/feed query is built.
+    """
+    if not identifier or not isinstance(identifier, str):
+        return None
+    clean = identifier.strip()
+    if re.fullmatch(r"[0-9a-fA-F]{64}", clean):
+        return clean.lower()
+    if not clean.lower().startswith("npub1"):
+        return None
+    try:
+        hrp, data = bech32.bech32_decode(clean)
+        if hrp != "npub" or data is None:
+            return None
+        decoded = bech32.convertbits(data, 5, 8, False)
+        if decoded is None:
+            return None
+        payload = bytes(decoded)
+        if len(payload) < 32:
+            return None
+        return payload[:32].hex()
+    except Exception:
+        return None
+
+
 def decode_nostr_uri(uri):
     """Decode a NIP-27 `nostr:note1...` / `nostr:nevent1...` URI into (event_id, pubkey).
 

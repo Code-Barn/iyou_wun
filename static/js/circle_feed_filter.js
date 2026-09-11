@@ -121,6 +121,25 @@
         return { root, pubkey, did, tagsRaw, mediaType, mimeType, altText, author, textContent };
     }
 
+    function getCardTags(card) {
+        if (!card) return [];
+        const raw = card.getAttribute("data-tags") || card.getAttribute("data-note-tags") || "";
+        if (!raw) return [];
+        try {
+            const parsed = JSON.parse(raw);
+            return Array.isArray(parsed) ? parsed : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function tagIsIyou(tag) {
+        if (!Array.isArray(tag) || tag.length < 2) return false;
+        const key = String(tag[0] || "").toLowerCase();
+        const value = String(tag[1] || "").toLowerCase();
+        return (key === "client" && value === "iyou") || (key === "t" && value === "iyou");
+    }
+
     function isAuthorMatchingUser(pubkey, did) {
         const currentPubkey = normalizeKey(
             global.userPubkey ||
@@ -182,6 +201,13 @@
                                card.getAttribute("data-is-sovereign") === "true";
 
             if (isIyouAttr) return true;
+
+            // Inclusive iyou circle: a card also counts when it was authored via
+            // the iyou client (data-client="iyou" attribute) or carries the
+            // ecosystem client tag (["client","iyou"]) or keyword tag (["t","iyou"])
+            // on its root event.
+            if (card.getAttribute && card.getAttribute("data-client") === "iyou") return true;
+            if (getCardTags(card).some(tagIsIyou)) return true;
 
             const iyouKeys = (global.IYOU_ECOSYSTEM_KEYS || window.IYOU_ECOSYSTEM_KEYS || []).map(normalizeKey);
             if (authorPk && iyouKeys.includes(authorPk)) return true;

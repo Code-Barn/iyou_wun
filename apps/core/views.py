@@ -515,6 +515,24 @@ def _resolve_profile_candidates(identifier):
     return carried, owner_user, owner_deck, hex_pubkey, candidates
 
 
+def _hex_author_candidates(candidates):
+    """Normalize profile author-candidate keys to 64-char lowercase hex.
+
+    Bech32 ``npub1...`` identifiers (e.g. a link-deck's enclave-synced key that
+    may be stored as an npub) are decoded to their 32-byte hex form via
+    ``npub_to_hex``. Nostr relays reject ``npub1...`` inside filter ``authors``
+    arrays, so every value returned here is a relay-safe plain hex pubkey.
+    """
+    cleaned = []
+    for c in candidates or []:
+        if not c:
+            continue
+        hx = npub_to_hex(str(c).strip())
+        if hx and re.fullmatch(r"[0-9a-fA-F]{64}", hx):
+            cleaned.append(hx.lower())
+    return list(set(cleaned))
+
+
 def get_relays_for_request(request=None):
     """Retrieve default relays, omitting unencrypted ws:// if request is served over HTTPS."""
     relays = DEFAULT_RELAYS
@@ -721,12 +739,15 @@ class FeedView(TemplateView):
                 feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
             elif circle == "iyou":
                 iyou_pks = get_iyou_pubkeys()
-                if not iyou_pks:
-                    feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
-                else:
-                    feed_data = fetch_unified_feed(
-                        authors=iyou_pks, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
-                    )
+                # Inclusive iyou circle: authors query (when ecosystem keys exist)
+                # merged with the #t iyou tag query so tag-only companion frames
+                # still surface server-side.
+                feed_data = fetch_unified_feed(
+                    authors=iyou_pks or None,
+                    tags={"t": ["iyou"]},
+                    relay_urls=relays,
+                    deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT,
+                )
             elif circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(
                     user_pubkey, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
@@ -1098,26 +1119,23 @@ def api_feed(request):
 
     if circle == "iyou":
         iyou_pks = get_iyou_pubkeys()
-        if not iyou_pks:
-            return JsonResponse({
-                "success": True,
-                "notes": [],
-                "replies": {},
-                "thread_replies": {},
-                "total_replies": 0,
-                "thread_reply_count": 0,
-                "oldest_timestamp": None,
-                "has_more": False,
-            })
-        filter_obj["authors"] = iyou_pks
-    elif circle in ("following", "network") and user_pubkey:
-        contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays, timeout=1.5, deadline=feed_deadline)
-        if contacts:
-            filter_obj["authors"] = contacts
-        else:
+        # Inclusive iyou circle: query the author set (ecosystem keys) AND a
+        # #t iyou tag query, merged server-side by event id. Companion/digest
+        # frames that only carry the ecosystem client tag surface even when
+        # their author key is not in the ecosystem set.
+        tag_query = {"#t": ["iyou"]}
+        if iyou_pks:
+            filter_obj["authors"] = iyou_pks
+    else:
+        tag_query = None
+        if circle in ("following", "network") and user_pubkey:
+            contacts = fetch_contact_pubkeys(user_pubkey, relay_urls=relays, timeout=1.5, deadline=feed_deadline)
+            if contacts:
+                filter_obj["authors"] = contacts
+            else:
+                filter_obj["authors"] = CURATED_AUTHORS
+        elif circle in ("following", "network") and not user_pubkey:
             filter_obj["authors"] = CURATED_AUTHORS
-    elif circle in ("following", "network") and not user_pubkey:
-        filter_obj["authors"] = CURATED_AUTHORS
 
     raw_events = relay_req(
         filter_obj,
@@ -1125,6 +1143,15 @@ def api_feed(request):
         timeout=2.5,
         deadline=feed_deadline,
     )
+
+    if tag_query:
+        tagged_events = relay_req(
+            tag_query,
+            relay_urls=relays,
+            timeout=2.5,
+            deadline=feed_deadline,
+        )
+        raw_events = _merge_events_by_id(raw_events, tagged_events)
 
     # Filter out non-renderable events (empty notes, P2P discovery beacons)
     from .nip10 import is_renderable_note
@@ -1311,7 +1338,11 @@ def api_profile_notes(request, identifier):
 
     hex_pubkey = str(hex_pubkey).strip().lower()
     # De-duplicate candidates; a bare hex identifier is always its own author.
-    author_candidates = list(set(str(c).strip().lower() for c in author_candidates if c))
+    # Any npub1... identifier (e.g. an enclave-synced deck key stored as an npub)
+    # is decoded to hex — relays reject npub1... in filter `authors` arrays.
+    author_candidates = _hex_author_candidates(author_candidates)
+    if not author_candidates:
+        return JsonResponse({"notes": [], "has_more": False, "error": "Invalid identifier"}, status=400)
 
     limit = request.GET.get("limit", 50)
     until = request.GET.get("until")
@@ -2548,16 +2579,44 @@ def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None):
     return roots
 
 
-def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None):
+def _merge_events_by_id(*event_batches):
+    """Merge one or more relay event mappings, deduplicating strictly by event id.
+
+    Accepts dicts or lists of raw Nostr events; the first occurrence of an event
+    id wins so multi-relay and multi-query results never fan out duplicates.
+    """
+    merged = {}
+    for events in event_batches:
+        if isinstance(events, dict):
+            items = events.items()
+        elif isinstance(events, list):
+            items = [(e.get("id"), e) for e in events if isinstance(e, dict) and e.get("id")]
+        else:
+            continue
+        for eid, e in items:
+            if e is None:
+                continue
+            real_id = e.get("id") or eid
+            if real_id and real_id not in merged:
+                merged[real_id] = e
+    return merged
+
+
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
     Phase 1: Fetch kinds [1, 7, 1063, 1111] with optional authors filter.
     Phase 2: Fetch Kind 0 metadata for all unique pubkeys discovered.
     Returns a structured feed with author_name/author_avatar populated.
 
+    `tags` optionally maps NIP-01 filter keys (e.g. ``{"t": ["iyou"]}``) to an
+    *inclusive* second query that is merged (by event id) with the authors
+    query — so companion-tool/dispatch frames that only carry the ecosystem tag
+    still surface in the iyou circle.
+
     `deadline` optionally bounds the total wall-clock time (Phase 34 instant shell).
     """
-    if authors is not None and not authors:
+    if authors is not None and not authors and not tags:
         return {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
 
     filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
@@ -2565,6 +2624,17 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
         filter_obj["authors"] = authors
 
     raw_events = relay_req(filter_obj, relay_urls=relay_urls, timeout=timeout, deadline=deadline)
+
+    # Inclusive tag query: fetch events carrying the given tag(s) alongside the
+    # authors query and merge/deduplicate by event id.
+    if tags:
+        tagged_filter = {"kinds": list(filter_obj["kinds"]), "limit": limit}
+        for key, values in tags.items():
+            if isinstance(values, (list, tuple)) and values:
+                # NIP-01 tag filters use the "#<tagname>" form (e.g. #t).
+                tagged_filter["#" + str(key).lstrip("#")] = list(values)
+        tagged_events = relay_req(tagged_filter, relay_urls=relay_urls, timeout=timeout, deadline=deadline)
+        raw_events = _merge_events_by_id(raw_events, tagged_events)
 
     # Filter out non-renderable events (empty notes, P2P discovery beacons)
     from .nip10 import is_renderable_note
@@ -3053,6 +3123,10 @@ class ProfileView(TemplateView):
 
         carried, owner_user, owner_deck, hex_pubkey, author_candidates = _resolve_profile_candidates(identifier)
 
+        # Normalize every candidate to relay-safe 64-char lowercase hex so the
+        # client-side profile stream never forwards npub1... into relay filters.
+        author_candidates = _hex_author_candidates(author_candidates)
+
         context["hex_pubkey"] = hex_pubkey or ""
         context["target_pubkey_hex"] = hex_pubkey or ""
         context["target_nostr_pubkey_hex"] = hex_pubkey or ""
@@ -3066,9 +3140,7 @@ class ProfileView(TemplateView):
 
         # Instant Profile Shell: resolve local metadata immediately without blocking on relays.
         context["hydrate_profile"] = True
-        context["candidates_json"] = json.dumps(
-            list(set(str(c).strip().lower() for c in author_candidates if c))
-        )
+        context["candidates_json"] = json.dumps(author_candidates)
 
         profile = {}
 

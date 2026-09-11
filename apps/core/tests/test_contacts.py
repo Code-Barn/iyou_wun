@@ -144,6 +144,18 @@ class KeyDerivationTests(TestCase):
         hex_pubkey = npub_to_hex(sample_npub)
         self.assertEqual(hex_pubkey, sample_hex)
 
+    def test_nip10_npub_to_hex_derivation(self):
+        from ..nip10 import npub_to_hex as nip10_npub_to_hex
+
+        sample_hex = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        sample_npub = hex_to_npub(sample_hex)
+        self.assertEqual(nip10_npub_to_hex(sample_npub), sample_hex)
+        self.assertEqual(nip10_npub_to_hex(sample_hex), sample_hex)
+        self.assertEqual(nip10_npub_to_hex(sample_hex.upper()), sample_hex)
+        self.assertIsNone(nip10_npub_to_hex("not-a-key"))
+        self.assertIsNone(nip10_npub_to_hex(""))
+        self.assertIsNone(nip10_npub_to_hex(None))
+
 
 class ContactFollowAPITests(TestCase):
     def setUp(self):

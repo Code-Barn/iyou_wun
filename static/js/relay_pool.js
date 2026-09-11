@@ -62,6 +62,11 @@
     var BROADCAST_TIMEOUT_MS = 4000;
     var PROBE_INTERVAL_MS = 45000;
 
+    // --- Keep-Alive & Auto-Reconnect ---
+    var KEEPALIVE_INTERVAL_MS = 25000; // heartbeat every 25s to defeat NAT/edge idle culling
+    var RECONNECT_BASE_MS = 2000;      // first reconnect attempt after 2s
+    var RECONNECT_MAX_MS = 30000;      // exponential backoff ceiling
+
     function normalizeUrl(url) {
         if (!url) return "";
         var u = String(url).trim();
@@ -91,6 +96,8 @@
         this.relays = new Map(); // url -> { url, read, write, isLocal, primary, status, latencyMs, lastProbe, failCount }
         this.listeners = [];
         this.probeTimer = null;
+        this.connections = new Map(); // normUrl -> managed persistent socket entry { socket, url, norm, backoffMs, reconnectTimer, heartbeatTimer, filters, onEvent }
+        this.reconnectHooks = [];
         this._initPool();
     }
 
@@ -550,6 +557,187 @@
         });
     };
 
+    /**
+     * Register a callback invoked each time a managed persistent socket
+     * successfully (re)connects. Feed controllers use this to re-issue active
+     * feed filters without requiring a full page refresh.
+     */
+    RelayPool.prototype.onReconnect = function (callback) {
+        if (typeof callback === "function") {
+            this.reconnectHooks.push(callback);
+        }
+        return this;
+    };
+
+    /**
+     * Open (or reuse) a persistent managed socket for a relay URL. Managed
+     * sockets receive the 25-second keep-alive heartbeat and automatic
+     * reconnect with exponential backoff (2s -> 30s). Returns the WebSocket,
+     * or null when the relay is disabled / blocked by mixed-content rules.
+     */
+    RelayPool.prototype.ensureConnection = function (url, filter, onEvent) {
+        var norm = normalizeUrl(url);
+        var record = this.relays.get(norm);
+        if (!record || record.enabled === false) return null;
+        if (isMixedContentRelay(url)) return null; // browser Mixed Content blocks ws:// on HTTPS
+
+        var entry = this.connections.get(norm);
+        if (entry && entry.socket) {
+            var st = entry.socket.readyState;
+            if (st === WebSocket.OPEN || st === WebSocket.CONNECTING) {
+                if (onEvent) entry.onEvent = onEvent;
+                if (filter) this._addFilter(entry, filter);
+                return entry.socket;
+            }
+            this._teardownConnection(entry);
+        }
+
+        var self = this;
+        var ws;
+        try {
+            ws = new WebSocket(url);
+        } catch (err) {
+            return null;
+        }
+
+        entry = {
+            socket: ws,
+            url: url,
+            norm: norm,
+            backoffMs: RECONNECT_BASE_MS,
+            reconnectTimer: null,
+            heartbeatTimer: null,
+            filters: filter ? [filter] : [],
+            onEvent: onEvent || null
+        };
+        this.connections.set(norm, entry);
+
+        ws.onopen = function () {
+            entry.backoffMs = RECONNECT_BASE_MS;
+            self._startHeartbeat(entry);
+            self._replaySubscriptions(entry);
+            self._notifyReconnect(entry);
+        };
+        ws.onmessage = function (ev) {
+            if (entry.onEvent) {
+                try { entry.onEvent(ev); } catch (e) { /* ignore */ }
+            }
+        };
+        ws.onerror = function () {
+            // onclose drives the reconnect decision.
+        };
+        ws.onclose = function (ev) {
+            var graceful = ev && ev.code === 1000;
+            self._teardownConnection(entry);
+            if (!graceful) {
+                var rec = self.relays.get(norm);
+                if (rec && rec.enabled !== false) {
+                    self._scheduleReconnect(entry);
+                }
+            }
+            self._updateHealthUI();
+        };
+        return ws;
+    };
+
+    RelayPool.prototype._addFilter = function (entry, filter) {
+        if (!filter) return;
+        var exists = (entry.filters || []).some(function (f) {
+            return JSON.stringify(f) === JSON.stringify(filter);
+        });
+        if (!exists) entry.filters.push(filter);
+        this._replaySubscriptions(entry);
+    };
+
+    RelayPool.prototype._teardownConnection = function (entry) {
+        if (!entry) return;
+        if (entry.heartbeatTimer) { clearInterval(entry.heartbeatTimer); }
+        entry.heartbeatTimer = null;
+        if (entry.reconnectTimer) { clearTimeout(entry.reconnectTimer); }
+        entry.reconnectTimer = null;
+        if (entry.socket) {
+            entry.socket.onopen = entry.socket.onmessage = entry.socket.onerror = entry.socket.onclose = null;
+            try {
+                if (entry.socket.readyState === WebSocket.OPEN) entry.socket.close();
+            } catch (e) { /* ignore */ }
+        }
+        this.connections.delete(entry.norm);
+    };
+
+    /**
+     * 25-second heartbeat: while the socket is OPEN, issue a lightweight
+     * keep-alive / query frame (or a protocol-level ping when the runtime
+     * exposes one) so stateful NAT gateways and edge proxies do not cull the
+     * idle TCP stream.
+     */
+    RelayPool.prototype._startHeartbeat = function (entry) {
+        var self = this;
+        if (entry.heartbeatTimer) return;
+        entry.heartbeatTimer = setInterval(function () {
+            var ws = entry.socket;
+            if (!ws) return;
+            if (ws.readyState === WebSocket.OPEN) {
+                try {
+                    if (typeof ws.ping === "function") {
+                        ws.ping("wun-keepalive");
+                    } else {
+                        var kaSub = "wun_ka_" + Date.now().toString(36);
+                        ws.send(JSON.stringify(["REQ", kaSub, { limit: 1 }]));
+                        ws.send(JSON.stringify(["CLOSE", kaSub]));
+                    }
+                } catch (e) { /* ignore */ }
+            } else if (ws.readyState === WebSocket.CLOSED) {
+                self._stopHeartbeat(entry);
+            }
+        }, KEEPALIVE_INTERVAL_MS);
+    };
+
+    RelayPool.prototype._stopHeartbeat = function (entry) {
+        if (entry && entry.heartbeatTimer) {
+            clearInterval(entry.heartbeatTimer);
+            entry.heartbeatTimer = null;
+        }
+    };
+
+    /**
+     * Schedule a reconnection attempt for a managed socket using exponential
+     * backoff (2s base, capped at 30s). Pending subscriptions are replayed
+     * automatically once the socket reopens.
+     */
+    RelayPool.prototype._scheduleReconnect = function (entry) {
+        var self = this;
+        if (entry.reconnectTimer) { clearTimeout(entry.reconnectTimer); }
+        entry.reconnectTimer = null;
+        var delay = entry.backoffMs;
+        entry.backoffMs = Math.min(entry.backoffMs * 2, RECONNECT_MAX_MS);
+        entry.reconnectTimer = setTimeout(function () {
+            entry.reconnectTimer = null;
+            var record = self.relays.get(entry.norm);
+            if (record && record.enabled === false) return;
+            self.ensureConnection(entry.url, (entry.filters || [])[0] || null, entry.onEvent);
+        }, delay);
+    };
+
+    /**
+     * Re-issue every active filter recorded for a managed socket once it has
+     * (re)opened.
+     */
+    RelayPool.prototype._replaySubscriptions = function (entry) {
+        if (!entry || !entry.socket || entry.socket.readyState !== WebSocket.OPEN) return;
+        (entry.filters || []).forEach(function (filter, idx) {
+            var subId = "wun_resub_" + entry.norm.replace(/[^a-z0-9]/gi, "") + "_" + idx;
+            try {
+                entry.socket.send(JSON.stringify(["REQ", subId, filter]));
+            } catch (e) { /* ignore */ }
+        });
+    };
+
+    RelayPool.prototype._notifyReconnect = function (entry) {
+        this.reconnectHooks.forEach(function (cb) {
+            try { cb(entry.url); } catch (e) { /* ignore */ }
+        });
+    };
+
     RelayPool.prototype.probeRelays = function () {
         var promises = [];
         var self = this;
@@ -999,6 +1187,25 @@
         }
         return false;
     };
+
+    global.onRelayReconnect = function (callback) {
+        if (poolInstance && typeof poolInstance.onReconnect === "function") {
+            return poolInstance.onReconnect(callback);
+        }
+        return null;
+    };
+
+    // Auto re-subscribe any active feed filters when a managed pool socket
+    // recovers (no full page refresh needed). Safe to no-op when the feed
+    // controller has not been loaded yet.
+    poolInstance.onReconnect(function () {
+        if (typeof window !== "undefined" && typeof window.reloadFeedForCircle === "function") {
+            var circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === "function")
+                ? window.circleFeedFilter.getActiveCircle()
+                : "iyou";
+            try { window.reloadFeedForCircle(circle); } catch (e) { /* ignore */ }
+        }
+    });
 
     if (typeof module !== "undefined" && module.exports) {
         module.exports = poolInstance;
