@@ -1273,4 +1273,21 @@
     window.showSovereignToast = showSovereignToast;
     window.switchTab = switchTab;
     window.uuidv4 = uuidv4;
+
+    /**
+     * Post-login pubkey sync: dispatch POST /api/auth/sync-keys/ with the
+     * enclave-synced key cached in localStorage or on the active profile so the
+     * server-side session is authoritative before the first feed/profile render.
+     */
+    window.syncNostrPubkeyIfAvailable = function () {
+        var pubkey = null;
+        try { pubkey = localStorage.getItem("nostr_pubkey_hex"); } catch (e) { /* ignore */ }
+        if (!pubkey || !isHex64(pubkey)) {
+            var ap = window.activeProfile;
+            pubkey = ap ? (ap.nostr_pubkey_hex || ap.pubkey_hex || null) : null;
+        }
+        if (!pubkey || !isHex64(pubkey)) return;
+        if (typeof bridgeClient === "undefined" || !bridgeClient || !bridgeClient.syncKeysToServer) return;
+        bridgeClient.syncKeysToServer(pubkey.toLowerCase());
+    };
 })();

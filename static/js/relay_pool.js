@@ -678,13 +678,14 @@
             if (!ws) return;
             if (ws.readyState === WebSocket.OPEN) {
                 try {
-                    if (typeof ws.ping === "function") {
-                        ws.ping("wun-keepalive");
-                    } else {
-                        var kaSub = "wun_ka_" + Date.now().toString(36);
-                        ws.send(JSON.stringify(["REQ", kaSub, { limit: 1 }]));
-                        ws.send(JSON.stringify(["CLOSE", kaSub]));
-                    }
+                    // NIP-01 liveness check: issue a REQ for an impossible ID
+                    // that guarantees no relay match, immediately close the sub.
+                    // Browser WebSockets have no .ping() method; raw strings or
+                    // non-NIP-01 JSON arrays like ["PING"] cause nostr-rs-relay
+                    // to disconnect the client.
+                    var kaSub = "keepalive_" + Date.now().toString(36);
+                    ws.send(JSON.stringify(["REQ", kaSub, {"ids": ["0000000000000000000000000000000000000000000000000000000000000000"], "limit": 1}]));
+                    ws.send(JSON.stringify(["CLOSE", kaSub]));
                 } catch (e) { /* ignore */ }
             } else if (ws.readyState === WebSocket.CLOSED) {
                 self._stopHeartbeat(entry);

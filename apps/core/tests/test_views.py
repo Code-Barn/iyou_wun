@@ -475,6 +475,22 @@ class ProfileViewTest(TestCase):
         self.assertContains(response, "Edit Profile")
         self.assertNotContains(response, "id=\"follow-action-btn\"")
 
+    def test_profile_view_candidates_always_include_linked_deck_pubkey(self):
+        canonical = "7dfd8f16d927446a5f09c6a4e872f8d1e734d5e485ed759fe7ded1b87b14a504"
+        synced = "782772aab786d1de0ab4a6cf57ecc98b80528c6adc47691c049369563235e412"
+        npub = hex_to_npub(canonical)
+        user = User.objects.create_user(username=f"did:iyou:0x{canonical}")
+        UserLinkDeck.objects.create(user=user, handle="dual-identity", nostr_pubkey=synced)
+        self.client.force_login(user)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+
+        self.assertEqual(response.status_code, 200)
+        candidates = set(json.loads(response.context["candidates_json"]))
+        self.assertIn(synced, candidates)
+        self.assertIn(canonical, candidates)
+
     def test_profile_view_falls_back_to_local_deck_when_relays_have_no_kind0(self):
         pk = "1111111111111111111111111111111111111111111111111111111111111111"
         npub = hex_to_npub(pk)

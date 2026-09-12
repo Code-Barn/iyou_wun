@@ -146,6 +146,18 @@
         });
       }
     </script>
+
+    {% if request.user.is_authenticated %}
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        // Immediately after login, push the enclave-synced pubkey to the
+        // Django session so feed/profile relay queries use the true signing key.
+        if (window.syncNostrPubkeyIfAvailable) {
+          window.syncNostrPubkeyIfAvailable();
+        }
+      });
+    </script>
+    {% endif %}
 </body>
 
 
