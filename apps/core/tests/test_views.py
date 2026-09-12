@@ -3583,6 +3583,46 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         self.assertIn(deck_pk, authors)
         self.assertTrue(all(len(a) == 64 and all(c in "0123456789abcdef" for c in a) for a in authors))
 
+    def test_api_profile_notes_direct_npub_resolution_without_deck(self):
+        # Guarantee: /profile/npub18rdn... finds the notes of the decoded hex
+        # key even when no local user/link deck has synced yet.
+        target_pk = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
+        npub_identifier = hex_to_npub(target_pk)
+        self.assertTrue(npub_identifier.startswith("npub1"))
+
+        with patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+            response = self.client.get(reverse("api_profile_notes", args=[npub_identifier]))
+        self.assertEqual(response.status_code, 200)
+
+        first_call_args = mock_relay_req.call_args_list[0]
+        filter_obj = first_call_args[0][0] if first_call_args and first_call_args[0] else {}
+        self.assertEqual(filter_obj.get("kinds"), [1, 6, 30023])
+        authors = set(filter_obj.get("authors", []))
+        self.assertIn(target_pk, authors)
+        self.assertTrue(all(len(a) == 64 and all(c in "0123456789abcdef" for c in a) for a in authors))
+
+    def test_profile_view_backfills_deck_pubkey_from_session(self):
+        # Post-login race guard: when the bridge uploaded the enclave key to the
+        # session but the deck rendered blank, rendering the profile reverts the
+        # deck to the session key so relay author queries are not starved.
+        deck_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{deck_pk}")
+        deck = UserLinkDeck.objects.create(user=owner, handle="blankdeck")
+        self.assertFalse(deck.nostr_pubkey)
+        self.client.force_login(owner)
+        session = self.client.session
+        session["nostr_pubkey_hex"] = deck_pk
+        session.save()
+
+        with (
+            patch("apps.core.views.relay_req", return_value={}),
+            patch("apps.core.views.fetch_profile_data", return_value={}),
+        ):
+            response = self.client.get(reverse("profile", args=[hex_to_npub(deck_pk)]))
+        self.assertEqual(response.status_code, 200)
+        deck.refresh_from_db()
+        self.assertEqual(deck.nostr_pubkey, deck_pk)
+
     def test_bridge_client_persists_synced_pubkey_and_syncs_to_server(self):
         src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
         self.assertIn("profile_sync", src)
@@ -3590,6 +3630,22 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         self.assertIn("syncKeysToServer", src)
         self.assertIn("/api/auth/sync-keys/", src)
         self.assertIn("nostr_pubkey_hex", src)
+
+    def test_bridge_client_protocol_aware_url_and_sign_timeout(self):
+        src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
+        # Protocol-aware WSS bridge endpoint: secure WSS over HTTPS, loopback ws on dev.
+        self.assertIn("wss://home.iyou.me:9001/", src)
+        self.assertIn("ws://127.0.0.1:9001/", src)
+        self.assertIn("BRIDGE_URL", src)
+        # Signature handshake ceiling raised to 15s so the enclave can prompt.
+        self.assertIn("SIGN_TIMEOUT_MS = 15000", src)
+
+    def test_bridge_client_pending_key_sync_resilience(self):
+        src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
+        # A 401 from sync-keys parks the key for a post-login re-push.
+        self.assertIn("window.pendingKeySync = nostrPubkeyHex", src)
+        self.assertIn("flushPendingKeySync", src)
+        self.assertIn("res.status === 401", src)
 
     def test_feed_interactions_injects_ecosystem_tags(self):
         src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()

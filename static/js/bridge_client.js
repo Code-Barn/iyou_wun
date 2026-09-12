@@ -1,7 +1,9 @@
 /**
  * bridge_client.js — Tauri Signing Bridge Client
- * Singleton WebSocket connection to ws://127.0.0.1:9001 with mutex state machine,
- * 5-second timeout fallback modal, and relay broadcast utilities.
+ * Singleton WebSocket connection to the owner enclave bridge. The endpoint is
+ * protocol-aware (wss://home.iyou.me:9001/ over HTTPS, ws://127.0.0.1:9001/ on
+ * local dev) with a mutex state machine, a 15-second signature fallback modal,
+ * and relay broadcast utilities.
  *
  * Exposes: window.bridgeClient
  */
@@ -15,6 +17,17 @@
     var ALIAS_DEBOUNCE_MS = 200;
     var ALIAS_CONNECT_POLL_MAX_ATTEMPTS = 60;
     var PERSONA_QUERY_TIMEOUT_MS = 2500;
+
+    // Protocol-aware owner-enclave bridge endpoint. Over HTTPS the browser
+    // forbids mixed-content ws:// so the hardened WSS port on home.iyou.me is
+    // used; on local HTTP dev origins the loopback process is reached directly.
+    var isHttpsBridge = (typeof window !== "undefined" && window.location && window.location.protocol === "https:");
+    var BRIDGE_URL = isHttpsBridge ? "wss://home.iyou.me:9001/" : "ws://127.0.0.1:9001/";
+
+    // Upper bound on the signature-approval handshake. Raised to 15s so the
+    // owner enclave has time to surface its approval prompt instead of the
+    // client aborting prematurely (aligned with feed_interactions.js).
+    var SIGN_TIMEOUT_MS = 15000;
 
     // The sovereign local relay (ws://127.0.0.1:9003) is only included on a local
     // HTTP dev origin; over HTTPS we rely solely on the secure public pool.
@@ -389,9 +402,7 @@
         if (url) return url;
         if (typeof window !== "undefined" && window.TAURI_SIGNING_BRIDGE) return window.TAURI_SIGNING_BRIDGE;
         if (typeof window !== "undefined" && window.BRIDGE_WS_URL) return window.BRIDGE_WS_URL;
-        return (typeof window !== "undefined" && window.location && window.location.protocol === "https:")
-            ? "wss://home.iyou.me:9001/"
-            : "ws://127.0.0.1:9001/";
+        return BRIDGE_URL;
     };
 
     TauriBridgeClient.prototype.connect = function (onMessage) {
@@ -433,6 +444,9 @@
                 if (self.pendingSignedPayload) return;
                 socket.send(JSON.stringify({ type: "get_profile" }));
                 self.queryVaultPersonas();
+                // After a fresh socket/authenticated page render, re-push any
+                // enclave key parked while the session was still logging in.
+                self.flushPendingKeySync();
             };
             socket.onmessage = function (event) {
                 self._handleMessage(event.data);
@@ -615,6 +629,10 @@
      * Background POST of the enclave-synced Secp256k1 pubkey to the Django
      * session so server-side relay queries always use the true signing identity
      * instead of a DID-derived placeholder.  Best-effort — never blocks UI.
+     *
+     * When the session rejects with 401 (login in progress / not yet
+     * authenticated) the key is parked in window.pendingKeySync so the
+     * post-login flush re-pushes it immediately — no manual cache clear.
      */
     TauriBridgeClient.prototype.syncKeysToServer = function (nostrPubkeyHex) {
         if (!nostrPubkeyHex || !isHex64(nostrPubkeyHex)) return;
@@ -627,8 +645,32 @@
                     "X-CSRFToken": getCsrfToken()
                 },
                 body: JSON.stringify({ nostr_pubkey_hex: nostrPubkeyHex })
+            }).then(function (res) {
+                if (res.status === 401) {
+                    // Not authenticated yet — park the enclave key so the
+                    // post-login flush can upload it immediately.
+                    window.pendingKeySync = nostrPubkeyHex;
+                    try {
+                        if (typeof localStorage !== "undefined") {
+                            localStorage.setItem("nostr_pubkey_hex", nostrPubkeyHex);
+                        }
+                    } catch (e) { /* ignore storage quotas */ }
+                } else if (res.ok && window.pendingKeySync) {
+                    window.pendingKeySync = null;
+                }
             }).catch(function () { /* background sync is best-effort */ });
         } catch (e) { /* ignore */ }
+    };
+
+    /**
+     * Push any key parked by a previous 401 (window.pendingKeySync) to the
+     * server. Wired to the post-login flush: once the session is authenticated
+     * the re-push succeeds, clears the flag, and the enclave key is live.
+     */
+    TauriBridgeClient.prototype.flushPendingKeySync = function () {
+        var pending = window.pendingKeySync;
+        if (!pending || !isHex64(pending)) return;
+        this.syncKeysToServer(pending);
     };
 
     /**
@@ -792,9 +834,16 @@
                     // downstream signature/query uses the real identity instead of a
                     // DID-derived placeholder, and mirror it into the Django session.
                     var syncedHex = prof.nostr_pubkey_hex || prof.pubkey_hex || prof.pubkey || "";
+                    // Always cache whatever the enclave reports as the pubkey;
+                    // the server sync below only uploads 64-char hex forms.
+                    if (syncedHex) {
+                        try { localStorage.setItem("nostr_pubkey_hex", String(syncedHex)); } catch (e) { /* ignore storage quotas */ }
+                    }
                     if (isHex64(syncedHex)) {
-                        try { localStorage.setItem("nostr_pubkey_hex", syncedHex.toLowerCase()); } catch (e) { /* ignore storage quotas */ }
                         this.syncKeysToServer(syncedHex.toLowerCase());
+                    } else {
+                        // A previously parked key may now be authenticated.
+                        this.flushPendingKeySync();
                     }
 
                     this.updateActivePersonaUI(prof);
@@ -858,7 +907,7 @@
                     self._signResolvers.splice(idx, 1);
                     resolve(self.pendingEvent || event);
                 }
-            }, SOCKET_POLL_TIMEOUT + 1000);
+            }, SIGN_TIMEOUT_MS + 1000);
         });
 
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
@@ -882,7 +931,7 @@
                 clearInterval(checkSocket);
                 self.showFallbackModal();
             }
-        }, SOCKET_POLL_TIMEOUT);
+        }, SIGN_TIMEOUT_MS);
     };
 
     // ---------- NIP-04 End-to-End DM Cryptography ----------

@@ -392,6 +392,30 @@ def get_effective_user_pubkey(request=None):
     return did_to_pubkey(request.user.username) or ""
 
 
+def _backfill_deck_pubkey_from_session(request):
+    """Mirror the session's enclave pubkey onto the user's link deck if blank.
+
+    Post-login race guard: the bridge may upload the enclave key to the session
+    before the authenticated page renders the deck, leaving deck.nostr_pubkey
+    blank. Profile/feed relay author queries read from the deck, so a blank
+    deck silently drops the user's own signed notes. This backfill copies the
+    session key into the deck so those queries are authoritative either way.
+    """
+    if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
+        return
+    session_key = str(request.session.get("nostr_pubkey_hex") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", session_key):
+        return
+    try:
+        deck = UserLinkDeck.objects.filter(user=request.user).first()
+        if deck is not None and not deck.nostr_pubkey:
+            deck.nostr_pubkey = session_key
+            deck.save(update_fields=["nostr_pubkey", "updated_at"])
+    except Exception:
+        # Backfill is best-effort; never fail the page render because of it.
+        pass
+
+
 def _find_user_by_pubkey(hex_pubkey):
     """Locate the local User whose canonical or enclave key equals the given hex.
 
@@ -658,6 +682,10 @@ class FeedView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+
+        # Post-login race guard: ensure the deck carries the enclave key from the
+        # session before computing the effective pubkey used for feed queries.
+        _backfill_deck_pubkey_from_session(self.request)
 
         user_pubkey = get_effective_user_pubkey(self.request) if self.request.user.is_authenticated else None
         user_npub = did_to_npub(self.request.user.username) if self.request.user.is_authenticated else None
@@ -1341,6 +1369,16 @@ def api_profile_notes(request, identifier):
     # Any npub1... identifier (e.g. an enclave-synced deck key stored as an npub)
     # is decoded to hex — relays reject npub1... in filter `authors` arrays.
     author_candidates = _hex_author_candidates(author_candidates)
+
+    # Direct npub1... → hex resolution: guarantee the requested npub is included
+    # as an author even when the user link deck has not finished synchronizing
+    # yet (so /profile/npub18rdn... finds all notes signed by the decoded key).
+    if identifier.strip().lower().startswith("npub1"):
+        decoded_npub = npub_to_hex(identifier)
+        if decoded_npub:
+            author_candidates.append(decoded_npub)
+
+    author_candidates = list(set(author_candidates))
     if not author_candidates:
         return JsonResponse({"notes": [], "has_more": False, "error": "Invalid identifier"}, status=400)
 
@@ -3120,6 +3158,11 @@ class ProfileView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         identifier = kwargs.get("npub")
+
+        # Post-login race guard: mirror the session's enclave-synced pubkey onto
+        # the deck before resolving the profile so relay author queries are not
+        # starved by a blank deck.nostr_pubkey.
+        _backfill_deck_pubkey_from_session(self.request)
 
         carried, owner_user, owner_deck, hex_pubkey, author_candidates = _resolve_profile_candidates(identifier)
 

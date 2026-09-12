@@ -1286,6 +1286,26 @@ class FeedPhase24Test(TestCase):
         self.assertEqual(response.context["selected_circle"], "iyou")
         self.assertTrue(mock_get_iyou.called)
 
+    def test_feed_view_backfills_deck_pubkey_from_session(self):
+        from django.contrib.auth.models import User
+        from apps.core.models import UserLinkDeck
+
+        deck_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        owner = User.objects.create_user(username=f"did:iyou:0x{deck_pk}")
+        deck = UserLinkDeck.objects.create(user=owner, handle="feedblankdeck")
+        self.assertEqual(deck.nostr_pubkey, "")
+        self.client.force_login(owner)
+        session = self.client.session
+        session["nostr_pubkey_hex"] = deck_pk
+        session.save()
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["user_pubkey"], deck_pk)
+        deck.refresh_from_db()
+        self.assertEqual(deck.nostr_pubkey, deck_pk)
+
     def test_detect_content_warning_flags_nip36_and_heuristics(self):
         from apps.core.nip10 import detect_content_warning, sanitize_event_content, build_thread_tree
 
