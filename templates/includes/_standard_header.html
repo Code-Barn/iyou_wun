@@ -3,41 +3,34 @@
   window.CURRENT_SESSION_DID = "{{ current_session_did|default:user.username|escapejs }}";
 </script>
 <header class="relative z-30 border-b backdrop-blur-sm transition-colors duration-200 bg-white/90 border-slate-200 text-slate-900 dark:bg-[#0B0F19]/90 dark:border-gray-800 dark:text-gray-100">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 flex items-center justify-between">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 py-3.5 min-h-[64px] flex items-center justify-between" style="min-height: 64px;">
 
-    <!-- Left: Brand Lockup & Rectangular Domain Badge -->
-    <a href="/" class="flex items-center gap-2.5 group transition-transform active:scale-95" title="iyou_wun">
-      <!-- Leading Squircle Mark -->
-      <img
-        src="{% static 'img/logo_square_sm.png' %}"
-        onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
-        alt="wun"
-        class="w-6 h-6 sm:w-7 sm:h-7 rounded-lg object-cover shadow-sm border border-slate-200 dark:border-slate-800 group-hover:scale-105 transition-transform duration-150"
-      />
-      <div class="flex items-center gap-1.5 font-bold tracking-tight">
-        <span class="text-slate-400 dark:text-gray-400 group-hover:text-slate-600 dark:group-hover:text-gray-200 transition-colors">iyou</span><span class="text-violet-600 dark:text-violet-400">_wun</span>
-        <!-- Rectangular Monospace Domain Badge -->
-        <span class="text-[10px] sm:text-[11px] font-mono tracking-wider uppercase px-2.5 py-0.5 rounded-md border border-slate-300/80 dark:border-slate-700 bg-slate-100/70 dark:bg-slate-800/60 text-slate-600 dark:text-slate-300 select-none ml-1.5 font-medium">
-          SOCIAL HUB
-        </span>
-      </div>
-    </a>
+    <!-- Left: Brand Lockup & Sibling Domain Badge -->
+    <div class="flex items-center gap-3">
+      <a href="/" class="flex items-center gap-2 text-2xl font-bold tracking-tight hover:opacity-90 transition-opacity" title="iyou_wun">
+        <img
+          src="{% static 'img/logo_square_sm.png' %}"
+          onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
+          alt="wun"
+          class="h-8 w-8 aspect-square rounded-lg object-contain shadow-sm border border-slate-200 dark:border-slate-800 group-hover:scale-105 transition-transform duration-150"
+        />
+        <span class="flex items-center"><span class="text-slate-400 dark:text-slate-500 font-medium">iyou</span><span class="text-violet-600 dark:text-violet-400 font-extrabold">_wun</span></span>
+      </a>
+      <span class="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-mono uppercase tracking-wider bg-slate-100 dark:bg-slate-800/80 text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-slate-700/60">
+        SOCIAL HUB
+      </span>
+    </div>
 
-    <!-- Right: Action & Identity Controls -->
-    <div class="flex items-center gap-3 sm:gap-4">
+    <!-- Right: Identity & Utility Controls -->
+    <div class="flex items-center gap-4">
       {% if user.is_authenticated or request.user.is_authenticated %}
         <!-- Notification Bell -->
-        <button id="notification-bell-btn"
-                type="button"
-                class="relative p-1.5 text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 focus:outline-none"
-                onclick="typeof toggleNotificationDrawer === 'function' && toggleNotificationDrawer()"
-                title="Activity Notifications">
+        <button id="notification-bell-btn" type="button" class="relative p-1.5 text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 focus:outline-none" onclick="typeof toggleNotificationDrawer === 'function' && toggleNotificationDrawer()" title="Activity Notifications">
           <span class="text-sm">🔔</span>
-          <!-- Unread Badge Ping -->
           <span id="notification-unread-dot" class="hidden absolute top-1 right-1 w-2 h-2 bg-violet-500 rounded-full animate-pulse"></span>
         </button>
 
-        <!-- Modular Persona Enclave (Quick-Switcher Partial) -->
+        <!-- Persona Enclave Partial -->
         {% include "includes/_persona_enclave.html" %}
 
         <!-- Direct Actions -->
@@ -48,30 +41,28 @@
           Sign Out
         </a>
       {% else %}
-        <!-- Logged-Out Canonical Poly Flow (Soft Capsule Pill + Solid Vibrant Button) -->
-        <div class="flex items-center gap-2 sm:gap-3">
-          <div class="flex items-center gap-1.5 px-3 py-1 rounded-full border border-amber-200/80 dark:border-amber-800/50 bg-amber-50/50 dark:bg-amber-950/20 text-xs text-slate-600 dark:text-slate-300 italic select-none">
+        <!-- Logged-Out Block: Live Poly Structure -->
+        <div class="flex items-center gap-2 text-xs">
+          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full border border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300">
             <span class="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0"></span>
-            <span class="hidden sm:inline">Sovereign Key Required</span>
+            <span class="italic text-xs text-slate-600 dark:text-slate-400">Sovereign Key Required</span>
           </div>
-          <a href="{% url 'oidc_authentication_init' %}" class="flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-violet-600 hover:bg-violet-700 active:scale-95 text-white text-xs font-semibold shadow-sm transition-all select-none">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+          <a href="{% url 'oidc_authentication_init' %}" class="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-medium text-xs shadow-sm transition-all flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
             </svg>
             <span>Authenticate</span>
           </a>
         </div>
       {% endif %}
 
-      <!-- Outline Theme Toggle (Sun in Light, Moon in Dark) -->
-      <button id="theme-toggle" type="button" class="p-1.5 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition focus:outline-none" aria-label="Toggle theme">
-        <svg id="icon-sun" class="w-5 h-5 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round"
-                d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
+      <!-- Grey Outline Theme Switcher (Strictly Neutral Slate) -->
+      <button id="theme-toggle" type="button" class="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors focus:outline-none" aria-label="Toggle theme">
+        <svg id="icon-sun" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
         </svg>
-        <svg id="icon-moon" class="w-5 h-5 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round"
-                d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+        <svg id="icon-moon" class="w-4 h-4 hidden dark:block" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
         </svg>
       </button>
     </div>
