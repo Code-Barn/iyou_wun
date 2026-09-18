@@ -772,6 +772,9 @@ class FeedView(TemplateView):
             context["selected_circle"] = selected_circle
             circle = selected_circle
 
+            dev_param = self.request.GET.get("dev")
+            dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
+
             if instant_shell:
                 notes = []
                 feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
@@ -785,6 +788,7 @@ class FeedView(TemplateView):
                     tags={"t": ["iyou"]},
                     relay_urls=relays,
                     deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT,
+                    dev_mode=dev_mode,
                 )
             elif circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(
@@ -792,19 +796,19 @@ class FeedView(TemplateView):
                 )
                 if contacts:
                     feed_data = fetch_unified_feed(
-                        authors=contacts, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                        authors=contacts, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                     )
                 else:
                     feed_data = fetch_unified_feed(
-                        authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                        authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                     )
             elif circle in ("following", "network") and not user_pubkey:
                 feed_data = fetch_unified_feed(
-                    authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                    authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                 )
             else:
                 feed_data = fetch_unified_feed(
-                    relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                    relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                 )
 
             notes = feed_data["roots"]
@@ -1154,7 +1158,10 @@ def api_feed(request):
         relays = get_relays_for_request(request)
 
 
-    filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
+    dev_param = request.GET.get("dev")
+    dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
+
+    filter_obj = {"kinds": [1, 1063, 1111, 30023], "limit": limit}
     if until:
         try:
             filter_obj["until"] = int(until)
@@ -1203,12 +1210,13 @@ def api_feed(request):
         )
         raw_events = _merge_events_by_id(raw_events, tagged_events)
 
-    # Filter out non-renderable events (empty notes, P2P discovery beacons)
-    from .nip10 import is_renderable_note
-    if isinstance(raw_events, dict):
-        raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
-    elif isinstance(raw_events, list):
-        raw_events = [e for e in raw_events if is_renderable_note(e)]
+    # Filter out non-renderable events (empty notes, P2P discovery beacons) unless in dev_mode
+    from .nip10 import is_renderable_note, has_iyou_tag
+    if not dev_mode:
+        if isinstance(raw_events, dict):
+            raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
+        elif isinstance(raw_events, list):
+            raw_events = [e for e in raw_events if is_renderable_note(e)]
 
     # Multi-relay event deduplication by ID
     deduped_events = {}
@@ -1248,7 +1256,7 @@ def api_feed(request):
             except (json.JSONDecodeError, TypeError):
                 profiles[pk] = {}
 
-    feed_data = process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data = process_into_feed(raw_events, profiles, max_items=limit, dev_mode=dev_mode)
     try:
         feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline)
     except TypeError:
@@ -1285,6 +1293,14 @@ def api_feed(request):
         result["pubkey_hex"] = note.get("pubkey_hex") or note.get("pubkey") or ""
         result["author_did"] = note.get("author_did") or ""
         result["is_sovereign"] = note.get("is_sovereign", False)
+        result["is_iyou_native"] = bool(note.get("is_iyou_native", False))
+        result["is_iyou_circle"] = bool(note.get("is_iyou_circle") or note.get("is_iyou_native") or has_iyou_tag(note.get("tags", [])))
+        result["_relay_sources"] = list(note.get("_relay_sources") or ([note.get("_relay_url")] if note.get("_relay_url") else []))
+        result["_primary_relay"] = note.get("_primary_relay") or note.get("_relay_url") or ""
+        result["_filter_status"] = note.get("_filter_status") or {"status": "PASS", "rule": None, "description": "Passed all content filters"}
+        result["relay_sources"] = result["_relay_sources"]
+        result["primary_relay"] = result["_primary_relay"]
+        result["filter_status"] = result["_filter_status"]
         result["nip05"] = note.get("nip05") or ""
         result["author_name"] = note.get("author_name") or ""
         result["author_avatar"] = note.get("author_avatar") or ""
@@ -2226,6 +2242,7 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
             if msg[0] == "EVENT" and msg[1] == sub_id:
                 e = msg[2]
                 if e.get("id") and e["id"] not in events:
+                    e["_relay_url"] = relay_url
                     events[e["id"]] = e
             elif msg[0] == "EOSE":
                 done.set()
@@ -2312,11 +2329,23 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
             try:
                 events = future.result()
                 if isinstance(events, dict):
-                    aggregated_events.update(events)
+                    items = events.items()
                 elif isinstance(events, list):
-                    for ev in events:
-                        if isinstance(ev, dict) and "id" in ev:
-                            aggregated_events[ev["id"]] = ev
+                    items = [(ev.get("id"), ev) for ev in events if isinstance(ev, dict) and ev.get("id")]
+                else:
+                    items = []
+
+                for eid, ev in items:
+                    if not eid or not isinstance(ev, dict):
+                        continue
+                    if eid not in aggregated_events:
+                        ev["_relay_sources"] = [url]
+                        ev["_primary_relay"] = url
+                        aggregated_events[eid] = ev
+                    else:
+                        sources = aggregated_events[eid].setdefault("_relay_sources", [])
+                        if url not in sources:
+                            sources.append(url)
             except Exception as e:
                 logger.debug("relay_req concurrent task failed on %s: %s", url, e)
 
@@ -2326,13 +2355,15 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
     return aggregated_events
 
 
-def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=True):
+def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=True, dev_mode=False):
     """Convert raw Nostr events into a structured, threaded feed.
 
     When use_thread_tree=True (default), delegates to the NIP-10 thread
     tree builder for proper threaded display. Reactions and votes are
     still attached in a flat pass. Falls back to flat grouping when
     use_thread_tree=False.
+    When dev_mode=True, blocked events are not discarded; they are annotated with
+    _filter_status and retained for diagnostic inspection.
 
     Returns a dict:
         {
@@ -2345,14 +2376,15 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     if profiles is None:
         profiles = {}
 
-    from .nip10 import build_thread_tree, sanitize_event_content, is_renderable_note
+    from .nip10 import build_thread_tree, sanitize_event_content, is_renderable_note, inspect_note_diagnostics
     from datetime import datetime
 
-    # Filter out non-renderable events (empty notes, P2P discovery beacons)
-    if isinstance(raw_events, dict):
-        raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
-    elif isinstance(raw_events, list):
-        raw_events = [e for e in raw_events if is_renderable_note(e)]
+    # Filter out non-renderable events (empty notes, P2P discovery beacons) unless in dev_mode
+    if not dev_mode:
+        if isinstance(raw_events, dict):
+            raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
+        elif isinstance(raw_events, list):
+            raw_events = [e for e in raw_events if is_renderable_note(e)]
 
     # Normalize and deduplicate input raw_events
     if isinstance(raw_events, list):
@@ -2392,15 +2424,18 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     votes = []
 
     for eid, e in raw_events.items():
-        sanitized = sanitize_event_content(e)
-        if not sanitized["is_valid"]:
+        diag = inspect_note_diagnostics(e)
+        e["_filter_status"] = diag
+        if not dev_mode and diag["status"] == "BLOCKED":
             continue
-        e["has_content_warning"] = sanitized["has_content_warning"]
-        e["warning_reason"] = sanitized["warning_reason"]
-        e["lang"] = sanitized["lang"]
+
+        sanitized = sanitize_event_content(e)
+        e["has_content_warning"] = sanitized.get("has_content_warning", False)
+        e["warning_reason"] = sanitized.get("warning_reason", "")
+        e["lang"] = sanitized.get("lang", "en")
 
         kind = e.get("kind")
-        if kind == 1:
+        if kind == 1 or (dev_mode and diag["status"] == "BLOCKED" and kind not in (7, 1063, 1111, 1112, 30023)):
             kind_1[eid] = e
         elif kind == 1063:
             kind_1063[eid] = e
@@ -2412,6 +2447,8 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
             kind_1111_events[eid] = e
         elif kind == 1112:
             votes.append(e)
+        else:
+            kind_1[eid] = e
 
     # Build thread tree from Kind 1111 replies + root events
     all_thread_events = {}
@@ -2686,15 +2723,22 @@ def _merge_events_by_id(*event_batches):
             if e is None:
                 continue
             real_id = e.get("id") or eid
-            if real_id and real_id not in merged:
-                merged[real_id] = e
+            if real_id:
+                if real_id not in merged:
+                    merged[real_id] = e
+                else:
+                    sources = merged[real_id].setdefault("_relay_sources", [])
+                    new_sources = e.get("_relay_sources", [e.get("_relay_url")] if e.get("_relay_url") else [])
+                    for s in new_sources:
+                        if s and s not in sources:
+                            sources.append(s)
     return merged
 
 
-def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None):
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None, dev_mode=False):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
-    Phase 1: Fetch kinds [1, 7, 1063, 1111] with optional authors filter.
+    Phase 1: Fetch kinds [1, 1063, 1111, 30023] with optional authors filter.
     Phase 2: Fetch Kind 0 metadata for all unique pubkeys discovered.
     Returns a structured feed with author_name/author_avatar populated.
 
@@ -2708,7 +2752,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
     if authors is not None and not authors and not tags:
         return {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
 
-    filter_obj = {"kinds": [1, 7, 1063, 1111, 30023, 1112], "limit": limit}
+    filter_obj = {"kinds": [1, 1063, 1111, 30023], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
 
@@ -2725,9 +2769,10 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
         tagged_events = relay_req(tagged_filter, relay_urls=relay_urls, timeout=timeout, deadline=deadline)
         raw_events = _merge_events_by_id(raw_events, tagged_events)
 
-    # Filter out non-renderable events (empty notes, P2P discovery beacons)
+    # Filter out non-renderable events (empty notes, P2P discovery beacons) unless in dev_mode
     from .nip10 import is_renderable_note
-    raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
+    if not dev_mode:
+        raw_events = {eid: e for eid, e in raw_events.items() if is_renderable_note(e)}
 
     pubkeys = set()
     for e in raw_events.values():
@@ -2753,7 +2798,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
             except (json.JSONDecodeError, TypeError):
                 profiles.setdefault(pk, {})
 
-    feed_data = process_into_feed(raw_events, profiles, max_items=limit)
+    feed_data = process_into_feed(raw_events, profiles, max_items=limit, dev_mode=dev_mode)
     feed_data["roots"] = attach_quoted_notes(
         feed_data["roots"], relay_urls=relay_urls, timeout=timeout, deadline=deadline
     )

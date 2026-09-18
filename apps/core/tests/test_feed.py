@@ -1585,4 +1585,173 @@ class Phase45RelayDeadlineTests(TestCase):
         self.assertEqual(len(events), 2)
 
 
+class Phase1DiagnosticProvenanceTests(TestCase):
+    def test_relay_req_accumulates_relay_sources_across_sockets(self):
+        """Verify that duplicate events returned by multiple relays accumulate all seen URLs in _relay_sources."""
+        from apps.core.views import relay_req
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            if "r1" in relay_url:
+                return {"e1": {"id": "e1", "content": "from r1"}}
+            elif "r2" in relay_url:
+                return {"e1": {"id": "e1", "content": "from r2 duplicate"}}
+            return {}
+
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            events = relay_req(
+                {"kinds": [1]},
+                relay_urls=["wss://r1", "wss://r2"],
+                timeout=1.0,
+            )
+        self.assertIn("e1", events)
+        sources = events["e1"].get("_relay_sources", [])
+        self.assertIn("wss://r1", sources)
+        self.assertIn("wss://r2", sources)
+        self.assertEqual(len(sources), 2)
+        self.assertIn(events["e1"].get("_primary_relay"), ["wss://r1", "wss://r2"])
+
+    def test_dev_mode_preserves_blocked_notes_with_filter_status(self):
+        """Verify that api_feed with ?dev=1 preserves machine noise events and flags them with BLOCKED status."""
+        from apps.core.views import api_feed
+        from django.test import RequestFactory
+        import json
+
+        rf = RequestFactory()
+        req_dev = rf.get("/api/feed?dev=1")
+        req_dev.user = None
+
+        noise_event = {
+            "id": "noise1",
+            "kind": 1,
+            "pubkey": "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+            "created_at": 1700000000,
+            "content": "{\"telemetry\": true, \"payload\": 123}",
+            "tags": [],
+        }
+
+        with patch("apps.core.views.relay_req", return_value={"noise1": noise_event}):
+            resp = api_feed(req_dev)
+
+        data = json.loads(resp.content.decode("utf-8"))
+        self.assertTrue(data["success"])
+        notes = data["notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertEqual(notes[0]["id"], "noise1")
+        self.assertEqual(notes[0]["_filter_status"]["status"], "BLOCKED")
+        self.assertEqual(notes[0]["_filter_status"]["rule"], "machine_noise:raw_json")
+
+        # In non-dev mode (?dev=0 or omitted), noise must be dropped
+        req_normal = rf.get("/api/feed")
+        req_normal.user = None
+        with patch("apps.core.views.relay_req", return_value={"noise1": noise_event}):
+            resp_normal = api_feed(req_normal)
+        data_normal = json.loads(resp_normal.content.decode("utf-8"))
+        self.assertEqual(len(data_normal["notes"]), 0)
+
+    def test_iyou_circle_includes_hashtag_notes(self):
+        """Verify that events with ['t', 'iyou'] or ['client', 'iyou'] receive is_iyou_circle = True."""
+        from apps.core.nip10 import has_iyou_tag
+        from apps.core.views import process_into_feed
+
+        self.assertTrue(has_iyou_tag([["t", "iyou"]]))
+        self.assertTrue(has_iyou_tag([["client", "iyou"]]))
+        self.assertFalse(has_iyou_tag([["t", "other"]]))
+
+        event = {
+            "id": "iyou_tagged_note",
+            "kind": 1,
+            "pubkey": "1" * 64,
+            "created_at": 1700000000,
+            "content": "Hello ecosystem #iyou",
+            "tags": [["t", "iyou"]],
+        }
+        feed = process_into_feed({"iyou_tagged_note": event})
+        self.assertEqual(len(feed["roots"]), 1)
+        self.assertTrue(feed["roots"][0]["is_iyou_circle"])
+
+
+class Phase2FrontendDiagnosticTests(TestCase):
+    def test_feed_ssr_renders_diagnostic_pill_and_blocked_drawer_in_dev_mode(self):
+        """Verify that in dev mode, feed.html renders the diagnostic pill and blocked drawer for flagged notes."""
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+
+        rf = RequestFactory()
+        request = rf.get("/feed?dev=1")
+        request.user = AnonymousUser()
+
+        blocked_note = {
+            "id": "blocked1",
+            "kind": 1,
+            "pubkey": "a" * 64,
+            "npub": "npub1test",
+            "author_name": "Alice",
+            "content": "{\"telemetry\": true}",
+            "created_at_epoch": 1700000000,
+            "created_at": 1700000000,
+            "primary_relay": "wss://relay.damus.io",
+            "filter_status": {
+                "status": "BLOCKED",
+                "rule": "machine_noise:raw_json",
+                "description": "Raw JSON payload",
+            },
+            "is_iyou_native": False,
+            "is_iyou_circle": False,
+        }
+
+        html = render_to_string("feed.html", {
+            "notes": [blocked_note],
+            "feed_mode": "main",
+            "dev_mode": True,
+            "request": request,
+        }, request=request)
+
+        self.assertIn("dev-diagnostic-pill", html)
+        self.assertIn("relay.damus.io", html)
+        self.assertIn("machine_noise:raw_json", html)
+        self.assertIn("border-dashed", html)
+        self.assertIn("data-is-blocked=\"true\"", html)
+        self.assertIn("toggleBlockedJsonDrawer", html)
+
+    def test_feed_ssr_renders_iyou_hashtag_notes_with_is_iyou_true(self):
+        """Verify that notes with is_iyou_circle=True render data-is-iyou='true' on the card."""
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+
+        rf = RequestFactory()
+        request = rf.get("/feed")
+        request.user = AnonymousUser()
+
+        iyou_note = {
+            "id": "note_iyou",
+            "kind": 1,
+            "pubkey": "b" * 64,
+            "npub": "npub1test2",
+            "author_name": "Bob",
+            "content": "Hello #iyou",
+            "created_at_epoch": 1700000000,
+            "created_at": 1700000000,
+            "primary_relay": "wss://nos.lol",
+            "filter_status": {
+                "status": "PASS",
+                "rule": None,
+                "description": "Passed all content filters",
+            },
+            "is_iyou_native": False,
+            "is_iyou_circle": True,
+        }
+
+        html = render_to_string("feed.html", {
+            "notes": [iyou_note],
+            "feed_mode": "main",
+            "request": request,
+        }, request=request)
+
+        self.assertIn("data-is-iyou=\"true\"", html)
+
+
+
+
 

@@ -177,7 +177,7 @@
         {% endif %}
         <div id="feed-container" class="space-y-3" {% if not notes %}data-hydrate="true"{% endif %}>
           {% for note in notes %}
-          <div class="feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800"
+          <div class="feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}border-2 border-dashed border-rose-400/80 dark:border-rose-500/60 bg-rose-50/10{% else %}border-slate-200 dark:border-slate-800{% endif %}"
                data-note-card-id="{{ note.id }}"
                data-kind="{{ note.kind }}"
                data-note-id="{{ note.id }}"
@@ -188,7 +188,8 @@
                {% if note.has_content_warning %}data-has-cw="true" data-has-content-warning="true"{% endif %}
                {% if note.lang %}data-lang="{{ note.lang }}"{% endif %}
                data-created-at="{% if note.created_at_epoch %}{{ note.created_at_epoch }}{% else %}{{ note.created_at|date:'U' }}{% endif %}"
-               data-is-iyou="{% if note.is_iyou_native %}true{% else %}false{% endif %}">
+               data-is-iyou="{% if note.is_iyou_circle or note.is_iyou_native %}true{% else %}false{% endif %}"
+               {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}data-is-blocked="true"{% endif %}>
             {% include "includes/_thread_post.html" with note=note %}
 
             {% if note.replies %}
@@ -291,6 +292,7 @@
     window.userPubkey = "{{ user_pubkey }}";
     window.userNpub = "{{ user_npub }}";
     window.userDid = "{{ user_did }}";
+    window.DEV_DIAGNOSTIC_MODE = {% if request.GET.dev == '1' or dev_mode %}true{% else %}false{% endif %};
 </script>
 <script src="{% static 'js/feed_interactions.js' %}"
         data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"

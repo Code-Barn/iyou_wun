@@ -90,48 +90,8 @@ def detect_machine_noise(content):
     """Return True when content looks like pure machine output, not a human note."""
     if not content:
         return False
-
-    stripped = content.strip()
-
-    # Telemetry and channel roster noise
-    if "channel:__roster" in content or "__roster" in content:
-        return True
-
-    # Raw JSON payloads: text starts with '{' and parses as JSON in full.
-    if stripped.startswith("{"):
-        try:
-            parsed = json.loads(stripped)
-        except (ValueError, TypeError):
-            parsed = None
-        if isinstance(parsed, dict) and parsed:
-            return True
-
-    # Stack traces
-    if STACK_TRACE_REGEX.search(content):
-        return True
-
-    # Repeated 64-character hex strings separated only by whitespace or newlines
-    tokens = stripped.split()
-    if len(tokens) >= 2 and all(len(t) == 64 and bool(re.fullmatch(r"[0-9a-fA-F]{64}", t)) for t in tokens):
-        return True
-
-    compact = re.sub(r"\s+", "", content)
-    if not compact:
-        return False
-
-    # Raw hex dumps >= 128 chars without spaces
-    if HEX_DUMP_REGEX.match(compact):
-        return True
-
-    # Base64 binary blobs (>= 100 chars, includes a digit, no spaces)
-    if (
-        len(compact) >= 100
-        and BASE64_BLOB_REGEX.match(compact)
-        and re.search(r"\d", compact)
-    ):
-        return True
-
-    return False
+    diag = inspect_note_diagnostics({"kind": 1, "content": content})
+    return diag["status"] == "BLOCKED" and str(diag.get("rule", "")).startswith("machine_noise:")
 
 
 def detect_content_warning(event):
@@ -289,6 +249,108 @@ def is_renderable_note(event: dict) -> bool:
         for t in tags
     )
     return has_media_tag
+
+
+def has_iyou_tag(tags) -> bool:
+    """Determine if a tag list includes an #iyou topic or client tag."""
+    if not tags:
+        return False
+    for t in tags:
+        if isinstance(t, (list, tuple)) and len(t) >= 2:
+            key = str(t[0]).strip().lower()
+            val = str(t[1]).strip().lower()
+            if (key == "t" and val == "iyou") or (key == "client" and val == "iyou"):
+                return True
+    return False
+
+
+def inspect_note_diagnostics(event: dict) -> dict:
+    """Run diagnostic content inspection on a raw Nostr event.
+
+    Returns:
+        {
+            "status": "PASS" | "BLOCKED",
+            "rule": str | None,
+            "description": str,
+        }
+    """
+    if not isinstance(event, dict):
+        return {
+            "status": "BLOCKED",
+            "rule": "non_renderable:empty_or_beacon",
+            "description": "Empty Kind 1 or P2P discovery beacon",
+        }
+
+    if not is_renderable_note(event):
+        return {
+            "status": "BLOCKED",
+            "rule": "non_renderable:empty_or_beacon",
+            "description": "Empty Kind 1 or P2P discovery beacon",
+        }
+
+    content = event.get("content")
+    if content is None:
+        content = ""
+    else:
+        content = str(content)
+
+    stripped = content.strip()
+
+    if "channel:__roster" in content or "__roster" in content:
+        return {
+            "status": "BLOCKED",
+            "rule": "machine_noise:roster",
+            "description": "Roster telemetry hex string",
+        }
+
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except (ValueError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict) and parsed:
+            return {
+                "status": "BLOCKED",
+                "rule": "machine_noise:raw_json",
+                "description": "Raw JSON payload",
+            }
+
+    if STACK_TRACE_REGEX.search(content):
+        return {
+            "status": "BLOCKED",
+            "rule": "machine_noise:stack_trace",
+            "description": "Python stack trace",
+        }
+
+    tokens = stripped.split()
+    if len(tokens) >= 2 and all(len(t) == 64 and bool(re.fullmatch(r"[0-9a-fA-F]{64}", t)) for t in tokens):
+        return {
+            "status": "BLOCKED",
+            "rule": "machine_noise:repeated_hex",
+            "description": "Repeated 64-character hex tokens",
+        }
+
+    compact = re.sub(r"\s+", "", content)
+    if compact:
+        if HEX_DUMP_REGEX.match(compact):
+            return {
+                "status": "BLOCKED",
+                "rule": "machine_noise:hex_dump",
+                "description": "Hex dump payload",
+            }
+
+        if len(compact) >= 100 and BASE64_BLOB_REGEX.match(compact) and re.search(r"\d", compact):
+            return {
+                "status": "BLOCKED",
+                "rule": "machine_noise:base64_blob",
+                "description": "Base64 binary blob",
+            }
+
+    return {
+        "status": "PASS",
+        "rule": None,
+        "description": "Passed all content filters",
+    }
 
 
 def detect_language(event_or_content):
@@ -767,6 +829,14 @@ def build_thread_tree(raw_events, profiles=None):
             "warning_reason": e.get("content_warning_reason") or e.get("warning_reason") or detect_content_warning(e)[1] or "",
             "lang": e.get("lang") or detect_language(e) or "en",
         }
+        note["_relay_sources"] = list(e.get("_relay_sources") or ([e.get("_relay_url")] if e.get("_relay_url") else []))
+        note["_primary_relay"] = e.get("_primary_relay") or e.get("_relay_url") or ""
+        note["_filter_status"] = e.get("_filter_status") or {"status": "PASS", "rule": None, "description": "Passed all content filters"}
+        note["relay_sources"] = note["_relay_sources"]
+        note["primary_relay"] = note["_primary_relay"]
+        note["filter_status"] = note["_filter_status"]
+        note["is_iyou_native"] = bool(e.get("is_iyou_native") or (pk in iyou_native_set))
+        note["is_iyou_circle"] = bool(note["is_iyou_native"] or has_iyou_tag(tags))
         return extract_media_from_note(note)
 
 
@@ -912,6 +982,14 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "warning_reason": e.get("content_warning_reason") or e.get("warning_reason") or detect_content_warning(e)[1] or "",
         "lang": e.get("lang") or detect_language(e) or "en",
     }
+    note["_relay_sources"] = list(e.get("_relay_sources") or ([e.get("_relay_url")] if e.get("_relay_url") else []))
+    note["_primary_relay"] = e.get("_primary_relay") or e.get("_relay_url") or ""
+    note["_filter_status"] = e.get("_filter_status") or {"status": "PASS", "rule": None, "description": "Passed all content filters"}
+    note["relay_sources"] = note["_relay_sources"]
+    note["primary_relay"] = note["_primary_relay"]
+    note["filter_status"] = note["_filter_status"]
+    note["is_iyou_native"] = bool(e.get("is_iyou_native") or (pk and pk in set(get_iyou_pubkeys())))
+    note["is_iyou_circle"] = bool(note["is_iyou_native"] or has_iyou_tag(tags))
 
     if kind == 1063:
         note["file_url"] = sanitize_media_url(get_tag_value(tags, "url"))

@@ -713,7 +713,8 @@
 
     function buildCardHtml(note) {
         if (!note) return "";
-        if (!isRenderableNote(note)) {
+        var isDevMode = (typeof window !== "undefined" && (new URLSearchParams(window.location.search).get("dev") === "1" || window.DEV_DIAGNOSTIC_MODE));
+        if (!isDevMode && !isRenderableNote(note)) {
             return '';
         }
         var noteId = note.id || "";
@@ -859,6 +860,46 @@
             '<div id="trans-text-' + escapeAttr(noteId) + '" class="text-slate-800 dark:text-slate-100"></div>' +
             '</div>';
 
+        var diagnosticPillHtml = "";
+        if (isDevMode || note._filter_status) {
+            var isBlocked = note._filter_status && note._filter_status.status === 'BLOCKED';
+            var primaryRelay = (note._primary_relay || (note._relay_sources && note._relay_sources[0]) || "local").replace(/^wss?:\/\//, "").slice(0, 15);
+            var ruleText = isBlocked ? ('✗ ' + (note._filter_status.rule || 'BLOCKED')) : '✓ PASS';
+            var langText = note.lang || 'en';
+            var pillClasses = isBlocked
+                ? 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700/60'
+                : 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700/60';
+
+            diagnosticPillHtml = '<span class="dev-diagnostic-pill inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono border font-semibold ' + pillClasses + '">' +
+                '<span class="opacity-75">📡 ' + escapeHtml(primaryRelay) + '</span>' +
+                '<span class="opacity-40">|</span>' +
+                '<span>' + escapeHtml(ruleText) + '</span>' +
+                '<span class="opacity-40">|</span>' +
+                '<span class="opacity-75">🌐 ' + escapeHtml(langText) + '</span>' +
+                '</span>';
+        }
+
+        var blockedDrawerHtml = "";
+        if (note._filter_status && note._filter_status.status === 'BLOCKED') {
+            var rawJsonString = "";
+            try {
+                rawJsonString = JSON.stringify(note.raw_event || note.raw_json || note, null, 2);
+            } catch (e) {
+                rawJsonString = String(note.content || "{}");
+            }
+            blockedDrawerHtml = '<div class="mt-3 p-3 rounded-lg border border-rose-200 dark:border-rose-800/60 bg-rose-50/20 dark:bg-rose-950/20 text-xs font-mono">' +
+                '<div class="flex items-center justify-between gap-2 text-rose-700 dark:text-rose-300">' +
+                '<span class="font-bold flex items-center gap-1.5"><span>⚠️ BLOCKED NOTE [' + escapeHtml(note._filter_status.rule || 'BLOCKED') + ']</span></span>' +
+                '<button type="button" class="hover:underline text-slate-500 dark:text-slate-400 text-[11px]" onclick="toggleBlockedJsonDrawer(\'' + escapeAttr(noteId) + '\')">' +
+                '<span id="btn-toggle-raw-' + escapeAttr(noteId) + '">Inspect Raw Event Payload ▾</span>' +
+                '</button>' +
+                '</div>' +
+                '<div id="blocked-raw-json-' + escapeAttr(noteId) + '" class="hidden mt-2 pt-2 border-t border-rose-200 dark:border-rose-800/40">' +
+                '<pre class="overflow-x-auto p-2 rounded bg-slate-900 text-slate-100 text-[10px] leading-tight select-all"><code>' + escapeHtml(rawJsonString) + '</code></pre>' +
+                '</div>' +
+                '</div>';
+        }
+
         return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '" data-lang="' + escapeAttr(note.lang || 'en') + '">' +
             '<div class="flex-shrink-0"><a href="/profile/' + npub + '/">' + avatarHtml + '</a></div>' +
             '<div class="flex-1 min-w-0">' +
@@ -868,6 +909,7 @@
             nip05Badge +
             '<span class="author-badge-slot" data-author-slot="' + escapeAttr(pubkey) + '"></span>' +
             sovereignBadge +
+            diagnosticPillHtml +
             '</div>' +
             '<div class="flex items-center gap-2">' +
             translateBtnHtml +
@@ -897,6 +939,7 @@
             '</div></div></div></div>' +
             replyingToHtml +
             contentAndMediaHtml +
+            blockedDrawerHtml +
             translatedBoxHtml +
             '<div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">' +
             '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPLY + '</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
@@ -957,6 +1000,42 @@
         }
     }
 
+    // ---------- Chronological Sorted Insertion ----------
+
+    function insertCardSortedByTimestamp(container, cardElement) {
+        if (!container || !cardElement) return;
+        var newTs = parseInt(cardElement.getAttribute("data-created-at"), 10) || 0;
+        var existingCards = container.querySelectorAll(".feed-note-card");
+        for (var i = 0; i < existingCards.length; i++) {
+            var existingCard = existingCards[i];
+            if (existingCard.parentElement !== container) continue;
+            var cardTs = parseInt(existingCard.getAttribute("data-created-at"), 10) || 0;
+            if (newTs > cardTs) {
+                container.insertBefore(cardElement, existingCard);
+                return;
+            }
+        }
+        var emptyState = container.querySelector("#circle-empty-state, #feed-empty-state");
+        if (emptyState && emptyState.parentElement === container) {
+            container.insertBefore(cardElement, emptyState);
+        } else {
+            container.appendChild(cardElement);
+        }
+    }
+
+    function toggleBlockedJsonDrawer(noteId) {
+        var drawer = document.getElementById("blocked-raw-json-" + noteId);
+        var label = document.getElementById("btn-toggle-raw-" + noteId);
+        if (!drawer) return;
+        if (drawer.classList.contains("hidden")) {
+            drawer.classList.remove("hidden");
+            if (label) label.textContent = "Hide Raw Event Payload ▴";
+        } else {
+            drawer.classList.add("hidden");
+            if (label) label.textContent = "Inspect Raw Event Payload ▾";
+        }
+    }
+
     // ---------- Optimistic Feed Insert ----------
 
     function addNoteToFeed(event) {
@@ -968,8 +1047,12 @@
             if (existing) return;
         }
 
+        var isBlocked = event._filter_status && event._filter_status.status === 'BLOCKED';
+        var borderClasses = isBlocked
+            ? "border-2 border-dashed border-rose-400/80 dark:border-rose-500/60 bg-rose-50/10"
+            : "border-slate-200 dark:border-slate-800";
         var wrapper = document.createElement("div");
-        wrapper.className = "feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800";
+        wrapper.className = "feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border " + borderClasses;
         wrapper.setAttribute("data-note-card-id", event.id);
         wrapper.setAttribute("data-kind", event.kind);
         wrapper.setAttribute("data-note-id", event.id);
@@ -984,6 +1067,10 @@
             wrapper.setAttribute("data-lang", event.lang);
         }
         wrapper.setAttribute("data-created-at", Math.floor(event.created_at || (Date.now() / 1000)));
+        wrapper.setAttribute("data-is-iyou", "true");
+        if (isBlocked) {
+            wrapper.setAttribute("data-is-blocked", "true");
+        }
         if (window.circleFeedFilter && typeof window.circleFeedFilter.indexCardTags === "function") {
             window.circleFeedFilter.indexCardTags(wrapper, event.tags);
         }
@@ -1023,11 +1110,7 @@
 
         wrapper.innerHTML = buildCardHtml(noteObj);
 
-        if (container.firstChild) {
-            container.insertBefore(wrapper, container.firstChild);
-        } else {
-            container.appendChild(wrapper);
-        }
+        insertCardSortedByTimestamp(container, wrapper);
         hydrateLocalTimestamps(wrapper);
 
         if (window.trustLens && typeof window.trustLens.scan === "function") {
@@ -1066,11 +1149,15 @@
             || new URLSearchParams(window.location.search).get('circle')
             || 'iyou');
 
-        if (activeCircle === 'iyou') {
-            const isIyouAuthor = (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(note.pubkey_hex)) || note.is_sovereign || note.author_did;
-            if (!isIyouAuthor) {
-                return; // Discard non-ecosystem notes before touching the DOM
-            }
+        const isDevMode = new URLSearchParams(window.location.search).get("dev") === "1" || window.DEV_DIAGNOSTIC_MODE;
+        const hasIyouTag = Array.isArray(note.tags) && note.tags.some(t => t[0] === "t" && (t[1] || "").toLowerCase() === "iyou");
+        const isIyouClient = Array.isArray(note.tags) && note.tags.some(t => t[0] === "client" && (t[1] || "").toLowerCase() === "iyou");
+        const isEcosystem = note.is_iyou_native || note.is_sovereign || note.author_did || note.is_iyou_circle || (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(note.pubkey_hex));
+
+        const matchesIyou = hasIyouTag || isIyouClient || isEcosystem;
+
+        if (!isDevMode && activeCircle === 'iyou' && !matchesIyou) {
+            return; // Drop non-iyou notes only in standard mode
         }
 
         try {
@@ -1079,8 +1166,12 @@
                 if (existing) return;
             }
 
+            var isBlocked = note._filter_status && note._filter_status.status === 'BLOCKED';
+            var borderClasses = isBlocked
+                ? "border-2 border-dashed border-rose-400/80 dark:border-rose-500/60 bg-rose-50/10"
+                : "border-slate-200 dark:border-slate-800";
             var wrapper = document.createElement("div");
-            wrapper.className = "feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800";
+            wrapper.className = "feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border " + borderClasses;
             wrapper.setAttribute("data-note-card-id", note.id || "");
             wrapper.setAttribute("data-kind", note.kind || 1);
             wrapper.setAttribute("data-note-id", note.id || "");
@@ -1095,6 +1186,10 @@
                 wrapper.setAttribute("data-lang", note.lang);
             }
             wrapper.setAttribute("data-created-at", Math.floor(note.created_at_epoch || note.created_at || (Date.now() / 1000)));
+            wrapper.setAttribute("data-is-iyou", matchesIyou ? "true" : "false");
+            if (isBlocked) {
+                wrapper.setAttribute("data-is-blocked", "true");
+            }
             if (window.circleFeedFilter && typeof window.circleFeedFilter.indexCardTags === "function") {
                 window.circleFeedFilter.indexCardTags(wrapper, note.tags);
             }
@@ -1126,7 +1221,7 @@
                 wrapper.appendChild(repliesDiv);
             }
 
-            container.appendChild(wrapper);
+            insertCardSortedByTimestamp(container, wrapper);
             checkAndApplyClamping(wrapper);
             hydrateLocalTimestamps(wrapper);
             
@@ -2373,6 +2468,8 @@
 
     window.appendReplyToThread = appendReplyToThread;
     window.addNoteToFeed = addNoteToFeed;
+    window.insertCardSortedByTimestamp = insertCardSortedByTimestamp;
+    window.toggleBlockedJsonDrawer = toggleBlockedJsonDrawer;
     window.revealContentWarning = revealContentWarning;
     window.checkAndApplyClamping = checkAndApplyClamping;
     window.toggleNoteClamp = toggleNoteClamp;

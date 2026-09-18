@@ -2,7 +2,8 @@
 <div class="flex items-start gap-3.5 sm:gap-4 relative group" 
      data-note-card-id="{{ note.id }}" 
      data-author-pubkey="{{ note.pubkey }}"
-     data-is-iyou="{{ note.is_iyou_native|yesno:'true,false' }}"
+     data-is-iyou="{% if note.is_iyou_native or note.is_iyou_circle %}true{% else %}false{% endif %}"
+     {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}data-is-blocked="true"{% endif %}
      {% if note.has_content_warning %}data-has-cw="true" data-has-content-warning="true"{% endif %}
      data-lang="{{ note.lang|default:'en' }}">
   <!-- Author Avatar -->
@@ -70,6 +71,15 @@
         {% endif %}
         {% if note.kind == 1063 and note.is_sovereign %}
         <span class="bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 text-[10px] font-mono px-1.5 py-0.2 rounded border border-amber-300 dark:border-amber-700">Sovereign</span>
+        {% endif %}
+        {% if request.GET.dev == '1' or dev_mode or note.filter_status %}
+        <span class="dev-diagnostic-pill inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-mono border font-semibold {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-300 dark:border-rose-700/60{% else %}bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700/60{% endif %}">
+          <span class="opacity-75">📡 {{ note.primary_relay|default:"local"|cut:"wss://"|cut:"ws://"|slice:":15" }}</span>
+          <span class="opacity-40">|</span>
+          <span>{% if note.filter_status and note.filter_status.status == 'BLOCKED' %}✗ {{ note.filter_status.rule|default:"BLOCKED" }}{% else %}✓ PASS{% endif %}</span>
+          <span class="opacity-40">|</span>
+          <span class="opacity-75">🌐 {{ note.lang|default:'en' }}</span>
+        </span>
         {% endif %}
       </div>
 
@@ -239,6 +249,25 @@
           ⚠️ {{ note.warning_reason|default:"Sensitive Content" }} — Click to View
         </span>
       </button>
+    </div>
+    {% endif %}
+
+    <!-- Blocked Card Diagnostic Drawer (Dev Mode) -->
+    {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}
+    <div class="mt-3 p-3 rounded-lg border border-rose-200 dark:border-rose-800/60 bg-rose-50/20 dark:bg-rose-950/20 text-xs font-mono">
+      <div class="flex items-center justify-between gap-2 text-rose-700 dark:text-rose-300">
+        <span class="font-bold flex items-center gap-1.5">
+          <span>⚠️ BLOCKED NOTE [{{ note.filter_status.rule|default:"BLOCKED" }}]</span>
+        </span>
+        <button type="button" 
+                class="hover:underline text-slate-500 dark:text-slate-400 text-[11px]" 
+                onclick="toggleBlockedJsonDrawer('{{ note.id }}')">
+          <span id="btn-toggle-raw-{{ note.id }}">Inspect Raw Event Payload ▾</span>
+        </button>
+      </div>
+      <div id="blocked-raw-json-{{ note.id }}" class="hidden mt-2 pt-2 border-t border-rose-200 dark:border-rose-800/40">
+        <pre class="overflow-x-auto p-2 rounded bg-slate-900 text-slate-100 text-[10px] leading-tight select-all"><code>{{ note.raw_json|default:note.content|default:"{}" }}</code></pre>
+      </div>
     </div>
     {% endif %}
 
