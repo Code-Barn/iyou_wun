@@ -43,6 +43,7 @@ Requires: running `iyou_idp` instance + `iyou_home` (Tauri bridge :9001, Blossom
 | Auth Flow Spec | `docs/ecosystem_shared/AUTH_FLOW_SPECIFICATION.md` | Request/response flow diagrams |
 | PKCE Reference | `docs/ecosystem_shared/auth_pkce.py` | Canonical reference implementation |
 | Satellite Coordination | `docs/ecosystem_shared/satellite-coordination.md` | Multi-satellite sync patterns |
+| Moderation Shield Spec | `docs/MODERATION_SHIELD_SPEC.md` | Sovereign moderation shield & node takedown engine architecture |
 
 ### Archive (historical reference — gitignored)
 
