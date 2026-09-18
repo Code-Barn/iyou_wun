@@ -483,3 +483,205 @@ The test suite in `apps/core/tests/test_moderation_shield.py` must achieve 100% 
 4. **Decoupled Governance Immunity:** Verify that a user whose pubkey is in `NodeBlockedEntity` can still successfully post to `api_cast_vote` and have their vote proxied to `POLY_ENGINE_URL`.
 5. **Access Control & Staff Security:** Verify that anonymous or non-staff users receive HTTP 302 or HTTP 403 when requesting `/desk/moderation/`, while users authenticated with `ADMIN_DID` are granted access.
 6. **In-Memory Cache Invalidation:** Verify that modifying a record via the admin desk immediately updates the in-memory cache without requiring a server restart.
+
+---
+
+## 9. Community Flag Aggregation & Progressive Friction Engine
+
+### 9.1 Signed Reporting Protocol (NIP-56 Kind 1984)
+
+Rather than relying entirely on reactive top-down operator intervention, the node harnesses decentralized peer reporting via **NIP-56 (Kind 1984)** events. Peer reports are cryptographically signed by the reporter's sovereign identity and ingested locally into transient query index tables.
+
+#### Ingestion Flow & Schema Mapping
+
+When a user flags a note via `_report_modal.html`, the client constructs and signs a standard Kind 1984 event:
+```json
+{
+  "kind": 1984,
+  "pubkey": "<reporter_pubkey_64hex>",
+  "created_at": 1726670000,
+  "tags": [
+    ["e", "<target_event_id_64hex>", "wss://relay.iyou.me", "spam"],
+    ["p", "<target_author_pubkey_64hex>", "wss://relay.iyou.me", "spam"],
+    ["content-warning", "Automated Commercial Spam"]
+  ],
+  "content": "Automated phishing link detected in thread.",
+  "sig": "<schnorr_sig_64hex>"
+}
+```
+
+The payload is submitted to `POST /api/moderation/flag/` and indexed into `CommunityFlagLedger`:
+
+```python
+class CommunityFlagLedger(models.Model):
+    CATEGORY_CHOICES = [
+        ("SPAM", "Automated Spam / Phishing"),
+        ("NUDITY_NSFW", "Unlabeled Adult / NSFW Content"),
+        ("ILLEGAL", "Suspected Illegal Material"),
+        ("MALWARE", "Malware or Malicious Links"),
+        ("HARASSMENT", "Targeted Harassment or Threats"),
+        ("IMPERSONATION", "Identity Impersonation"),
+        ("OTHER", "Other Violation"),
+    ]
+
+    raw_report_event_id = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Nostr Event ID (64-hex) of the signed Kind 1984 report.",
+    )
+    reporter_pubkey = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text="64-hex Nostr pubkey of the peer submitting the report.",
+    )
+    target_event_id = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text="Target Nostr Event ID (64-hex) being flagged.",
+    )
+    target_author_pubkey = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        help_text="Author pubkey of the target note.",
+    )
+    category = models.CharField(
+        max_length=32,
+        choices=CATEGORY_CHOICES,
+        default="SPAM",
+    )
+    reason_detail = models.TextField(
+        blank=True,
+        default="",
+        help_text="Optional text content from the Kind 1984 report.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["reporter_pubkey", "target_event_id"],
+                name="uniq_reporter_event_flag",
+            )
+        ]
+        verbose_name = "Community Flag Ledger"
+        verbose_name_plural = "Community Flag Ledgers"
+
+    def __str__(self):
+        return f"<CommunityFlag {self.reporter_pubkey[:10]} -> {self.target_event_id[:10]} ({self.category})>"
+```
+
+#### Anti-Sybil Defense
+- **Single-Vote Invariant:** The database enforces a `UniqueConstraint` on `(reporter_pubkey, target_event_id)` so duplicate submissions from the same key are idempotently ignored.
+- **WoT-Weighted Aggregation:** In Phase 30, flag counts are computed by filtering against known non-zero Web-of-Trust peers or requiring authentic Nostr signature verification to prevent automated botnets from mass-flagging legitimate creators.
+
+---
+
+### 9.2 Progressive Threshold Matrix
+
+To balance community safety against arbitrary speech suppression, the node implements a **Three-Tier Progressive Friction Matrix**. Rather than treating moderation as a blunt binary on/off switch, the system applies increasing levels of friction proportional to community consensus:
+
+| Tier | Unique Flags Threshold | System Enforcement Action | User Experience Impact |
+| :--- | :--- | :--- | :--- |
+| **Tier 1: Progressive Friction** | **$\ge 3$ unique signed flags** | Dynamic NIP-36 Injection | Note remains in stream; media attachments are blurred (`.blur-me`) with a *"⚠️ Sensitive Content — Flagged by 3+ peers (Click to Reveal)"* expandable veil. |
+| **Tier 2: Discovery Suppression** | **$\ge 7$ unique signed flags** | Stream Withholding | Note is withheld from discovery feeds (`/feed`, `/api/feed`, search). Accessible exclusively via direct permalink (`/feed?thread=<id>`) behind a content warning interstitial. Creates `ModerationReviewDocket` entry. |
+| **Tier 3: Social Quarantine** | **$\ge 15$ unique flags** (or $\ge 30$ author flags / 7d) | Instance Quarantine & Escalation | Note is completely withheld from all local views via `filter_shielded_events()`. Docket entry elevated to `CRITICAL`. Author entered into review queue for operator review. |
+
+```mermaid
+flowchart TD
+    A["Inbound Note Card"] --> B{"Unique Flag Count"}
+    B -- "< 3 Flags" --> C["Normal Stream Presentation"]
+    B -- "3 to 6 Flags (Tier 1)" --> D["Dynamic NIP-36 Injection<br/>• Blur media attachments (.blur-me)<br/>• Render 'Click to Reveal' veil"]
+    B -- "7 to 14 Flags (Tier 2)" --> E["Discovery Feed Suppression<br/>• Omit from /feed & /api/feed<br/>• Allow direct permalink drilldown<br/>• Enqueue ModerationReviewDocket"]
+    B -- ">= 15 Flags (Tier 3)" --> F["Social Quarantine<br/>• Drop from filter_shielded_events()<br/>• Elevate Docket to CRITICAL<br/>• Operator Desk intervention required"]
+```
+
+#### `ModerationReviewDocket` Model Schema
+
+```python
+class ModerationReviewDocket(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING_REVIEW", "Pending Operator Review"),
+        ("DISMISSED_WHITELISTED", "Dismissed / Whitelisted"),
+        ("UPHELD_TAKEDOWN", "Upheld / Content Takedown"),
+        ("ESCALATED_LEGAL", "Escalated for Legal / DMCA"),
+    ]
+    ESCALATION_CHOICES = [
+        ("TIER_2", "Tier 2 (7+ Flags Discovery Withheld)"),
+        ("TIER_3_CRITICAL", "Tier 3 (15+ Flags Social Quarantine)"),
+        ("OPERATOR_FLAGGED", "Manual Operator Escalation"),
+    ]
+
+    target_event_id = models.CharField(
+        max_length=64,
+        unique=True,
+        db_index=True,
+        help_text="Event ID under review.",
+    )
+    target_author_pubkey = models.CharField(
+        max_length=64,
+        db_index=True,
+        help_text="Author of the flagged event.",
+    )
+    flag_count = models.PositiveIntegerField(default=1)
+    primary_category = models.CharField(max_length=32, default="SPAM")
+    escalation_level = models.CharField(
+        max_length=32,
+        choices=ESCALATION_CHOICES,
+        default="TIER_2",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=STATUS_CHOICES,
+        default="PENDING_REVIEW",
+        db_index=True,
+    )
+    reviewed_by_did = models.CharField(max_length=512, blank=True, default="")
+    resolution_notes = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Moderation Review Docket"
+        verbose_name_plural = "Moderation Review Dockets"
+
+    def __str__(self):
+        return f"<ReviewDocket {self.target_event_id[:12]} flags={self.flag_count} status={self.status}>"
+```
+
+---
+
+### 9.3 Restorative Intervention & Non-Disenfranchisement
+
+#### Non-Disenfranchisement Invariant for Civic Voting
+A core principle of the ecosystem is the inviolability of the democratic franchise:
+> **Civic voting through `/api/vote` to `POLY_ENGINE_URL` (:8002) is constitutionally immune to community flag counts.**
+> Under no circumstances SHALL flags in `CommunityFlagLedger` or dockets in `ModerationReviewDocket` be queried by, or impede the execution of, `api_cast_vote()`.
+> Even if a user has accumulated dozens of community flags on social posts, their cryptographic DID remains fully enfranchised to cast votes, submit ballots, and verify electoral tallies.
+
+#### Transparent Author Notice Banner Pattern
+In contrast to legacy centralized platforms that deploy deceptive "shadowbanning" techniques (leaving creators unaware of visibility restrictions), `iyou_wun` enforces radical transparency:
+
+1. **Self-Inspection Transparency:** When an author views their own note or inspects their profile/dashboard, any applied progressive friction displays a clear informational status badge:
+   ```html
+   <div class="px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs font-mono flex items-center justify-between">
+     <span>⚠️ Notice: This note received 4 community flags (Spam/Sensitive). Media attachments are veiled on this instance.</span>
+     <a href="/desk/appeal/?id={{ note.id }}" class="underline hover:opacity-80">Learn More / Appeal</a>
+   </div>
+   ```
+2. **External Mesh Independence:** The banner explicitly clarifies that the event remains intact and fully available on decentralized external relays, reminding the creator of their sovereign cryptographic ownership.
+
+---
+
+### 9.4 Operator Desk Integration
+
+The Moderation Desk (`/desk/moderation/`) is enhanced with an active **Review Docket Workspace**:
+- **Docket Queue:** Displays all events that crossed Tier 2 (7 flags) or Tier 3 (15 flags) with flag breakdowns, primary report categories, and reporter pubkeys.
+- **One-Click Whitelisting:** Operators can dismiss community flags with a single click, marking `status="DISMISSED_WHITELISTED"` and exempting the event from automated suppression.
+- **One-Click Takedown & Purge:** Operators can uphold the community flag, creating a permanent `NodeContentTakedown` and automatically dispatching a Blossom port 9002 REST `DELETE` request for associated media.
+- **Configurable Thresholds:** Operators can customize threshold parameters (e.g. adjust Tier 1 from 3 to 5 flags) via instance environment variables (`WUN_FLAG_TIER1_THRESHOLD`, `WUN_FLAG_TIER2_THRESHOLD`, `WUN_FLAG_TIER3_THRESHOLD`).
+

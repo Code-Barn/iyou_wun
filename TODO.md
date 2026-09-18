@@ -543,3 +543,12 @@
 - [x] Create UI partial `templates/admin/moderation_desk.html` matching ecosystem Tailwind styles
 - [x] Write unit tests in `apps/core/tests/test_moderation_shield.py` (target: 100% pass)
 
+#### Phase 30 — Community Flag Aggregation & Progressive Friction Engine
+- [ ] Implement `CommunityFlagLedger` and `ModerationReviewDocket` models in `apps/core/models.py`
+- [ ] Run migrations for community flag indexing tables
+- [ ] Implement flag aggregation, threshold evaluation, and NIP-36 dynamic injection in `apps/core/moderation.py`
+- [ ] Create `POST /api/moderation/flag/` endpoint in `apps/core/views.py` wired to `_report_modal.html`
+- [ ] Add Review Docket tab and threshold config controls to `templates/admin/moderation_desk.html` and `apps/core/views_admin.py`
+- [ ] Author automated unit tests in `apps/core/tests/test_community_moderation.py`
+
+
