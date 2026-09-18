@@ -1561,5 +1561,28 @@ class Phase45RelayDeadlineTests(TestCase):
         self.assertEqual(events, {})
         self.assertLess(elapsed, 4.0)
 
+    def test_relay_req_aggregates_events_across_multiple_responsive_relays(self):
+        """Verify relay_req aggregates events returned by all responsive sockets concurrently."""
+        from apps.core.views import relay_req
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            if "r1" in relay_url:
+                return {"e1": {"id": "e1", "content": "from r1"}}
+            elif "r2" in relay_url:
+                return {"e2": {"id": "e2", "content": "from r2"}}
+            elif "r3" in relay_url:
+                raise ConnectionError("r3 down")
+            return {}
+
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            events = relay_req(
+                {"kinds": [1]},
+                relay_urls=["wss://r1", "wss://r2", "wss://r3"],
+                timeout=1.0,
+            )
+        self.assertIn("e1", events)
+        self.assertIn("e2", events)
+        self.assertEqual(len(events), 2)
+
 
 

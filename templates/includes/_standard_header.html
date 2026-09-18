@@ -1,6 +1,6 @@
 {% load static %}
 <script>
-  window.CURRENT_SESSION_DID = "{{ current_session_did|default:user.username|escapejs }}";
+  window.CURRENT_SESSION_DID = "{% if current_session_did %}{{ current_session_did|escapejs }}{% elif user and user.username %}{{ user.username|escapejs }}{% endif %}";
 </script>
 <header class="relative z-30 border-b backdrop-blur-sm transition-colors duration-200 bg-white/90 border-slate-200 text-slate-900 dark:bg-[#0B0F19]/90 dark:border-gray-800 dark:text-gray-100">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 py-3.5 min-h-[64px] flex items-center justify-between" style="min-height: 64px;">

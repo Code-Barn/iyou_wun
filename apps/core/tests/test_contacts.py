@@ -125,6 +125,12 @@ class KeyDerivationTests(TestCase):
         self.assertIsNotNone(pubkey)
         self.assertEqual(len(pubkey), 64)
 
+    def test_did_key_base58btc_multicodec_derivation(self):
+        did = "did:key:z6MktwupdmLXVVqTzCw4i46r4uGyosGXRnR3XjN4Zq7oMMsw"
+        expected_pubkey = "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a"
+        pubkey = did_to_pubkey(did)
+        self.assertEqual(pubkey, expected_pubkey)
+
     def test_did_iyou_derivation(self):
         sample_hex = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         sample_did = f"did:iyou:0x{sample_hex}"

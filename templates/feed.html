@@ -87,6 +87,7 @@
 
           <!-- FOCUSED HERO POST -->
           <div class="bg-white dark:bg-slate-900 rounded-xl p-4 sm:p-5 border-2 border-violet-500/50 shadow-xl ring-1 ring-violet-500/20">
+            {% if thread_root and thread_root.id %}
             {% include "includes/_thread_post.html" with note=thread_root is_hero=True %}
             
             <!-- Inline Reply Box for Hero Post -->
@@ -104,6 +105,21 @@
                 </button>
               </div>
             </div>
+            {% else %}
+            <div class="animate-pulse space-y-3">
+              <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-full bg-slate-200 dark:bg-slate-800"></div>
+                <div class="space-y-1.5 flex-1">
+                  <div class="h-3.5 bg-slate-200 dark:bg-slate-800 rounded w-1/4"></div>
+                  <div class="h-2.5 bg-slate-200 dark:bg-slate-800 rounded w-1/6"></div>
+                </div>
+              </div>
+              <div class="space-y-2">
+                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-full"></div>
+                <div class="h-3 bg-slate-200 dark:bg-slate-800 rounded w-5/6"></div>
+              </div>
+            </div>
+            {% endif %}
           </div>
 
           <!-- Direct Replies Deck -->

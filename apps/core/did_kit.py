@@ -143,3 +143,30 @@ def verify_vc_signature(
         signed_vc["proof"] = proof
 
     return result
+
+
+B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+B58_INDEX = {c: i for i, c in enumerate(B58_ALPHABET)}
+
+
+def b58decode(s: str) -> bytes:
+    """Decode a Base58BTC-encoded string to bytes."""
+    num = 0
+    for char in s:
+        if char not in B58_INDEX:
+            raise ValueError(f"Invalid Base58 character: {char}")
+        num = num * 58 + B58_INDEX[char]
+    pad = len(s) - len(s.lstrip("1"))
+    byte_len = (num.bit_length() + 7) // 8
+    return (b"\x00" * pad) + (num.to_bytes(byte_len, "big") if num > 0 else b"")
+
+
+def b58encode(b: bytes) -> str:
+    """Encode bytes to a Base58BTC string."""
+    num = int.from_bytes(b, "big")
+    chars = []
+    while num > 0:
+        num, rem = divmod(num, 58)
+        chars.append(B58_ALPHABET[rem])
+    pad = len(b) - len(b.lstrip(b"\x00"))
+    return (B58_ALPHABET[0] * pad) + "".join(reversed(chars))

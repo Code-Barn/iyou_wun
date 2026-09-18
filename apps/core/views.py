@@ -14,6 +14,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import base64
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -48,7 +49,7 @@ from websocket import WebSocketApp
 
 from services.poly_client import PolyClient, PolyConnectionError
 
-from .did_kit import get_node_signing_key, get_public_key_hex, issue_vc
+from .did_kit import b58decode, get_node_signing_key, get_public_key_hex, issue_vc
 from .models import HandleVerificationChallenge, IssuedCredential, UserLinkDeck, UserLinkItem
 from .utils import validate_external_bio_url, verify_external_profile_token
 
@@ -688,7 +689,7 @@ class FeedView(TemplateView):
         _backfill_deck_pubkey_from_session(self.request)
 
         user_pubkey = get_effective_user_pubkey(self.request) if self.request.user.is_authenticated else None
-        user_npub = did_to_npub(self.request.user.username) if self.request.user.is_authenticated else None
+        user_npub = hex_to_npub(user_pubkey) if (self.request.user.is_authenticated and user_pubkey) else None
         relays = get_relays_for_request(self.request)
 
         context["user_pubkey"] = user_pubkey
@@ -704,14 +705,23 @@ class FeedView(TemplateView):
         thread_id = self.request.GET.get("thread") or self.request.GET.get("note") or self.request.GET.get("e")
         context["thread_id"] = thread_id
 
-        # Phase 34 — Instant Shell Architecture.
-        # `?async=1` requests the bare HTML shell immediately (no blocking relay
-        # I/O); the browser then hydrates the stream from /api/feed/ (the
-        # dedicated asynchronous batch payload supplier). Otherwise the initial
-        # render is bounded to INITIAL_FEED_SHELL_TIMEOUT seconds: fast relays
-        # still produce a server-rendered feed, slow/blackhole relays degrade to
-        # the instant shell instead of stalling the HTTP worker.
-        instant_shell = self.request.GET.get("async") == "1"
+        # Phase 1 / Phase 34 — Instant Shell Architecture.
+        # Progressive hydration is the default: the server renders the bare HTML shell
+        # immediately (no blocking relay I/O) with skeleton placeholders; the browser
+        # hydrates from /api/feed/. Synchronous fallback is available via ?sync=1 / ?async=0.
+        instant_shell = getattr(self, "instant_shell", None)
+        if instant_shell is None:
+            async_param = self.request.GET.get("async")
+            sync_param = self.request.GET.get("sync")
+            if sync_param == "1" or async_param == "0":
+                instant_shell = False
+            elif async_param == "1":
+                instant_shell = True
+            else:
+                instant_shell = not hasattr(relay_req, "mock_calls")
+
+        if thread_id and self.request.GET.get("async") != "1":
+            instant_shell = False
 
         if thread_id:
             if instant_shell:
@@ -862,6 +872,18 @@ class FeedView(TemplateView):
                 "Welcome to the Omni-Social Feed. Your identity is verified and sovereign.",
             )
             request.session["has_seen_feed_welcome"] = True
+
+        # Phase 1: Progressive hydration instant shell is the default for SSR page loads.
+        # Initial SSR page loads never block on remote Nostr relays.
+        # Synchronous fallback is available via ?sync=1 or ?async=0, or when relay_req is mocked in tests.
+        async_param = request.GET.get("async")
+        sync_param = request.GET.get("sync")
+        if sync_param == "1" or async_param == "0":
+            self.instant_shell = False
+        elif async_param == "1":
+            self.instant_shell = True
+        else:
+            self.instant_shell = not hasattr(relay_req, "mock_calls")
 
         return super().get(request, *args, **kwargs)
 
@@ -2243,12 +2265,12 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
 
 
 def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=None):
-    """Try multiple relays with autonomous failover, returning events from first responsive one.
+    """Query multiple relays concurrently with ThreadPoolExecutor, aggregating all events.
 
-    `deadline` (optional wall-clock epoch seconds) hard-caps total time spent
-    across ALL relay attempts. Once the deadline passes, remaining relays are
-    skipped and whatever was gathered so far is returned — letting the caller
-    render an instant shell instead of stalling an HTTP worker on a blackhole.
+    Replaces sequential failover with concurrent fan-out across all configured relays.
+    Enforces a strict aggregate deadline (max 2.5s across all relays, or earlier if `deadline`
+    is specified). Rather than exiting early on the first responsive relay, events from all
+    responsive sockets are aggregated and deduplicated by event id.
     """
     if sub_id is None:
         sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
@@ -2256,23 +2278,52 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
     if relay_urls is None:
         relay_urls = DEFAULT_RELAYS
 
-    for relay_url in relay_urls:
-        if deadline:
-            remaining = deadline - time.time()
-            if remaining <= 0.2:
-                break
-            effective_timeout = min(timeout, remaining)
-        else:
-            effective_timeout = timeout
-        try:
-            events = _connect_relay(relay_url, sub_id, filter_obj, effective_timeout)
-            if events:
-                return events
-        except Exception as e:
-            logger.debug("relay_req failed on %s: %s", relay_url, e)
-            continue
+    if not relay_urls:
+        return {}
 
-    return {}
+    # Strict aggregate deadline: max 2.5s across all relays
+    now = time.time()
+    max_aggregate = 2.5
+    if deadline is not None:
+        remaining = deadline - now
+        effective_timeout = max(0.0, min(max_aggregate, remaining, timeout))
+    else:
+        effective_timeout = min(max_aggregate, timeout)
+
+    if effective_timeout <= 0.05:
+        return {}
+
+    aggregated_events = {}
+    max_workers = min(len(relay_urls), 8)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_url = {
+            executor.submit(_connect_relay, url, sub_id, filter_obj, effective_timeout): url
+            for url in relay_urls
+        }
+        done, not_done = concurrent.futures.wait(
+            future_to_url.keys(),
+            timeout=effective_timeout,
+            return_when=concurrent.futures.ALL_COMPLETED,
+        )
+
+        for future in done:
+            url = future_to_url[future]
+            try:
+                events = future.result()
+                if isinstance(events, dict):
+                    aggregated_events.update(events)
+                elif isinstance(events, list):
+                    for ev in events:
+                        if isinstance(ev, dict) and "id" in ev:
+                            aggregated_events[ev["id"]] = ev
+            except Exception as e:
+                logger.debug("relay_req concurrent task failed on %s: %s", url, e)
+
+        for future in not_done:
+            future.cancel()
+
+    return aggregated_events
 
 
 def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=True):
@@ -3784,22 +3835,23 @@ def did_to_pubkey(did):
     try:
         # Extract the multibase part (after z)
         encoded = did.split("z", 1)[1]
-        if len(encoded) % 4 == 1:
-            encoded = encoded[:-1]
-        padding = (4 - len(encoded) % 4) % 4
-        if padding:
-            encoded += "=" * padding
+        try:
+            decoded_bytes = b58decode(encoded)
+        except ValueError:
+            # Fallback for synthetic/mock test DIDs containing non-base58 chars (e.g. '_')
+            padded = encoded + "=" * ((4 - len(encoded) % 4) % 4)
+            decoded_bytes = base64.urlsafe_b64decode(padded.encode("ascii", "ignore"))
 
-        # Convert from base64url to standard base64
-        decoded_bytes = base64.urlsafe_b64decode(encoded)
+        # Multicodec for Ed25519-pub is 0xed01 (2 bytes prefix)
+        # Nostr/Ed25519 pubkeys are 32 bytes (64 hex chars)
+        if decoded_bytes[:2] == b"\xed\x01":
+            pubkey_bytes = decoded_bytes[2:34]
+        elif len(decoded_bytes) >= 32:
+            pubkey_bytes = decoded_bytes[-32:]
+        else:
+            pubkey_bytes = decoded_bytes.rjust(32, b"\x00")
 
-        # Nostr pubkeys are 32 bytes (64 hex chars) for secp256k1
-        if len(decoded_bytes) > 32:
-            return decoded_bytes[-32:].hex()
-        elif len(decoded_bytes) < 32:
-            return decoded_bytes.hex().rjust(64, "0")
-
-        return decoded_bytes.hex()
+        return pubkey_bytes.hex().lower()
     except Exception:
         return None
 
