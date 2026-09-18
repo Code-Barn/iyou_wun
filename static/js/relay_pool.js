@@ -220,10 +220,21 @@
             });
         }
 
-        // 4. Initial probe and periodic probe
+        // 4. Initial probe and periodic probe + Tab Sleep & Resume Lifecycle
         if (typeof window !== "undefined") {
             setTimeout(function () { self.probeRelays(); }, 500);
             this.probeTimer = setInterval(function () { self.probeRelays(); }, PROBE_INTERVAL_MS);
+
+            var resumeHandler = function () {
+                self.handleResume();
+            };
+            if (typeof document !== "undefined") {
+                document.addEventListener("visibilitychange", function () {
+                    if (!document.hidden) resumeHandler();
+                });
+            }
+            window.addEventListener("online", resumeHandler);
+            window.addEventListener("focus", resumeHandler);
         }
     };
 
@@ -737,6 +748,39 @@
         this.reconnectHooks.forEach(function (cb) {
             try { cb(entry.url); } catch (e) { /* ignore */ }
         });
+    };
+
+    /**
+     * Tab Sleep & Resume Lifecycle Engine:
+     * When the tab becomes visible (!document.hidden), comes online, or regains focus,
+     * immediately check connection health across all managed sockets.
+     * If any socket is closing (readyState 2) or closed (readyState 3), trigger
+     * an immediate reconnection pass rather than waiting for the background probe timer.
+     * Re-subscribes active feed filters to ensure live note streaming resumes immediately.
+     */
+    RelayPool.prototype.handleResume = function () {
+        if (typeof document !== "undefined" && document.hidden) return;
+
+        var self = this;
+        this.connections.forEach(function (entry, norm) {
+            var ws = entry.socket;
+            if (!ws || ws.readyState === WebSocket.CLOSING || ws.readyState === WebSocket.CLOSED) {
+                if (entry.reconnectTimer) {
+                    clearTimeout(entry.reconnectTimer);
+                    entry.reconnectTimer = null;
+                }
+                entry.backoffMs = RECONNECT_BASE_MS;
+                self._teardownConnection(entry);
+                var record = self.relays.get(norm);
+                if (record && record.enabled !== false) {
+                    self.ensureConnection(entry.url, (entry.filters || [])[0] || null, entry.onEvent);
+                }
+            } else if (ws.readyState === WebSocket.OPEN) {
+                self._replaySubscriptions(entry);
+            }
+        });
+
+        this.probeRelays();
     };
 
     RelayPool.prototype.probeRelays = function () {

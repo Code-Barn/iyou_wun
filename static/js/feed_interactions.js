@@ -984,6 +984,9 @@
             wrapper.setAttribute("data-lang", event.lang);
         }
         wrapper.setAttribute("data-created-at", Math.floor(event.created_at || (Date.now() / 1000)));
+        if (window.circleFeedFilter && typeof window.circleFeedFilter.indexCardTags === "function") {
+            window.circleFeedFilter.indexCardTags(wrapper, event.tags);
+        }
 
         var npub = window.userNpub || (window.userPubkey ? window.userPubkey.substring(0, 12) + "..." : "You");
         var mediaUrl = (event.tags && event.tags.find(function (t) { return t[0] === "url"; })) ? event.tags.find(function (t) { return t[0] === "url"; })[1] : "";
@@ -1092,6 +1095,9 @@
                 wrapper.setAttribute("data-lang", note.lang);
             }
             wrapper.setAttribute("data-created-at", Math.floor(note.created_at_epoch || note.created_at || (Date.now() / 1000)));
+            if (window.circleFeedFilter && typeof window.circleFeedFilter.indexCardTags === "function") {
+                window.circleFeedFilter.indexCardTags(wrapper, note.tags);
+            }
 
             wrapper.innerHTML = buildCardHtml(note);
 
@@ -1124,14 +1130,18 @@
             checkAndApplyClamping(wrapper);
             hydrateLocalTimestamps(wrapper);
             
-            // Hide empty state elements when cards are rendered
+            // Hide canonical empty state and remove legacy circle-empty-state
             var feedEmptyState = document.getElementById("feed-empty-state");
             var circleEmptyState = document.getElementById("circle-empty-state");
             if (feedEmptyState) {
                 feedEmptyState.classList.add("hidden");
+                feedEmptyState.style.display = "none";
             }
             if (circleEmptyState) {
-                circleEmptyState.classList.add("hidden");
+                try { circleEmptyState.remove(); } catch (e) {
+                    circleEmptyState.classList.add("hidden");
+                    circleEmptyState.style.display = "none";
+                }
             }
 
             if (note.kind === 30023) {
@@ -1212,20 +1222,32 @@
 
                 var emptyState = document.getElementById("feed-empty-state");
                 var circleEmpty = document.getElementById("circle-empty-state");
-                if (notes.length > 0) {
-                    if (emptyState) emptyState.classList.add("hidden");
-                    if (circleEmpty) circleEmpty.classList.add("hidden");
-                } else {
-                    if (circleEmpty) circleEmpty.classList.add("hidden");
-                    if (!emptyState) {
-                        var emptyDiv = document.createElement("div");
-                        emptyDiv.id = "feed-empty-state";
-                        emptyDiv.className = "text-center py-12 text-slate-400 font-mono text-xs";
-                        emptyDiv.textContent = "No notes found in this circle.";
-                        container.appendChild(emptyDiv);
-                    } else {
-                        emptyState.classList.remove("hidden");
+                if (circleEmpty) {
+                    try { circleEmpty.remove(); } catch (e) {
+                        circleEmpty.classList.add("hidden");
+                        circleEmpty.style.display = "none";
                     }
+                }
+
+                if (notes.length > 0) {
+                    if (emptyState) {
+                        emptyState.classList.add("hidden");
+                        emptyState.style.display = "none";
+                    }
+                } else {
+                    if (!emptyState) {
+                        emptyState = document.createElement("div");
+                        emptyState.id = "feed-empty-state";
+                        emptyState.className = "text-center py-12 text-slate-400 font-mono text-xs";
+                        container.appendChild(emptyState);
+                    }
+                    if (window.circleFeedFilter && typeof window.circleFeedFilter.updateEmptyStateContent === "function") {
+                        window.circleFeedFilter.updateEmptyStateContent(emptyState, circle);
+                    } else {
+                        emptyState.textContent = "No notes found in this circle.";
+                    }
+                    emptyState.classList.remove("hidden");
+                    emptyState.style.display = "";
                 }
 
                 container.removeAttribute("data-hydrate");
@@ -1250,8 +1272,10 @@
             });
     }
 
+    var _feedFetchSequence = 0;
+
     function loadMoreNotes(isReset = false) {
-        if (_isLoadingFeedNotes) return;
+        if (_isLoadingFeedNotes && !isReset) return;
 
         var sentinel = document.getElementById("feed-pagination-sentinel");
         var container = document.getElementById("feed-container") || document.getElementById("feedContainer");
@@ -1271,6 +1295,7 @@
         }
 
         _isLoadingFeedNotes = true;
+        var thisRequestId = ++_feedFetchSequence;
 
         var spinner = document.getElementById("feed-loading-spinner") || document.getElementById("loadMoreSpinner");
         var btn = document.getElementById("load-more-btn") || document.getElementById("loadMoreBtn");
@@ -1307,6 +1332,10 @@
         fetch(queryUrl)
             .then(function (r) { return r.json(); })
             .then(function (data) {
+                if (thisRequestId !== _feedFetchSequence) {
+                    return; // Stale fetch response from previous circle or pagination trigger
+                }
+
                 var notes = data.notes || [];
                 var repliesMap = data.replies || {};
 
@@ -1317,8 +1346,16 @@
                 if (notes.length > 0) {
                     var emptyState = document.getElementById("feed-empty-state");
                     var circleEmpty = document.getElementById("circle-empty-state");
-                    if (emptyState) emptyState.classList.add("hidden");
-                    if (circleEmpty) circleEmpty.classList.add("hidden");
+                    if (emptyState) {
+                        emptyState.classList.add("hidden");
+                        emptyState.style.display = "none";
+                    }
+                    if (circleEmpty) {
+                        try { circleEmpty.remove(); } catch (e) {
+                            circleEmpty.classList.add("hidden");
+                            circleEmpty.style.display = "none";
+                        }
+                    }
 
                     notes.forEach(function (note) {
                         appendNoteToFeed(note, container, repliesMap);
@@ -1359,24 +1396,46 @@
                         window.feedObserver.unobserve(sentinel);
                     }
                     if (btn) btn.classList.add("hidden");
-                    if (endMsg) endMsg.classList.remove("hidden");
 
                     var visibleCards = container.querySelectorAll(".feed-note-card:not(.hidden)");
                     if (visibleCards.length === 0) {
+                        if (endMsg) endMsg.classList.add("hidden");
                         var emptyStateEl = document.getElementById("feed-empty-state");
-                        if (emptyStateEl) emptyStateEl.classList.remove("hidden");
+                        if (!emptyStateEl) {
+                            emptyStateEl = document.createElement("div");
+                            emptyStateEl.id = "feed-empty-state";
+                            emptyStateEl.className = "text-center py-12 text-slate-400 font-mono text-xs";
+                            container.appendChild(emptyStateEl);
+                        }
+                        if (window.circleFeedFilter && typeof window.circleFeedFilter.updateEmptyStateContent === "function") {
+                            window.circleFeedFilter.updateEmptyStateContent(emptyStateEl, circle);
+                        } else {
+                            emptyStateEl.textContent = "No notes found in this circle.";
+                        }
+                        emptyStateEl.classList.remove("hidden");
+                        emptyStateEl.style.display = "";
                         var circleEmpty = document.getElementById("circle-empty-state");
-                        if (circleEmpty) circleEmpty.classList.add("hidden");
+                        if (circleEmpty) {
+                            try { circleEmpty.remove(); } catch (e) {
+                                circleEmpty.classList.add("hidden");
+                                circleEmpty.style.display = "none";
+                            }
+                        }
+                    } else {
+                        if (endMsg) endMsg.classList.remove("hidden");
                     }
                 }
             })
             .catch(function (err) {
+                if (thisRequestId !== _feedFetchSequence) return;
                 console.error("Failed to load more feed notes:", err);
                 if (btn) btn.classList.remove("hidden");
             })
             .finally(function () {
-                _isLoadingFeedNotes = false;
-                if (spinner) spinner.classList.add("hidden");
+                if (thisRequestId === _feedFetchSequence) {
+                    _isLoadingFeedNotes = false;
+                    if (spinner) spinner.classList.add("hidden");
+                }
             });
     }
 
@@ -1385,15 +1444,23 @@
         var sentinel = document.getElementById('feed-pagination-sentinel');
         if (!container) return;
 
-        // Clear existing cards
+        // Clear existing cards immediately to prevent switching flash
         container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
         if (sentinel) {
             sentinel.dataset.oldestTimestamp = '';
         }
         var emptyState = document.getElementById('feed-empty-state');
-        if (emptyState) emptyState.classList.add('hidden');
+        if (emptyState) {
+            emptyState.classList.add('hidden');
+            emptyState.style.display = 'none';
+        }
         var circleEmpty = document.getElementById('circle-empty-state');
-        if (circleEmpty) circleEmpty.classList.add('hidden');
+        if (circleEmpty) {
+            try { circleEmpty.remove(); } catch (e) {
+                circleEmpty.classList.add('hidden');
+                circleEmpty.style.display = 'none';
+            }
+        }
 
         var spinner = document.getElementById('feed-loading-spinner');
         if (spinner) spinner.classList.remove('hidden');
@@ -1425,7 +1492,7 @@
                     var cards = container ? container.querySelectorAll(".feed-note-card:not(.hidden)") : [];
 
                     // If #feed-empty-state is visible or no cards are rendered, do not trigger loadMoreNotes()
-                    if ((emptyState && !emptyState.classList.contains("hidden")) || cards.length === 0) {
+                    if ((emptyState && !emptyState.classList.contains("hidden") && emptyState.style.display !== "none") || cards.length === 0) {
                         return;
                     }
 

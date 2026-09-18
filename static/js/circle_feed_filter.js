@@ -121,16 +121,84 @@
         return { root, pubkey, did, tagsRaw, mediaType, mimeType, altText, author, textContent };
     }
 
+    // In-memory normalized tag cache: card/note ID -> Array of [key, val, ...]
+    const noteTagMap = new Map();
+
+    function indexCardTags(card, optionalParsedTags) {
+        if (!card) return [];
+        let root = card;
+        if (!root.getAttribute("data-tags") && !root.getAttribute("data-note-tags")) {
+            const inner = card.querySelector("[data-tags], [data-note-tags]");
+            if (inner) root = inner;
+        }
+
+        const cardId = root.getAttribute("data-note-card-id") ||
+                       root.getAttribute("data-note-id") ||
+                       root.id ||
+                       card.id ||
+                       (card.dataset && card.dataset.noteId) ||
+                       (root.dataset && root.dataset.noteId);
+
+        if (optionalParsedTags && Array.isArray(optionalParsedTags)) {
+            const normalized = optionalParsedTags.map(t => {
+                if (!Array.isArray(t)) return [String(t || "").toLowerCase()];
+                return t.map(v => String(v || "").toLowerCase());
+            });
+            if (cardId) noteTagMap.set(cardId, normalized);
+            card._cachedNormalizedTags = normalized;
+            root._cachedNormalizedTags = normalized;
+            return normalized;
+        }
+
+        const raw = root.getAttribute("data-tags") || root.getAttribute("data-note-tags") || "";
+        let normalized = [];
+        if (raw) {
+            try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    normalized = parsed.map(t => {
+                        if (!Array.isArray(t)) return [String(t || "").toLowerCase()];
+                        return t.map(v => String(v || "").toLowerCase());
+                    });
+                }
+            } catch (e) {
+                normalized = [];
+            }
+        }
+        if (cardId) {
+            noteTagMap.set(cardId, normalized);
+        }
+        card._cachedNormalizedTags = normalized;
+        root._cachedNormalizedTags = normalized;
+        return normalized;
+    }
+
     function getCardTags(card) {
         if (!card) return [];
-        const raw = card.getAttribute("data-tags") || card.getAttribute("data-note-tags") || "";
-        if (!raw) return [];
-        try {
-            const parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-            return [];
+        let root = card;
+        if (!root.getAttribute("data-tags") && !root.getAttribute("data-note-tags")) {
+            const inner = card.querySelector("[data-tags], [data-note-tags]");
+            if (inner) root = inner;
         }
+
+        const cardId = root.getAttribute("data-note-card-id") ||
+                       root.getAttribute("data-note-id") ||
+                       root.id ||
+                       card.id ||
+                       (card.dataset && card.dataset.noteId) ||
+                       (root.dataset && root.dataset.noteId);
+
+        if (cardId && noteTagMap.has(cardId)) {
+            return noteTagMap.get(cardId);
+        }
+        if (root._cachedNormalizedTags) {
+            return root._cachedNormalizedTags;
+        }
+        if (card._cachedNormalizedTags) {
+            return card._cachedNormalizedTags;
+        }
+
+        return indexCardTags(card);
     }
 
     function tagIsIyou(tag) {
@@ -276,35 +344,33 @@
         if (cardData.altText && cardData.altText.includes(q)) return true;
         if (cardData.author && cardData.author.includes(q)) return true;
 
-        if (cardData.tagsRaw) {
-            try {
-                const tags = JSON.parse(cardData.tagsRaw);
-                if (Array.isArray(tags)) {
-                    const hasTag = tags.some(t => {
-                        if (!Array.isArray(t)) return false;
-                        if (t[0] === "t" && t[1] && t[1].toLowerCase().includes(tagClean)) return true;
-                        return t.some(val => String(val).toLowerCase().includes(q));
-                    });
-                    if (hasTag) return true;
-                }
-            } catch (e) {
-                if (cardData.tagsRaw.toLowerCase().includes(q)) return true;
-            }
+        const tags = getCardTags(cardData.root || cardData.card);
+        if (tags && tags.length > 0) {
+            const hasTag = tags.some(t => {
+                if (!Array.isArray(t)) return false;
+                if (t[0] === "t" && t[1] && t[1].includes(tagClean)) return true;
+                return t.some(val => String(val).includes(q));
+            });
+            if (hasTag) return true;
         }
 
         return false;
     }
 
     function ensureEmptyStateElement(container) {
-        let el = document.getElementById("circle-empty-state");
-        if (!el) {
+        // Deprecate and remove any legacy #circle-empty-state
+        const legacy = document.getElementById("circle-empty-state");
+        if (legacy) {
+            try { legacy.remove(); } catch (e) { legacy.classList.add("hidden"); legacy.style.display = "none"; }
+        }
+
+        let el = document.getElementById("feed-empty-state");
+        if (!el && container) {
             el = document.createElement("div");
-            el.id = "circle-empty-state";
-            el.className = "text-center py-12 px-6 text-slate-500 dark:text-slate-400 font-mono text-xs border border-dashed border-slate-300 dark:border-slate-800 rounded-lg my-6";
+            el.id = "feed-empty-state";
+            el.className = "text-center py-12 text-slate-400 font-mono text-xs hidden";
             container.appendChild(el);
         }
-        const feedEmpty = document.getElementById("feed-empty-state");
-        if (feedEmpty) feedEmpty.classList.add("hidden");
         return el;
     }
 
@@ -467,6 +533,35 @@
         }
     }
 
+    function getEmptyStateHtml(circle, searchQuery) {
+        if (searchQuery) {
+            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes match the active filter and search query.</p>' +
+                '<p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>';
+        } else if (circle === "iyou") {
+            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from the iyou ecosystem yet.</p>' +
+                '<p class="text-xs text-slate-500">Notes posted by registered accounts will appear here.</p>';
+        } else if (circle === "following") {
+            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in Following Circle.</p>' +
+                '<p class="text-xs text-slate-500">Follow more creators on the feed or link deck to populate your network.</p>';
+        } else if (circle === "inner") {
+            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from Inner Circle (Level 0 / 0.5).</p>' +
+                '<p class="text-xs text-slate-500">Add trusted peer aliases in the iyou_home Contact Enclave.</p>';
+        } else if (circle === "mutual") {
+            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from Mutual Friends (Level 1 Peers).</p>' +
+                '<p class="text-xs text-slate-500">Mutual friends are peers who follow you back on the decentralized mesh.</p>';
+        } else {
+            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in this circle.</p>' +
+                '<p class="text-xs text-slate-500">Follow more creators or add contacts in the Enclave.</p>';
+        }
+    }
+
+    function updateEmptyStateContent(el, circle, searchQuery) {
+        if (!el) return;
+        const targetCircle = circle || activeCircle;
+        const targetQuery = searchQuery !== undefined ? searchQuery : activeSearchQuery;
+        el.innerHTML = getEmptyStateHtml(targetCircle, targetQuery);
+    }
+
     function applyFeedFilters() {
         const container = getFeedContainer();
         if (!container) return;
@@ -515,35 +610,26 @@
 
         applyNsfwBlurState();
 
-        // Handle empty state banner
+        // Handle empty state banner — only mutate canonical #feed-empty-state
         const emptyState = ensureEmptyStateElement(container);
-        if (visibleCount === 0 && cards.length > 0) {
-            emptyState.style.display = "";
-            emptyState.classList.remove("hidden");
-            const feedEmpty = document.getElementById("feed-empty-state");
-            if (feedEmpty) feedEmpty.classList.add("hidden");
-            if (activeSearchQuery) {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes match the active filter and search query.</p>' +
-                    '<p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>';
-            } else if (activeCircle === "iyou") {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from the iyou ecosystem yet.</p>' +
-                    '<p class="text-xs text-slate-500">Notes posted by registered accounts will appear here.</p>';
-            } else if (activeCircle === "following") {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in Following Circle.</p>' +
-                    '<p class="text-xs text-slate-500">Follow more creators on the feed or link deck to populate your network.</p>';
-            } else if (activeCircle === "inner") {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from Inner Circle (Level 0 / 0.5).</p>' +
-                    '<p class="text-xs text-slate-500">Add trusted peer aliases in the iyou_home Contact Enclave.</p>';
-            } else if (activeCircle === "mutual") {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from Mutual Friends (Level 1 Peers).</p>' +
-                    '<p class="text-xs text-slate-500">Mutual friends are peers who follow you back on the decentralized mesh.</p>';
+        const spinner = document.getElementById("feed-loading-spinner") || document.getElementById("loadMoreSpinner");
+        const isLoading = spinner && !spinner.classList.contains("hidden");
+        const skeleton = document.getElementById("feed-skeleton-container");
+        const isHydrating = container && container.getAttribute("data-hydrate") === "true";
+
+        if (emptyState) {
+            // Never display empty state while an in-flight fetch or skeleton is resolving
+            if (isLoading || skeleton || isHydrating) {
+                emptyState.style.display = "none";
+                emptyState.classList.add("hidden");
+            } else if (visibleCount === 0) {
+                emptyState.style.display = "";
+                emptyState.classList.remove("hidden");
+                updateEmptyStateContent(emptyState, activeCircle, activeSearchQuery);
             } else {
-                emptyState.innerHTML = '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in this circle.</p>' +
-                    '<p class="text-xs text-slate-500">Follow more creators or add contacts in the Enclave.</p>';
+                emptyState.style.display = "none";
+                emptyState.classList.add("hidden");
             }
-        } else {
-            emptyState.style.display = "none";
-            emptyState.classList.add("hidden");
         }
     }
 
@@ -681,7 +767,9 @@
         }
 
         // Update URL search params gracefully on feed and gallery
-        if (window.location.pathname.startsWith("/feed") || window.location.pathname.startsWith("/gallery") || window.location.pathname === "/") {
+        const isFeedPage = window.location.pathname.startsWith("/feed") || window.location.pathname === "/";
+        const isGalleryPage = window.location.pathname.startsWith("/gallery");
+        if (isFeedPage || isGalleryPage) {
             const url = new URL(window.location.href);
             if (activeCircle === "iyou") {
                 url.searchParams.delete("circle");
@@ -691,12 +779,28 @@
             window.history.replaceState({}, "", url.toString());
         }
 
-        applyFilters();
+        const feedContainer = getFeedContainer();
+        if (isFeedPage && feedContainer && (!suppressCircleToasts || previousCircle !== activeCircle)) {
+            feedContainer.querySelectorAll(".feed-note-card").forEach(el => el.remove());
+            const feedEmpty = document.getElementById("feed-empty-state");
+            if (feedEmpty) { feedEmpty.style.display = "none"; feedEmpty.classList.add("hidden"); }
+            const circleEmpty = document.getElementById("circle-empty-state");
+            if (circleEmpty) {
+                try { circleEmpty.remove(); } catch (e) { circleEmpty.style.display = "none"; circleEmpty.classList.add("hidden"); }
+            }
+            const spinner = document.getElementById("feed-loading-spinner") || document.getElementById("loadMoreSpinner");
+            if (spinner) spinner.classList.remove("hidden");
 
-        if (!suppressCircleToasts) {
-            window.dispatchEvent(new CustomEvent('circleChanged', { detail: { circle: activeCircle } }));
-            if (typeof window.reloadFeedForCircle === 'function') {
-                window.reloadFeedForCircle(activeCircle);
+            if (!suppressCircleToasts) {
+                window.dispatchEvent(new CustomEvent('circleChanged', { detail: { circle: activeCircle } }));
+                if (typeof window.reloadFeedForCircle === 'function') {
+                    window.reloadFeedForCircle(activeCircle);
+                }
+            }
+        } else {
+            applyFilters();
+            if (!suppressCircleToasts) {
+                window.dispatchEvent(new CustomEvent('circleChanged', { detail: { circle: activeCircle } }));
             }
         }
     }
@@ -912,7 +1016,8 @@
         // Initial client scan for cards against initialCircle
         const cards = getNoteCards();
         cards.forEach((card) => {
-            if (card.id === "circle-empty-state") return;
+            indexCardTags(card);
+            if (card.id === "circle-empty-state" || card.id === "feed-empty-state") return;
             checkCircleMatch(card, initialCircle);
         });
         if (urlQuery) {
@@ -1034,7 +1139,12 @@
         applyNsfwBlurState: applyNsfwBlurState,
         checkCircleMatch: checkCircleMatch,
         getActiveCircle: () => activeCircle,
-        get activeCircle() { return activeCircle; }
+        get activeCircle() { return activeCircle; },
+        noteTagMap: noteTagMap,
+        indexCardTags: indexCardTags,
+        getCardTags: getCardTags,
+        updateEmptyStateContent: updateEmptyStateContent,
+        getEmptyStateHtml: getEmptyStateHtml
     };
 
     global.circleFeedFilter = circleFeedFilter;
@@ -1044,6 +1154,8 @@
     global.setCircle = setCircle;
     global.toggleNsfwFilter = toggleNsfwFilter;
     global.filterByTag = filterByTag;
+    global.noteTagMap = noteTagMap;
+    global.indexCardTags = indexCardTags;
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initCircleFeedFilter);

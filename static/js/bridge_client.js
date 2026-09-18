@@ -252,7 +252,34 @@
         this._personaQueryActive = false;      // waiting on an enclave persona list response
         this._isSwitchingPersona = false;      // in-flight mutex lock for /api/auth/persona-switch/
         this._lastSwitchedProfileId = null;    // frame deduplication cache
+        this._initLifecycle();
     }
+
+    TauriBridgeClient.prototype._initLifecycle = function () {
+        if (typeof window === "undefined" || typeof document === "undefined") return;
+        var self = this;
+        var resumeHandler = function () {
+            self.handleResume();
+        };
+        document.addEventListener("visibilitychange", function () {
+            if (!document.hidden) resumeHandler();
+        });
+        window.addEventListener("online", resumeHandler);
+        window.addEventListener("focus", resumeHandler);
+    };
+
+    /**
+     * Tab Sleep & Resume Lifecycle:
+     * When tab becomes visible, comes online, or regains focus, reconnect
+     * dropped or closed bridge socket immediately.
+     */
+    TauriBridgeClient.prototype.handleResume = function () {
+        if (typeof document !== "undefined" && document.hidden) return;
+        if (!this.socket || this.socket.readyState === WebSocket.CLOSING || this.socket.readyState === WebSocket.CLOSED) {
+            this.connectionLock = "IDLE";
+            this.connect(this._onMessage);
+        }
+    };
 
     TauriBridgeClient.prototype._normalizeAliasKey = function (raw) {
         var key = String(raw == null ? "" : raw).trim();
