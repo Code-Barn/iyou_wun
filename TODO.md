@@ -552,7 +552,7 @@
 - [x] Author automated unit tests in `apps/core/tests/test_community_moderation.py` and `test_moderation_shield.py`
 
 #### Phase 31 — Transparent Author Friction, Restorative Appeals & User-Tunable Shielding
-- [ ] Implement `ModerationAppeal` model in `apps/core/models.py` and run migrations
+- [x] Implement `ModerationAppeal` model in `apps/core/models.py` and run migrations
 - [ ] Build author friction inspector and appeal submission helper in `apps/core/moderation.py`
 - [ ] Create `POST /api/moderation/appeal/` endpoint and context exposure in `apps/core/views.py`
 - [ ] Add transparent friction notice card and appeal modal in `templates/dashboard.html`

@@ -323,3 +323,56 @@ class ModerationReviewDocket(models.Model):
     def __str__(self):
         return f"<ModerationReviewDocket {self.docket_type}:{self.target_identifier} tier={self.current_tier} status={self.status}>"
 
+    @property
+    def appeal_count(self) -> int:
+        return self.appeals.count()
+
+    @property
+    def has_pending_appeal(self) -> bool:
+        return self.appeals.filter(status="PENDING").exists()
+
+
+class ModerationAppeal(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending Operator Review"),
+        ("ACCEPTED", "Accepted / Friction Cleared"),
+        ("REJECTED", "Rejected / Action Upheld"),
+    ]
+
+    docket = models.ForeignKey(
+        ModerationReviewDocket,
+        on_delete=models.CASCADE,
+        related_name="appeals",
+        help_text="Parent review docket under appeal.",
+    )
+    appellant_did = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="DID of the author appealing the action",
+    )
+    statement = models.TextField(
+        help_text="Appellant's restorative statement or explanation",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+        db_index=True,
+    )
+    reviewed_by_did = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Moderation Appeal"
+        verbose_name_plural = "Moderation Appeals"
+
+    def __str__(self):
+        return f"<ModerationAppeal docket={self.docket_id} appellant={self.appellant_did[:16]} status={self.status}>"
+
+

@@ -22,6 +22,7 @@ from django.urls import reverse
 
 from apps.core.models import (
     CommunityFlagLedger,
+    ModerationAppeal,
     ModerationReviewDocket,
     NodeBlockedEntity,
     NodeContentTakedown,
@@ -324,3 +325,33 @@ class CommunityModerationTests(TestCase):
         self.assertTrue(data.get("valid"))
         self.assertEqual(data.get("receipt"), "receipt_tx_poly_enfranchised_ballot_50flags")
         mock_cast_vote.assert_called_once()
+
+    def test_moderation_appeal_model_and_docket_helpers(self):
+        """Verify ModerationAppeal model creation, appeal_count, and has_pending_appeal."""
+        docket = ModerationReviewDocket.objects.create(
+            target_identifier="test_appeal_event_001",
+            docket_type="event",
+            flag_count=7,
+            current_tier=2,
+            status="PENDING",
+        )
+        self.assertEqual(docket.appeal_count, 0)
+        self.assertFalse(docket.has_pending_appeal)
+
+        appeal = ModerationAppeal.objects.create(
+            docket=docket,
+            appellant_did="did:key:z6MkAppellant123",
+            statement="This event was misidentified as malware.",
+            status="PENDING",
+        )
+        self.assertEqual(docket.appeal_count, 1)
+        self.assertTrue(docket.has_pending_appeal)
+        self.assertIn("ModerationAppeal", str(appeal))
+
+        # Once resolved (ACCEPTED), pending appeal helper reflects False
+        appeal.status = "ACCEPTED"
+        appeal.reviewed_by_did = self.admin_user.username
+        appeal.save()
+        self.assertEqual(docket.appeal_count, 1)
+        self.assertFalse(docket.has_pending_appeal)
+
