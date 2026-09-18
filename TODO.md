@@ -551,4 +551,14 @@
 - [x] Add Review Docket section and confirmation/dismissal actions to `templates/admin/moderation_desk.html` and `apps/core/views_admin.py`
 - [x] Author automated unit tests in `apps/core/tests/test_community_moderation.py` and `test_moderation_shield.py`
 
+#### Phase 31 — Transparent Author Friction, Restorative Appeals & User-Tunable Shielding
+- [ ] Implement `ModerationAppeal` model in `apps/core/models.py` and run migrations
+- [ ] Build author friction inspector and appeal submission helper in `apps/core/moderation.py`
+- [ ] Create `POST /api/moderation/appeal/` endpoint and context exposure in `apps/core/views.py`
+- [ ] Add transparent friction notice card and appeal modal in `templates/dashboard.html`
+- [ ] Surface appeal statements and single-click resolution in `templates/admin/moderation_desk.html` and `apps/core/views_admin.py`
+- [ ] Add user-tunable shield sensitivity preference in `templates/dashboard.html` and `static/js/circle_feed_filter.js`
+- [ ] Author test suite in `apps/core/tests/test_moderation_appeals.py` (target: 100% pass)
+
+
 

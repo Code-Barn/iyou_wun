@@ -685,3 +685,165 @@ The Moderation Desk (`/desk/moderation/`) is enhanced with an active **Review Do
 - **One-Click Takedown & Purge:** Operators can uphold the community flag, creating a permanent `NodeContentTakedown` and automatically dispatching a Blossom port 9002 REST `DELETE` request for associated media.
 - **Configurable Thresholds:** Operators can customize threshold parameters (e.g. adjust Tier 1 from 3 to 5 flags) via instance environment variables (`WUN_FLAG_TIER1_THRESHOLD`, `WUN_FLAG_TIER2_THRESHOLD`, `WUN_FLAG_TIER3_THRESHOLD`).
 
+---
+
+## 10. Restorative Interventions, Author Transparency & Sovereign Appeal Pipelines
+
+### 10.1 The Anti-Shadowbanning Invariant
+
+Centralized social networks routinely deploy deceptive "shadowbanning" algorithms that covertly suppress, downrank, or hide user content without informing the author. This practice is fundamentally incompatible with the cryptographic and ethical tenets of the sovereign web.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                      ANTI-SHADOWBANNING INVARIANT                      │
+├────────────────────────────────────────────────────────────────────────┤
+│ The Sovereign Moderation Shield SHALL NEVER covertly suppress, demote, │
+│ or hide an author's notes without providing transparent, inspectable,   │
+│ and actionable disclosure directly to that author.                    │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Transparency Guarantee & Notification Lifecycle
+When an author's note or sovereign DID crosses any threshold in the progressive matrix:
+1. **Tier 1 (NIP-36 Dynamic Blur):**
+   - **Viewer View:** Blurred with `.blur-me` and warning veil.
+   - **Author Self-Inspection View:** Display of clear author warning badge:
+     `⚠️ Notice: This note received X community flags (Breakdown: Spam, NSFW). Attachments are veiled on this instance.`
+2. **Tier 2 (Discovery Feed Suppression):**
+   - **Viewer View:** Omitted from `/feed` and `/api/feed`; accessible only via direct thread permalink.
+   - **Author Dashboard Notice:** Author dashboard displays an active **Instance Friction Alert** listing the target event ID, total unique flags, categorical reason tally, and an interactive `[ File Appeal / Statement ]` action.
+3. **Tier 3 (Social Quarantine):**
+   - **Viewer View:** Fully withheld by `filter_shielded_events()`.
+   - **Author Notification:** A prominent high-priority notification banner informs the creator of quarantine status, providing one-click access to the appeal submission modal.
+4. **External Mesh Independence Disclaimer:**
+   Every notice explicitly reminds the creator that their cryptographic event remains immutable and available across external Nostr relays, affirming that local safe harbor suppression does not equal global censorship.
+
+```mermaid
+flowchart LR
+    A["Progressive Flag Threshold Crossed"] --> B{"Viewer Identity"}
+    B -- "Public Peer" --> C["Apply Progressive Shielding<br/>(Blur or Feed Suppression)"]
+    B -- "Note Author" --> D["Render Transparent Friction Notice<br/>• Exact Flag Count & Categories<br/>• External Relay Independence Note<br/>• Actionable [ Appeal ] Trigger"]
+```
+
+---
+
+### 10.2 Restorative Appeal Protocol & Attestation Ledger
+
+Decentralized moderation must offer a restorative, non-punitive dispute mechanism. Rather than permanent automated condemnation, authors are empowered to submit contextual attestations and appeals directly attached to the instance review docket.
+
+#### Data Model Specification (`apps/core/models.py`)
+
+```python
+class ModerationAppeal(models.Model):
+    STATUS_CHOICES = [
+        ("PENDING", "Pending Operator Review"),
+        ("APPROVED", "Approved / Suppression Lifted"),
+        ("REJECTED", "Rejected / Suppression Upheld"),
+    ]
+
+    docket = models.ForeignKey(
+        ModerationReviewDocket,
+        on_delete=models.CASCADE,
+        related_name="appeals",
+        help_text="Parent review docket under appeal.",
+    )
+    target_identifier = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Target Event ID or Author DID under dispute.",
+    )
+    author_did = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Sovereign DID or pubkey of the appealing author.",
+    )
+    statement = models.TextField(
+        help_text="Author's explanatory statement or restorative attestation.",
+    )
+    attestation_event_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Optional Nostr Event ID of a cryptographically signed public attestation.",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+        db_index=True,
+    )
+    reviewed_by_did = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Sovereign DID of the node operator who resolved the appeal.",
+    )
+    resolution_notes = models.TextField(
+        blank=True,
+        default="",
+        help_text="Internal notes or public rationale from the reviewing operator.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Moderation Appeal"
+        verbose_name_plural = "Moderation Appeals"
+
+    def __str__(self):
+        return f"<ModerationAppeal {self.target_identifier[:16]} ({self.status}) by {self.author_did[:16]}>"
+```
+
+#### Signed Appeal Ingestion Contract (`POST /api/moderation/appeal/`)
+- **Authentication:** Strict `@login_required` enforcement.
+- **Verification:** Ensures `request.user.username` corresponds to the author of the target event or pubkey docket.
+- **Payload Schema:**
+  ```json
+  {
+    "target_identifier": "<target_event_id_or_pubkey>",
+    "statement": "The flagged note contains technical code snippets erroneously marked as spam.",
+    "attestation_event_id": "<optional_signed_nip_event_id>"
+  }
+  ```
+- **Operator Review Integration:**
+  Appeals appear directly inside the `/desk/moderation/` Review Docket queue. Operators are provided two one-click actions:
+  - **`[ ✓ Approve Appeal & Restore ]`:**
+    1. Sets `ModerationAppeal.status = "APPROVED"`.
+    2. Sets `ModerationReviewDocket.status = "DISMISSED"`.
+    3. Calls `invalidate_shield_cache()`.
+    4. Instantly restores the event or author to public feeds and discovery without delay.
+  - **`[ ✕ Reject Appeal ]`:**
+    1. Sets `ModerationAppeal.status = "REJECTED"`.
+    2. Records operator resolution notes.
+    3. Retains safe harbor suppression.
+
+---
+
+### 10.3 User-Tunable Display Thresholds (The Sovereign Client Lens)
+
+While instance-level defaults protect the node operator from statutory liability, individual sovereign users retain fundamental autonomy over their personal viewing experience. The platform introduces the **Sovereign Client Lens**:
+
+| Mode | Threshold Sensitivity | Client Display Behavior | Target Audience |
+| :--- | :--- | :--- | :--- |
+| **Strict Safe Harbor** | • Tier 1 Blur: 1 flag<br/>• Tier 2 Withheld: 3 flags<br/>• Tier 3 Quarantine: 5 flags | Aggressively veils any content flagged by peers. Early warnings on sensitive topics. | Family-friendly, school, or corporate node deployment profiles. |
+| **Standard Mode (Default)** | • Tier 1 Blur: 3 flags<br/>• Tier 2 Withheld: 7 flags<br/>• Tier 3 Quarantine: 15 flags | Balanced threshold reflecting decentralized community consensus. | Default everyday community exploration. |
+| **Raw Mesh Mode (Unfiltered)** | • Peer flags ignored<br/>• Statutory takedowns preserved | Bypasses community flag veils entirely. Unveils all non-statutory content directly from relays. | Researchers, investigative journalists, and censorship-resistant purists. |
+
+#### Storage & Execution Mechanics
+- Stored locally in `localStorage` under key `wun_shield_lens_pref` (with server-synced profile fallback).
+- Evaluated client-side in `circle_feed_filter.js` during DOM rendering, allowing instant toggle without requiring a page refresh.
+- **Operator Protection Invariant:** `NodeContentTakedown` and `NodeBlockedEntity` records (statutory safe harbor defenses) are evaluated exclusively at the backend Django layer (`apps/core/moderation.py`) and cannot be disabled by user-tunable display preferences.
+
+---
+
+### 10.4 Governance Decoupling Preservation
+
+The constitutional separation of social feed curation from democratic franchise is strictly maintained throughout the appeal and transparency lifecycle:
+
+> **The Democratic Franchise Invariant:**
+> Under no circumstances SHALL an active, pending, or rejected `ModerationAppeal` affect a user's ability to participate in civic governance.
+> Calls to `POST /api/vote/` proxying to `POLY_ENGINE_URL` (:8002) bypass `ModerationAppeal` and `ModerationReviewDocket` completely.
+> An author whose appeal is rejected retains 100% unimpeded cryptographic voting enfranchisement.
+
+
