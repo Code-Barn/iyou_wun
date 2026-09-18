@@ -15,10 +15,12 @@
 
 from django.urls import path, re_path
 from . import views
+from .views_admin import moderation_console
 
 urlpatterns = [
     path('', views.home, name='home'),
     path('dashboard', views.dashboard, name='dashboard'),
+    path('desk/moderation/', moderation_console, name='moderation_console'),
     path('feed', views.FeedView.as_view(), name='feed'),
     path('notifications/', views.NotificationsView.as_view(), name='notifications'),
     path('gallery', views.GalleryView.as_view(), name='gallery'),

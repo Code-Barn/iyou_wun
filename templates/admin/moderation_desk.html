@@ -1,0 +1,410 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Sovereign Moderation Desk — iyou_wun{% endblock %}
+
+{% block content %}
+{% comment %}
+  Standard header inherited via base.html:
+  {% include "templates/includes/_standard_header.html" %}
+  {% include "includes/_standard_header.html" %}
+{% endcomment %}
+
+<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-8">
+
+  <!-- Desk Top Banner & Invariant Posture Bar -->
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+    <div class="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4 bg-slate-50/60 dark:bg-slate-950/40">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-violet-950 border border-violet-800 flex items-center justify-center text-lg">
+          🛡️
+        </div>
+        <div>
+          <div class="flex items-center gap-2.5 flex-wrap">
+            <h1 class="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100">
+              Sovereign Moderation Shield & Takedown Desk
+            </h1>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-violet-100 dark:bg-violet-950/80 text-violet-800 dark:text-violet-300 border border-violet-300 dark:border-violet-700/80 font-semibold uppercase tracking-wide">
+              ADMIN DESK
+            </span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-100 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700/80 font-semibold uppercase tracking-wide">
+              POSTGRES INDEXING INVARIANT
+            </span>
+          </div>
+          <p class="text-xs font-mono text-slate-500 dark:text-slate-400 mt-0.5">
+            Instance-level safe harbor defense: shields node operator without altering upstream relays or DID keys.
+          </p>
+        </div>
+      </div>
+
+      <!-- Quick Metrics Counters -->
+      <div class="flex items-center gap-3 text-xs font-mono">
+        <div class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 flex items-center gap-2">
+          <span class="text-slate-400">Blocked Entities:</span>
+          <span class="font-bold text-rose-600 dark:text-rose-400">{{ total_blocked_count }}</span>
+        </div>
+        <div class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 flex items-center gap-2">
+          <span class="text-slate-400">Content Takedowns:</span>
+          <span class="font-bold text-violet-600 dark:text-violet-400">{{ total_takedown_count }}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Decoupled Governance Notification Notice -->
+    <div class="px-6 py-3 bg-amber-500/10 border-b border-amber-500/20 text-xs font-mono text-amber-800 dark:text-amber-300 flex items-center justify-between gap-4">
+      <div class="flex items-center gap-2">
+        <span>⚖️</span>
+        <span><strong>Decoupled Governance Guarantee:</strong> Local suppression rules apply strictly to social feeds and discovery. Civic voting via <code class="bg-amber-500/20 px-1 py-0.5 rounded">/api/vote</code> to Poly (:8002) is untouched.</span>
+      </div>
+      <a href="{% url 'feed' %}" class="underline hover:opacity-80 transition shrink-0">← Back to Feed</a>
+    </div>
+  </div>
+
+  <!-- Messages Alert Block -->
+  {% if messages %}
+  <div class="space-y-3">
+    {% for message in messages %}
+    <div class="rounded-xl px-4 py-3 text-xs font-mono flex items-center justify-between border {% if message.tags == 'error' %}bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200{% elif message.tags == 'warning' %}bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200{% else %}bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200{% endif %}">
+      <div class="flex items-center gap-2">
+        <span>{% if message.tags == 'error' %}❌{% elif message.tags == 'warning' %}⚠️{% else %}✓{% endif %}</span>
+        <span>{{ message }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Three-Column Operator Action Forms -->
+  <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+    <!-- Form 1: Block Entity -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-5 space-y-4">
+      <div class="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+        <span class="text-base">🚫</span>
+        <div>
+          <h2 class="text-sm font-bold text-slate-900 dark:text-slate-100">Block Entity</h2>
+          <p class="text-[11px] font-mono text-slate-400">Suppress pubkey hex or DID</p>
+        </div>
+      </div>
+
+      <form method="POST" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="block_entity">
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Target DID or Pubkey Hex *</label>
+          <input
+            type="text"
+            name="entity_identifier"
+            required
+            placeholder="did:key:z6Mk... or 64-hex pubkey"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          />
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Suppression Reason</label>
+          <select
+            name="reason"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          >
+            {% for choice_val, choice_label in reason_choices %}
+            <option value="{{ choice_val }}">{{ choice_label }} ({{ choice_val }})</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Internal Notes (Optional)</label>
+          <textarea
+            name="notes"
+            rows="2"
+            placeholder="Docket ID, DMCA ticket, or operator rationale..."
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          ></textarea>
+        </div>
+
+        <button
+          type="submit"
+          class="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-mono text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5"
+        >
+          <span>🚫 Enact Entity Block</span>
+        </button>
+      </form>
+    </div>
+
+    <!-- Form 2: Takedown Event -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-5 space-y-4">
+      <div class="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+        <span class="text-base">⚡</span>
+        <div>
+          <h2 class="text-sm font-bold text-slate-900 dark:text-slate-100">Takedown Note / Event</h2>
+          <p class="text-[11px] font-mono text-slate-400">Suppress 64-hex Nostr event ID</p>
+        </div>
+      </div>
+
+      <form method="POST" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="takedown_event">
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Nostr Event ID (64-hex) *</label>
+          <input
+            type="text"
+            name="event_id"
+            required
+            placeholder="e.g. 7f9b2d8... (64 hex characters)"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          />
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Takedown Reason</label>
+          <select
+            name="reason"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          >
+            {% for choice_val, choice_label in reason_choices %}
+            <option value="{{ choice_val }}">{{ choice_label }} ({{ choice_val }})</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div class="pt-6">
+          <button
+            type="submit"
+            class="w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-mono text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5"
+          >
+            <span>⚡ Suppress Event</span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Form 3: Purge Blossom Media -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm p-5 space-y-4">
+      <div class="flex items-center gap-2 border-b border-slate-100 dark:border-slate-800 pb-3">
+        <span class="text-base">🗑️</span>
+        <div>
+          <h2 class="text-sm font-bold text-slate-900 dark:text-slate-100">Purge Blossom Blob</h2>
+          <p class="text-[11px] font-mono text-slate-400">REST DELETE :9002 & local blacklist</p>
+        </div>
+      </div>
+
+      <form method="POST" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="purge_media">
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Media SHA-256 Hash (64-hex) *</label>
+          <input
+            type="text"
+            name="media_hash"
+            required
+            placeholder="e.g. b0a4805e... (64 hex characters)"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          />
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Blossom Host</label>
+          <input
+            type="text"
+            name="blossom_host"
+            value="http://127.0.0.1:9002"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          />
+        </div>
+
+        <div>
+          <label class="block text-[11px] font-mono text-slate-500 dark:text-slate-400 mb-1">Takedown Reason</label>
+          <select
+            name="reason"
+            class="w-full rounded-xl bg-slate-50 dark:bg-slate-950 border border-slate-300 dark:border-slate-700/80 px-3 py-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 transition"
+          >
+            {% for choice_val, choice_label in reason_choices %}
+            <option value="{{ choice_val }}">{{ choice_label }} ({{ choice_val }})</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          class="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-mono text-xs font-semibold shadow transition-all flex items-center justify-center gap-1.5"
+        >
+          <span>🗑️ Issue Blossom DELETE</span>
+        </button>
+      </form>
+    </div>
+
+  </div>
+
+  <!-- Management Tables Section -->
+  <div class="space-y-6">
+
+    <!-- Table 1: Active Blocked Entities -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-950/40">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">Active Blocked Entities</h3>
+          <p class="text-xs font-mono text-slate-400">Showing up to 25 recent active entity blocks</p>
+        </div>
+        <span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 font-bold">
+          {{ blocked_entities|length }} Active
+        </span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-100/60 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-500 uppercase tracking-wider">
+              <th class="px-6 py-3">Entity Identifier</th>
+              <th class="px-6 py-3">Reason</th>
+              <th class="px-6 py-3">Notes</th>
+              <th class="px-6 py-3">Blocked Date</th>
+              <th class="px-6 py-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs font-mono">
+            {% for entity in blocked_entities %}
+            <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
+              <td class="px-6 py-3.5 font-bold text-slate-900 dark:text-slate-100 max-w-xs truncate" title="{{ entity.entity_identifier }}">
+                {{ entity.entity_identifier }}
+              </td>
+              <td class="px-6 py-3.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                  {{ entity.reason }}
+                </span>
+              </td>
+              <td class="px-6 py-3.5 text-slate-500 dark:text-slate-400 max-w-xs truncate">
+                {{ entity.notes|default:"—" }}
+              </td>
+              <td class="px-6 py-3.5 text-slate-400">
+                {{ entity.created_at|date:"Y-m-d H:i" }}
+              </td>
+              <td class="px-6 py-3.5 text-right">
+                <form method="POST" class="inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="unblock_entity">
+                  <input type="hidden" name="entity_id" value="{{ entity.id }}">
+                  <button
+                    type="submit"
+                    class="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition text-[11px] font-mono"
+                    title="Revoke entity block"
+                  >
+                    ↩️ Revoke
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="5" class="px-6 py-8 text-center text-slate-400 dark:text-slate-500 font-mono text-xs">
+                No active blocked entities on this node.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Table 2: Recent Content Takedowns & Media Purges -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
+      <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-950/40">
+        <div>
+          <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">Content Takedowns & Media Purges</h3>
+          <p class="text-xs font-mono text-slate-400">Showing up to 25 recent suppressed events and purged Blossom media</p>
+        </div>
+        <span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 font-bold">
+          {{ recent_takedowns|length }} Records
+        </span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-100/60 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-500 uppercase tracking-wider">
+              <th class="px-6 py-3">Target ID</th>
+              <th class="px-6 py-3">Type</th>
+              <th class="px-6 py-3">Reason</th>
+              <th class="px-6 py-3">Blossom Scrub Status</th>
+              <th class="px-6 py-3">Logged At</th>
+              <th class="px-6 py-3 text-right">Action</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs font-mono">
+            {% for takedown in recent_takedowns %}
+            <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
+              <td class="px-6 py-3.5 font-bold text-slate-900 dark:text-slate-100 max-w-xs truncate" title="{{ takedown.event_id|default:takedown.media_hash }}">
+                {% if takedown.event_id %}
+                  <span class="text-violet-600 dark:text-violet-400">Event:</span> {{ takedown.event_id }}
+                {% elif takedown.media_hash %}
+                  <span class="text-amber-600 dark:text-amber-400">Media:</span> {{ takedown.media_hash }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class="px-6 py-3.5">
+                {% if takedown.event_id %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20">
+                    Nostr Event
+                  </span>
+                {% elif takedown.media_hash %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    Blossom Blob
+                  </span>
+                {% endif %}
+              </td>
+              <td class="px-6 py-3.5">
+                <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                  {{ takedown.reason }}
+                </span>
+              </td>
+              <td class="px-6 py-3.5">
+                {% if takedown.purged_from_blossom %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    ✓ Scrubbed (:9002)
+                  </span>
+                {% elif takedown.media_hash %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    Blacklist Only
+                  </span>
+                {% else %}
+                  <span class="text-slate-400 text-[10px] font-mono">—</span>
+                {% endif %}
+              </td>
+              <td class="px-6 py-3.5 text-slate-400">
+                {{ takedown.created_at|date:"Y-m-d H:i" }}
+              </td>
+              <td class="px-6 py-3.5 text-right">
+                <form method="POST" class="inline">
+                  {% csrf_token %}
+                  <input type="hidden" name="action" value="revoke_takedown">
+                  <input type="hidden" name="takedown_id" value="{{ takedown.id }}">
+                  <button
+                    type="submit"
+                    class="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 transition text-[11px] font-mono"
+                    title="Revoke takedown"
+                  >
+                    ↩️ Revoke
+                  </button>
+                </form>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="6" class="px-6 py-8 text-center text-slate-400 dark:text-slate-500 font-mono text-xs">
+                No active content takedowns on this node.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+{% endblock %}

@@ -16,8 +16,10 @@
 import urllib.error
 from unittest.mock import MagicMock, patch
 
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase
+from django.urls import reverse
 
 from apps.core.models import NodeBlockedEntity, NodeContentTakedown
 from apps.core.moderation import (
@@ -234,3 +236,134 @@ class ModerationShieldCoreTests(TestCase):
         """Verify empty sha256_hex returns False."""
         self.assertFalse(purge_blossom_blob(""))
         self.assertFalse(purge_blossom_blob("   "))
+
+
+class ModerationDeskViewTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        invalidate_shield_cache()
+        self.User = get_user_model()
+        self.staff_user = self.User.objects.create_user(
+            username="did:key:z6MkAdminStaff",
+            is_staff=True,
+        )
+        self.regular_user = self.User.objects.create_user(
+            username="did:key:z6MkRegularUser",
+            is_staff=False,
+        )
+        self.url = reverse("moderation_console")
+
+    def tearDown(self):
+        invalidate_shield_cache()
+        super().tearDown()
+
+    def test_anonymous_access_redirects_to_login(self):
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertIn("oidc", resp.url.lower())
+
+    def test_non_staff_user_redirects(self):
+        self.client.force_login(self.regular_user)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_staff_user_access_granted_200(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "admin/moderation_desk.html")
+        self.assertIn("blocked_entities", resp.context)
+        self.assertIn("recent_takedowns", resp.context)
+
+    def test_post_block_entity_creates_record_and_invalidates_cache(self):
+        self.client.force_login(self.staff_user)
+        cache.set(CACHE_KEY_BLOCKED_ENTITIES, {"some_cached_val"})
+
+        resp = self.client.post(
+            self.url,
+            {
+                "action": "block_entity",
+                "entity_identifier": "did:key:z6MkBannedBot123",
+                "reason": "SPAM_BOT",
+                "notes": "Spam bot report #42",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            NodeBlockedEntity.objects.filter(
+                entity_identifier="did:key:z6MkBannedBot123",
+                reason="SPAM_BOT",
+                is_active=True,
+            ).exists()
+        )
+        # Verify cache invalidated
+        self.assertIsNone(cache.get(CACHE_KEY_BLOCKED_ENTITIES))
+
+    def test_post_unblock_entity_revokes_block(self):
+        self.client.force_login(self.staff_user)
+        entity = NodeBlockedEntity.objects.create(
+            entity_identifier="did:key:z6MkToUnblock",
+            reason="HARASSMENT",
+            is_active=True,
+        )
+        resp = self.client.post(
+            self.url,
+            {
+                "action": "unblock_entity",
+                "entity_id": entity.id,
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertFalse(NodeBlockedEntity.objects.filter(id=entity.id).exists())
+
+    def test_post_takedown_event_creates_record(self):
+        self.client.force_login(self.staff_user)
+        resp = self.client.post(
+            self.url,
+            {
+                "action": "takedown_event",
+                "event_id": "bad_event_id_64_hex_11223344556677889900aabbccddeeff",
+                "reason": "ILLEGAL_CSAM",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            NodeContentTakedown.objects.filter(
+                event_id="bad_event_id_64_hex_11223344556677889900aabbccddeeff",
+                reason="ILLEGAL_CSAM",
+            ).exists()
+        )
+
+    @patch("apps.core.views_admin.purge_blossom_blob")
+    def test_post_purge_media_calls_blossom_and_records_takedown(self, mock_purge):
+        mock_purge.return_value = True
+        self.client.force_login(self.staff_user)
+        resp = self.client.post(
+            self.url,
+            {
+                "action": "purge_media",
+                "media_hash": "deadbeef1234567890",
+                "reason": "MALWARE",
+            },
+        )
+        self.assertEqual(resp.status_code, 302)
+        mock_purge.assert_called_once_with("deadbeef1234567890", blossom_host="http://127.0.0.1:9002")
+        self.assertTrue(
+            NodeContentTakedown.objects.filter(
+                media_hash="deadbeef1234567890",
+                purged_from_blossom=True,
+            ).exists()
+        )
+
+    def test_context_limits_to_25_most_recent(self):
+        self.client.force_login(self.staff_user)
+        # Create 30 blocked entities
+        for i in range(30):
+            NodeBlockedEntity.objects.create(
+                entity_identifier=f"entity_{i:03d}",
+                reason="ADMIN_OVERRIDE",
+            )
+        resp = self.client.get(self.url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.context["blocked_entities"]), 25)
+
