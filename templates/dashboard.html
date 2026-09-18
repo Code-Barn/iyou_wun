@@ -46,8 +46,11 @@
       <button type="button" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition whitespace-nowrap" data-tab="settings" onclick="switchTab('settings')">
         ⚙️ Relays & Switchboard
       </button>
-      <button type="button" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition whitespace-nowrap" data-tab="account" onclick="switchTab('account')">
-        🛡️ Account & Key Info
+      <button type="button" class="tab-btn py-3.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition whitespace-nowrap inline-flex items-center gap-1.5" data-tab="account" onclick="switchTab('account')">
+        <span>🛡️ Account & Key Info</span>
+        {% if active_frictions %}
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold">{{ active_frictions|length }}</span>
+        {% endif %}
       </button>
     </div>
 
@@ -300,6 +303,95 @@
 
     <!-- TAB 4: Account & Key Info -->
     <div id="tab-account" class="tab-panel hidden p-5 sm:p-6">
+      {% if active_frictions %}
+      <!-- Instance Health & Content Advisory Card -->
+      <div id="instance-health-advisory" class="mb-8 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/30 rounded-2xl p-5 sm:p-6 shadow-sm">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="text-sm font-mono font-bold text-amber-700 dark:text-amber-400 flex items-center gap-2">
+              <span>⚠️ Instance Health &amp; Content Advisory</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] bg-amber-500/20 text-amber-800 dark:text-amber-300 font-bold">
+                {{ active_frictions|length }} Active {% if active_frictions|length == 1 %}Friction{% else %}Frictions{% endif %}
+              </span>
+            </h3>
+            <p class="text-xs text-amber-800/90 dark:text-amber-300/90 mt-1 font-mono">
+              Notice: {{ active_frictions|length }} of your notes (or profile) have received community flags on this instance. External relay distribution remains fully unaffected.
+            </p>
+          </div>
+        </div>
+
+        <!-- Affected Items List -->
+        <div class="mt-4 space-y-3">
+          {% for item in active_frictions %}
+          <div class="bg-white/80 dark:bg-slate-900/80 border border-amber-500/20 rounded-xl p-4 text-xs font-mono">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-slate-500 dark:text-slate-400">Target:</span>
+                <span class="font-semibold text-slate-800 dark:text-slate-200" title="{{ item.target_identifier }}">
+                  {{ item.type|upper }}: {{ item.target_identifier|truncatechars:24 }}
+                </span>
+                <!-- Tier Badge -->
+                {% if item.tier == 1 %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-700">TIER 1 (BLUR)</span>
+                {% elif item.tier == 2 %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-orange-100 dark:bg-orange-950/60 text-orange-800 dark:text-orange-300 border border-orange-300 dark:border-orange-700">TIER 2 (FEED SUPPRESSION)</span>
+                {% elif item.tier >= 3 %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 border border-rose-300 dark:border-rose-700">TIER 3 (QUARANTINE)</span>
+                {% endif %}
+              </div>
+              <div class="text-slate-500 dark:text-slate-400">
+                Flags: <span class="font-bold text-amber-600 dark:text-amber-400">{{ item.flag_count }}</span>
+              </div>
+            </div>
+
+            <!-- Categories / Reasons Breakdown -->
+            {% if item.reasons %}
+            <div class="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+              <span class="text-slate-400">Categories:</span>
+              {% for r_code, r_count in item.reasons.items %}
+              <span class="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
+                {{ r_code }} ({{ r_count }})
+              </span>
+              {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Appeal Status & Button -->
+            <div class="mt-3 pt-3 border-t border-slate-200/60 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                {% if item.has_appeal %}
+                  {% if item.appeal_status == 'PENDING' %}
+                    <span class="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                      ⏳ <strong>Appeal Pending Review</strong> — Submitted and awaiting operator decision.
+                    </span>
+                  {% elif item.appeal_status == 'ACCEPTED' %}
+                    <span class="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                      ✅ <strong>Appeal Accepted</strong> — Restriction cleared.
+                    </span>
+                  {% elif item.appeal_status == 'REJECTED' %}
+                    <span class="inline-flex items-center gap-1 text-[11px] text-rose-600 dark:text-rose-400">
+                      ❌ <strong>Appeal Rejected</strong> — Action upheld.
+                    </span>
+                  {% endif %}
+                {% else %}
+                  <span class="text-[11px] text-slate-400">No appeal submitted yet.</span>
+                {% endif %}
+              </div>
+
+              {% if not item.has_appeal or item.appeal_status == 'REJECTED' %}
+              <button type="button"
+                      onclick="openAppealModal('{{ item.docket_id }}', '{{ item.target_identifier }}', '{{ item.type }}')"
+                      class="inline-flex items-center gap-1 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-mono transition shadow-sm">
+                ✉️ Submit Appeal / Explanation
+              </button>
+              {% endif %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endif %}
+
       <div class="max-w-xl space-y-3 text-xs font-mono">
         <div class="flex justify-between py-2 border-b border-slate-100 dark:border-slate-800">
           <span class="text-slate-400">Decentralized Identifier (DID):</span>
@@ -438,6 +530,42 @@
       <button type="button" id="generateTokenBtn" onclick="generateVerifyToken()" class="px-4 py-2 text-xs font-mono font-semibold text-white bg-violet-600 hover:bg-violet-500 rounded-lg transition-colors shadow-sm">Generate Token</button>
       <button type="button" id="confirmVerifyBtn" onclick="confirmVerification()" disabled class="px-4 py-2 text-xs font-mono font-semibold text-white bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 rounded-lg transition-colors shadow-sm">Check & Claim Handle</button>
     </div>
+  </div>
+</div>
+
+<!-- Restorative Moderation Appeal Modal -->
+<div id="appealModal" class="fixed inset-0 z-50 hidden flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+  <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+    <div class="p-6 border-b border-slate-200 dark:border-slate-800">
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-mono font-bold text-slate-900 dark:text-slate-100">Restorative Moderation Appeal</h3>
+        <button type="button" onclick="closeAppealModal()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+      <p class="text-xs text-slate-500 dark:text-slate-400 mt-2">
+        Submit an attestation statement or explanation to the instance operators. If accepted, local display friction will be cleared.
+      </p>
+    </div>
+    <form id="appealForm" onsubmit="return submitAppeal(event)" class="p-6 space-y-4">
+      {% csrf_token %}
+      <input type="hidden" id="appealDocketId" name="docket_id" value="" />
+      <div>
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Target</label>
+        <p id="appealTargetInfo" class="font-mono text-xs text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-slate-950 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 truncate"></p>
+      </div>
+      <div>
+        <label class="block text-xs font-mono text-slate-600 dark:text-slate-400 mb-1">Restorative Statement / Explanation</label>
+        <textarea id="appealStatement" name="statement" rows="5" required
+                  placeholder="Explain why this content does not violate instance standards, or provide context..."
+                  class="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500 resize-none"></textarea>
+      </div>
+      <div id="appealStatus" class="text-xs font-mono hidden"></div>
+      <div class="border-t border-slate-200 dark:border-slate-800 pt-4 flex items-center justify-end gap-3">
+        <button type="button" onclick="closeAppealModal()" class="px-4 py-2 text-xs font-mono font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition-colors">Cancel</button>
+        <button type="submit" id="appealSubmitBtn" class="px-4 py-2 text-xs font-mono font-semibold text-white bg-violet-600 hover:bg-violet-500 rounded-lg transition-colors shadow-sm">Submit Appeal</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -1075,6 +1203,93 @@
       reader.readAsText(file);
       ev.preventDefault();
     });
+  }
+
+  function openAppealModal(docketId, targetId, targetType) {
+    var modal = document.getElementById("appealModal");
+    if (!modal) return;
+    document.getElementById("appealDocketId").value = docketId;
+    document.getElementById("appealTargetInfo").textContent = (targetType || "TARGET").toUpperCase() + ": " + targetId;
+    document.getElementById("appealStatement").value = "";
+    var statusEl = document.getElementById("appealStatus");
+    if (statusEl) {
+      statusEl.className = "text-xs font-mono hidden";
+      statusEl.textContent = "";
+    }
+    modal.classList.remove("hidden");
+  }
+
+  function closeAppealModal() {
+    var modal = document.getElementById("appealModal");
+    if (modal) modal.classList.add("hidden");
+  }
+
+  async function submitAppeal(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    var docketId = document.getElementById("appealDocketId").value;
+    var statement = (document.getElementById("appealStatement").value || "").trim();
+    var statusEl = document.getElementById("appealStatus");
+    var submitBtn = document.getElementById("appealSubmitBtn");
+
+    if (!statement) {
+      if (statusEl) {
+        statusEl.className = "text-xs font-mono text-rose-500 block";
+        statusEl.textContent = "Please enter an explanation or restorative statement.";
+      }
+      return false;
+    }
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Submitting...";
+    }
+    if (statusEl) {
+      statusEl.className = "text-xs font-mono text-slate-400 block";
+      statusEl.textContent = "Submitting appeal...";
+    }
+
+    try {
+      var csrfToken = (document.querySelector("#appealForm [name=csrfmiddlewaretoken]") || document.querySelector("[name=csrfmiddlewaretoken]")) ? (document.querySelector("#appealForm [name=csrfmiddlewaretoken]") || document.querySelector("[name=csrfmiddlewaretoken]")).value : "";
+      var resp = await fetch("/api/moderation/appeal/", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRFToken": csrfToken,
+        },
+        body: JSON.stringify({ docket_id: parseInt(docketId, 10), statement: statement }),
+      });
+      var data = await resp.json();
+      if (data.success) {
+        if (statusEl) {
+          statusEl.className = "text-xs font-mono text-emerald-500 block";
+          statusEl.textContent = "Appeal submitted successfully!";
+        }
+        if (typeof showToast === "function") showToast("Appeal submitted for review", "success");
+        setTimeout(function () {
+          closeAppealModal();
+          window.location.reload();
+        }, 800);
+      } else {
+        if (statusEl) {
+          statusEl.className = "text-xs font-mono text-rose-500 block";
+          statusEl.textContent = data.error || "Failed to submit appeal.";
+        }
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Submit Appeal";
+        }
+      }
+    } catch (err) {
+      if (statusEl) {
+        statusEl.className = "text-xs font-mono text-rose-500 block";
+        statusEl.textContent = "Network error: " + err;
+      }
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "Submit Appeal";
+      }
+    }
+    return false;
   }
 
   document.addEventListener("DOMContentLoaded", function () {

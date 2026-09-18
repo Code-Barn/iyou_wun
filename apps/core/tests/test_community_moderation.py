@@ -33,9 +33,11 @@ from apps.core.moderation import (
     TIER3_QUARANTINE_THRESHOLD,
     annotate_progressive_friction,
     filter_shielded_events,
+    get_author_active_frictions,
     invalidate_shield_cache,
     is_event_shielded,
     record_community_flag,
+    submit_moderation_appeal,
 )
 
 
@@ -354,4 +356,187 @@ class CommunityModerationTests(TestCase):
         appeal.save()
         self.assertEqual(docket.appeal_count, 1)
         self.assertFalse(docket.has_pending_appeal)
+
+    def test_get_author_active_frictions(self):
+        """Verify get_author_active_frictions correctly aggregates active dockets and flag reasons."""
+        from apps.core.models import UserLinkDeck
+
+        author_did = "did:key:z6MkAuthorActiveFrictions"
+        author_pk = "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        author_user = self.User.objects.create_user(username=author_did)
+        UserLinkDeck.objects.create(user=author_user, handle="testalpha", nostr_pubkey=author_pk)
+
+        event_id = "test_note_friction_001"
+
+        # Record 3 flags: 2 SPAM, 1 HARASSMENT -> Tier 1 blur
+        record_community_flag(self.reporter1, author_pk, event_id, "SPAM")
+        record_community_flag(self.reporter2, author_pk, event_id, "SPAM")
+        record_community_flag(self.reporter3, author_pk, event_id, "HARASSMENT")
+
+        frictions = get_author_active_frictions(author_did)
+        self.assertEqual(len(frictions), 2)
+        event_notice = next(f for f in frictions if f["type"] == "event")
+        pubkey_notice = next(f for f in frictions if f["type"] == "pubkey")
+        self.assertEqual(event_notice["target_identifier"], event_id)
+        self.assertEqual(event_notice["type"], "event")
+        self.assertEqual(event_notice["tier"], 1)
+        self.assertEqual(event_notice["flag_count"], 3)
+        self.assertEqual(event_notice["reasons"], {"SPAM": 2, "HARASSMENT": 1})
+        self.assertFalse(event_notice["has_appeal"])
+        self.assertIsNone(event_notice["appeal_status"])
+        self.assertIsNone(event_notice["appeal_id"])
+        self.assertFalse(event_notice["has_pending_appeal"])
+
+        self.assertEqual(pubkey_notice["target_identifier"], author_pk)
+        self.assertEqual(pubkey_notice["type"], "pubkey")
+        self.assertEqual(pubkey_notice["tier"], 1)
+        self.assertEqual(pubkey_notice["flag_count"], 3)
+
+        # Submit appeal and verify notice updates
+        docket_id = event_notice["docket_id"]
+        res = submit_moderation_appeal(docket_id, author_did, "Context statement for note.")
+        self.assertTrue(res["success"])
+
+        frictions_after = get_author_active_frictions(author_did)
+        event_notice_after = next(f for f in frictions_after if f["type"] == "event")
+        self.assertTrue(event_notice_after["has_appeal"])
+        self.assertEqual(event_notice_after["appeal_status"], "PENDING")
+        self.assertEqual(event_notice_after["appeal_id"], res["appeal_id"])
+        self.assertTrue(event_notice_after["has_pending_appeal"])
+
+        # Dismiss dockets and verify active frictions becomes empty
+        ModerationReviewDocket.objects.filter(id__in=[f["docket_id"] for f in frictions]).update(status="DISMISSED")
+
+        frictions_dismissed = get_author_active_frictions(author_did)
+        self.assertEqual(len(frictions_dismissed), 0)
+
+    def test_submit_moderation_appeal_duplicate_pending_rejected(self):
+        """Duplicate pending appeals on the same docket are rejected."""
+        from apps.core.models import UserLinkDeck
+
+        author_did = "did:key:z6MkAuthorDupAppeal"
+        author_pk = "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2"
+        author_user = self.User.objects.create_user(username=author_did)
+        UserLinkDeck.objects.create(user=author_user, handle="testbeta", nostr_pubkey=author_pk)
+
+        event_id = "test_note_friction_002"
+        for i, rep in enumerate([self.reporter1, self.reporter2, self.reporter3]):
+            record_community_flag(rep, author_pk, event_id, "SPAM")
+
+        docket = ModerationReviewDocket.objects.get(target_identifier=event_id)
+        res1 = submit_moderation_appeal(docket.id, author_did, "First explanation.")
+        self.assertTrue(res1["success"])
+
+        # Duplicate pending appeal attempt
+        res2 = submit_moderation_appeal(docket.id, author_did, "Second attempt while pending.")
+        self.assertFalse(res2["success"])
+        self.assertIn("already pending", res2["error"])
+
+    def test_submit_moderation_appeal_unauthorized_user_rejected(self):
+        """Users who are not the author or target cannot submit appeals on other users' dockets."""
+        from apps.core.models import UserLinkDeck
+
+        author_did = "did:key:z6MkAuthorRealOwner"
+        author_pk = "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3"
+        author_user = self.User.objects.create_user(username=author_did)
+        UserLinkDeck.objects.create(user=author_user, handle="testgamma", nostr_pubkey=author_pk)
+
+        event_id = "test_note_friction_003"
+        for rep in [self.reporter1, self.reporter2, self.reporter3]:
+            record_community_flag(rep, author_pk, event_id, "SPAM")
+
+        docket = ModerationReviewDocket.objects.get(target_identifier=event_id)
+
+        imposter_did = "did:key:z6MkImposterNotAuthor"
+        res = submit_moderation_appeal(docket.id, imposter_did, "Imposter appeal statement.")
+        self.assertFalse(res["success"])
+        self.assertIn("Unauthorized", res["error"])
+
+    def test_api_submit_appeal_view(self):
+        """Verify the /api/moderation/appeal/ endpoint handles auth, validation, and permissions."""
+        from apps.core.models import UserLinkDeck
+
+        author_did = "did:key:z6MkAuthorEndpointTest"
+        author_pk = "d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4d4"
+        author_user = self.User.objects.create_user(username=author_did)
+        UserLinkDeck.objects.create(user=author_user, handle="testdelta", nostr_pubkey=author_pk)
+
+        event_id = "test_note_friction_004"
+        for rep in [self.reporter1, self.reporter2, self.reporter3]:
+            record_community_flag(rep, author_pk, event_id, "SPAM")
+
+        docket = ModerationReviewDocket.objects.get(target_identifier=event_id)
+
+        # 1. Anonymous user redirect
+        anon_resp = self.client.post(
+            "/api/moderation/appeal/",
+            data=json.dumps({"docket_id": docket.id, "statement": "Hello"}),
+            content_type="application/json",
+        )
+        self.assertEqual(anon_resp.status_code, 302)
+
+        # 2. Authenticated author user success
+        self.client.force_login(author_user)
+        auth_resp = self.client.post(
+            "/api/moderation/appeal/",
+            data=json.dumps({"docket_id": docket.id, "statement": "Legitimate author context."}),
+            content_type="application/json",
+        )
+        self.assertEqual(auth_resp.status_code, 200)
+        data = auth_resp.json()
+        self.assertTrue(data.get("success"))
+        self.assertIsNotNone(data.get("appeal_id"))
+
+        # 3. Missing / invalid parameters
+        bad_resp = self.client.post(
+            "/api/moderation/appeal/",
+            data=json.dumps({"docket_id": docket.id, "statement": ""}),
+            content_type="application/json",
+        )
+        self.assertEqual(bad_resp.status_code, 400)
+
+        # 4. Imposter user returns 403 Forbidden
+        other_user = self.User.objects.create_user(username="did:key:z6MkOtherUserEndpoint")
+        self.client.force_login(other_user)
+        # Create a second docket for author
+        event_id_2 = "test_note_friction_005"
+        for rep in [self.reporter1, self.reporter2, self.reporter3]:
+            record_community_flag(rep, author_pk, event_id_2, "SPAM")
+        docket2 = ModerationReviewDocket.objects.get(target_identifier=event_id_2)
+
+        imposter_resp = self.client.post(
+            "/api/moderation/appeal/",
+            data=json.dumps({"docket_id": docket2.id, "statement": "Imposter statement"}),
+            content_type="application/json",
+        )
+        self.assertEqual(imposter_resp.status_code, 403)
+
+    def test_dashboard_renders_active_frictions_and_advisory(self):
+        """Verify dashboard context contains active_frictions and renders advisory card."""
+        from apps.core.models import UserLinkDeck
+
+        author_did = "did:key:z6MkAuthorDashboardUi"
+        author_pk = "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"
+        author_user = self.User.objects.create_user(username=author_did)
+        UserLinkDeck.objects.create(user=author_user, handle="testui", nostr_pubkey=author_pk)
+
+        event_id = "test_note_friction_ui_006"
+        for rep in [self.reporter1, self.reporter2, self.reporter3]:
+            record_community_flag(rep, author_pk, event_id, "SPAM")
+
+        self.client.force_login(author_user)
+        resp = self.client.get(reverse("dashboard"))
+        self.assertEqual(resp.status_code, 200)
+
+        # Check context
+        self.assertIn("active_frictions", resp.context)
+        self.assertEqual(len(resp.context["active_frictions"]), 2)
+
+        # Check rendered HTML
+        html = resp.content.decode("utf-8")
+        self.assertIn("Instance Health &amp; Content Advisory", html)
+        self.assertIn("Notice: 2 of your notes", html)
+        self.assertIn("TIER 1 (BLUR)", html)
+        self.assertIn("Submit Appeal / Explanation", html)
+
 

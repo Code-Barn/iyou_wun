@@ -53,7 +53,9 @@ from .did_kit import b58decode, get_node_signing_key, get_public_key_hex, issue_
 from .moderation import (
     annotate_progressive_friction,
     filter_shielded_events,
+    get_author_active_frictions,
     record_community_flag,
+    submit_moderation_appeal,
 )
 from .models import HandleVerificationChallenge, IssuedCredential, UserLinkDeck, UserLinkItem
 from .utils import validate_external_bio_url, verify_external_profile_token
@@ -589,6 +591,7 @@ def dashboard(request):
     relay_objs = [{"url": url, "enabled": True} for url in relays]
     profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
     deck = UserLinkDeck.objects.filter(user=request.user).first()
+    active_frictions = get_author_active_frictions(request.user.username)
     return render(request, "dashboard.html", {
         "user_pubkey": user_pubkey,
         "user_npub": user_npub,
@@ -597,6 +600,7 @@ def dashboard(request):
         "relays": relays,
         "relay_objs": relay_objs,
         "deck": deck,
+        "active_frictions": active_frictions,
     })
 
 
@@ -1439,6 +1443,50 @@ def api_report_flag(request):
         "tier": res.get("tier", 0),
         "flag_count": res.get("flag_count", 0),
     })
+
+
+@login_required
+@require_POST
+def api_submit_appeal(request):
+    """
+    API endpoint for authors to submit a restorative moderation appeal against a docket.
+    Accepts JSON or form data: docket_id, statement.
+    """
+    docket_id = None
+    statement = ""
+
+    if request.content_type == "application/json":
+        try:
+            body_text = request.body.decode("utf-8") if isinstance(request.body, bytes) else request.body
+            data = json.loads(body_text) if body_text else {}
+            if isinstance(data, dict):
+                docket_id = data.get("docket_id")
+                statement = data.get("statement", "")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"success": False, "error": "Invalid JSON payload."}, status=400)
+    else:
+        docket_id = request.POST.get("docket_id")
+        statement = request.POST.get("statement", "")
+
+    if not docket_id:
+        return JsonResponse({"success": False, "error": "Missing docket_id."}, status=400)
+
+    try:
+        docket_id_int = int(docket_id)
+    except (ValueError, TypeError):
+        return JsonResponse({"success": False, "error": "Invalid docket_id format."}, status=400)
+
+    res = submit_moderation_appeal(
+        docket_id=docket_id_int,
+        appellant_did=request.user.username,
+        statement=statement,
+    )
+
+    if not res.get("success"):
+        status_code = 403 if "Unauthorized" in res.get("error", "") else 400
+        return JsonResponse(res, status=status_code)
+
+    return JsonResponse(res, status=200)
 
 
 def api_profile_notes(request, identifier):

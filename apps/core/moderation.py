@@ -13,18 +13,23 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+from collections import Counter
 import logging
 import urllib.error
 import urllib.request
 from typing import Any
 
 from django.core.cache import cache
+from django.db.models import Q
 
+from .did_kit import did_to_pubkey
 from .models import (
     CommunityFlagLedger,
+    ModerationAppeal,
     ModerationReviewDocket,
     NodeBlockedEntity,
     NodeContentTakedown,
+    UserLinkDeck,
 )
 
 logger = logging.getLogger(__name__)
@@ -508,4 +513,208 @@ def annotate_progressive_friction(
             return ev
 
     return [_annotate_single(ev) for ev in events]
+
+
+def get_author_active_frictions(author_identifier: str) -> list[dict]:
+    """
+    Inspect ModerationReviewDocket for active friction dockets matching the author's
+    pubkey, DID, or notes authored by the pubkey.
+
+    Returns a list of structured friction notices:
+    [
+        {
+            "docket_id": int,
+            "target_identifier": str,
+            "type": str,
+            "tier": int,
+            "flag_count": int,
+            "reasons": dict[str, int],
+            "has_appeal": bool,
+            "appeal_status": str | None,
+            "appeal_id": int | None,
+            "has_pending_appeal": bool,
+        },
+        ...
+    ]
+    """
+    clean_author = str(author_identifier or "").strip()
+    if not clean_author:
+        return []
+
+    candidate_keys = {clean_author, clean_author.lower()}
+    resolved_pk = did_to_pubkey(clean_author)
+    if resolved_pk:
+        candidate_keys.add(resolved_pk.lower())
+
+    decks = UserLinkDeck.objects.filter(
+        Q(user__username__iexact=clean_author)
+        | Q(handle__iexact=clean_author.lstrip("@"))
+        | Q(nostr_pubkey__iexact=clean_author)
+    )
+    for deck in decks:
+        if deck.nostr_pubkey:
+            candidate_keys.add(deck.nostr_pubkey.lower())
+        if deck.user and deck.user.username:
+            candidate_keys.add(deck.user.username)
+            candidate_keys.add(deck.user.username.lower())
+            d_pk = did_to_pubkey(deck.user.username)
+            if d_pk:
+                candidate_keys.add(d_pk.lower())
+
+    authored_event_ids = set(
+        CommunityFlagLedger.objects.filter(
+            target_pubkey__in=candidate_keys
+        ).exclude(target_event_id="").values_list("target_event_id", flat=True)
+    )
+    authored_event_ids |= {eid.lower() for eid in authored_event_ids}
+
+    dockets = (
+        ModerationReviewDocket.objects.filter(
+            Q(docket_type="pubkey", target_identifier__in=candidate_keys)
+            | Q(docket_type="event", target_identifier__in=authored_event_ids)
+            | Q(target_identifier__in=candidate_keys)
+            | Q(target_identifier__in=authored_event_ids)
+        )
+        .filter(Q(current_tier__gte=1) | Q(flag_count__gte=TIER1_BLUR_THRESHOLD))
+        .exclude(status="DISMISSED")
+        .order_by("-current_tier", "-flag_count", "-created_at")
+        .distinct()
+    )
+
+    frictions = []
+    seen_docket_ids = set()
+    for docket in dockets:
+        if docket.id in seen_docket_ids:
+            continue
+        seen_docket_ids.add(docket.id)
+
+        if docket.docket_type == "event":
+            reason_list = CommunityFlagLedger.objects.filter(
+                target_event_id=docket.target_identifier
+            ).values_list("reason", flat=True)
+        else:
+            reason_list = CommunityFlagLedger.objects.filter(
+                target_pubkey=docket.target_identifier
+            ).values_list("reason", flat=True)
+
+        reasons_dict = dict(Counter(reason_list))
+
+        latest_appeal = docket.appeals.order_by("-created_at").first()
+        has_appeal = latest_appeal is not None
+        appeal_status = latest_appeal.status if latest_appeal else None
+        appeal_id = latest_appeal.id if latest_appeal else None
+
+        frictions.append(
+            {
+                "docket_id": docket.id,
+                "target_identifier": docket.target_identifier,
+                "type": docket.docket_type,
+                "tier": docket.current_tier,
+                "flag_count": docket.flag_count,
+                "reasons": reasons_dict,
+                "has_appeal": has_appeal,
+                "appeal_status": appeal_status,
+                "appeal_id": appeal_id,
+                "has_pending_appeal": docket.has_pending_appeal,
+            }
+        )
+
+    return frictions
+
+
+def submit_moderation_appeal(
+    docket_id: int,
+    appellant_did: str,
+    statement: str,
+) -> dict:
+    """
+    Validate and record a restorative moderation appeal against a ModerationReviewDocket.
+
+    - Validates docket existence.
+    - Verifies appellant identity matches target or note author.
+    - Prevents duplicate pending appeals per docket.
+    - Creates ModerationAppeal and logs the submission.
+    """
+    try:
+        docket = ModerationReviewDocket.objects.get(id=int(docket_id))
+    except (ModerationReviewDocket.DoesNotExist, ValueError, TypeError):
+        return {"success": False, "error": "Review docket not found."}
+
+    clean_did = str(appellant_did or "").strip()
+    clean_statement = str(statement or "").strip()
+
+    if not clean_did:
+        return {"success": False, "error": "Appellant DID is required."}
+    if not clean_statement:
+        return {"success": False, "error": "Appeal statement cannot be blank."}
+
+    # Verify appellant identity matches target or note author
+    candidate_keys = {clean_did, clean_did.lower()}
+    resolved_pk = did_to_pubkey(clean_did)
+    if resolved_pk:
+        candidate_keys.add(resolved_pk.lower())
+
+    decks = UserLinkDeck.objects.filter(
+        Q(user__username__iexact=clean_did)
+        | Q(handle__iexact=clean_did.lstrip("@"))
+        | Q(nostr_pubkey__iexact=clean_did)
+    )
+    for deck in decks:
+        if deck.nostr_pubkey:
+            candidate_keys.add(deck.nostr_pubkey.lower())
+        if deck.user and deck.user.username:
+            candidate_keys.add(deck.user.username)
+            candidate_keys.add(deck.user.username.lower())
+            d_pk = did_to_pubkey(deck.user.username)
+            if d_pk:
+                candidate_keys.add(d_pk.lower())
+
+    is_authorized = False
+    if (
+        docket.target_identifier in candidate_keys
+        or docket.target_identifier.lower() in candidate_keys
+    ):
+        is_authorized = True
+    elif docket.docket_type == "event":
+        is_authorized = CommunityFlagLedger.objects.filter(
+            target_event_id=docket.target_identifier,
+            target_pubkey__in=candidate_keys,
+        ).exists()
+
+    if not is_authorized:
+        logger.warning(
+            "Unauthorized appeal attempt for docket #%s by %s",
+            docket.id,
+            clean_did,
+        )
+        return {
+            "success": False,
+            "error": "Unauthorized: Appellant is not the author or target of this docket.",
+        }
+
+    # Prevent duplicate pending appeals per docket
+    if docket.has_pending_appeal:
+        return {
+            "success": False,
+            "error": "An appeal is already pending review for this docket.",
+        }
+
+    appeal = ModerationAppeal.objects.create(
+        docket=docket,
+        appellant_did=clean_did,
+        statement=clean_statement,
+        status="PENDING",
+    )
+    logger.info(
+        "Moderation appeal #%s submitted for docket #%s by %s",
+        appeal.id,
+        docket.id,
+        clean_did,
+    )
+    return {
+        "success": True,
+        "appeal_id": appeal.id,
+        "status": appeal.status,
+    }
+
 
