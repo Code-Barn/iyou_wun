@@ -231,31 +231,64 @@
         lightboxCards = collectLightboxCards();
         lightboxIndex = lightboxCards.indexOf(card);
         if (lightboxIndex === -1) lightboxIndex = 0;
-        renderLightbox();
-        var modal = document.getElementById("lightboxModal");
+
+        var targetCard = lightboxCards[lightboxIndex] || card;
+        var url = (targetCard && targetCard.getAttribute ? targetCard.getAttribute("data-url") : targetCard) ||
+                  (targetCard && targetCard.querySelector && targetCard.querySelector("img") ? targetCard.querySelector("img").src : "");
+
+        if (typeof window.openImageModal === "function") {
+            window.openImageModal(url);
+            return;
+        }
+
+        var modal = document.getElementById("image-lightbox-modal") || document.getElementById("lightboxModal");
+        var img = document.getElementById("lightbox-modal-img");
+        if (img && url) {
+            img.src = url;
+        }
         if (modal) {
+            modal.classList.remove("hidden");
             modal.classList.add("show");
             document.body.classList.add("modal-open");
         }
     }
 
     function closeLightbox(e) {
-        if (e && e.target && e.target.id !== "lightboxModal" && e.target !== document.getElementById("lightboxModal") && !e.target.classList.contains("close-lb-btn")) {
+        if (e && e.target && e.target.id !== "image-lightbox-modal" && e.target.id !== "lightboxModal" && !e.target.classList.contains("close-lb-btn") && e.target.tagName.toLowerCase() !== "button") {
             return;
         }
         stopActiveMedia();
-        var modal = document.getElementById("lightboxModal");
-        if (modal) modal.classList.remove("show");
+        if (typeof window.closeImageModal === "function") {
+            window.closeImageModal();
+        }
+        var modal = document.getElementById("image-lightbox-modal") || document.getElementById("lightboxModal");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("show");
+        }
         document.body.classList.remove("modal-open");
         var pane = document.getElementById("lbMediaPane");
         if (pane) pane.innerHTML = "";
     }
 
     function navigateLightbox(dir) {
+        if (lightboxCards.length === 0) {
+            lightboxCards = collectLightboxCards();
+        }
         if (lightboxCards.length === 0) return;
         stopActiveMedia();
         lightboxIndex = (lightboxIndex + dir + lightboxCards.length) % lightboxCards.length;
-        renderLightbox();
+        var nextCard = lightboxCards[lightboxIndex];
+        if (!nextCard) return;
+        var url = (nextCard.getAttribute ? nextCard.getAttribute("data-url") : nextCard) ||
+                  (nextCard.querySelector && nextCard.querySelector("img") ? nextCard.querySelector("img").src : "");
+
+        if (typeof window.openImageModal === "function") {
+            window.openImageModal(url);
+        } else {
+            var img = document.getElementById("lightbox-modal-img");
+            if (img && url) img.src = url;
+        }
     }
 
     function renderLightbox() {
@@ -366,12 +399,19 @@
             return;
         }
 
-        var modal = document.getElementById("lightboxModal");
-        var isModalOpen = modal && modal.classList.contains("show");
+        var modal = document.getElementById("image-lightbox-modal") || document.getElementById("lightboxModal");
+        var isModalOpen = modal && !modal.classList.contains("hidden") && (modal.classList.contains("show") || modal.style.display !== "none");
 
         // 1. Escape: Close Lightbox
         if (e.key === "Escape" && isModalOpen) {
             closeLightbox({ target: modal });
+            return;
+        }
+
+        // Left / Right arrow navigation when lightbox is open
+        if (isModalOpen && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+            e.preventDefault();
+            navigateLightbox(e.key === "ArrowLeft" ? -1 : 1);
             return;
         }
 

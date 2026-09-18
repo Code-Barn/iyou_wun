@@ -50,7 +50,7 @@
   // global here so initialization stays ES-module-safe.
   const converse = window.converse || self.converse;
 
-  document.addEventListener("DOMContentLoaded", function() {
+  function initChat() {
     const wsFallback = "{{ xmpp_ws_url|default:'wss://wun.iyou.me/xmpp-websocket' }}";
     const xmppDomainFallback = "{{ xmpp_domain|default:'iyou.me' }}";
     const templateJid = "{{ user_jid|default:'' }}";
@@ -163,7 +163,13 @@
       .catch(function () {
         bindChat(null);
       });
-  });
+  }
+
+  if (document.readyState === "interactive" || document.readyState === "complete") {
+    initChat();
+  } else {
+    document.addEventListener("DOMContentLoaded", initChat);
+  }
 </script>
 {% endblock %}
 

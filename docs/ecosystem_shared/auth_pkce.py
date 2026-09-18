@@ -49,19 +49,16 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import secrets
-import time
 from base64 import urlsafe_b64encode
 from urllib.parse import urlencode
 
 import requests
 from django.conf import settings
-from django.contrib import auth
-from django.contrib.auth import get_user_model, logout
+from django.contrib.auth import logout
 from django.contrib.auth.backends import ModelBackend
 from django.http import HttpResponseRedirect
-from django.shortcuts import redirect, resolve_url
+from django.shortcuts import redirect
 from django.urls import reverse
 from mozilla_django_oidc.utils import (
     absolutify,
@@ -151,17 +148,18 @@ class PKCEOIDCAuthenticationRequestView(OIDCAuthenticationRequestView):
                 self.get_settings("OIDC_PKCE_CODE_VERIFIER_SIZE", 64)
             )
             code_challenge = _compute_code_challenge(code_verifier)
+            redirect_uri = absolutify(request, reverse(reverse_url))
 
             # Persist the verifier in the encrypted session cookie.
             request.session[SESSION_KEY_CODE_VERIFIER] = code_verifier
-            request.session["pkce_redirect_uri"] = params["redirect_uri"]
+            request.session["pkce_redirect_uri"] = redirect_uri
 
             # -- Build outbound query parameters ------------------------------
             params = {
                 "response_type": "code",
                 "scope": self.get_settings("OIDC_RP_SCOPES", "openid profile email"),
                 "client_id": self.OIDC_RP_CLIENT_ID,
-                "redirect_uri": absolutify(request, reverse(reverse_url)),
+                "redirect_uri": redirect_uri,
                 "state": state,
                 "code_challenge": code_challenge,
                 "code_challenge_method": "S256",

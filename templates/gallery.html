@@ -1,26 +1,23 @@
+{% extends "base.html" %}
 {% load static %}
-<!doctype html>
-<html>
-<head>
-    <title>Media Gallery - iyou_wun</title>
-    <script>
-      (function() {
-        const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
-        const theme = cookieMatch ? decodeURIComponent(cookieMatch[1]) : (localStorage.getItem('wun_theme') || 'light');
-        if (theme === 'dark' || theme === 'stealth') {
-          document.documentElement.classList.add('dark');
-        } else {
-          document.documentElement.classList.remove('dark');
-        }
-      })();
-    </script>
+
+{% block title %}Media Gallery - iyou_wun{% endblock %}
+
+{% block og_tags %}
+    <meta property="og:site_name" content="iyou_wun" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Media Gallery — iyou_wun" />
+    <meta property="og:description" content="Sovereign visuals, video, and audio from the iyou_wun mesh." />
+    <meta property="og:image" content="{{ og_image }}" />
+    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
+    <meta name="twitter:card" content="summary_large_image" />
+{% endblock %}
+
+{% block extra_head %}
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
     <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
-    <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
         .modal-open { overflow: hidden; }
-        #lightboxModal { opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
-        #lightboxModal.show { opacity: 1; pointer-events: auto; }
         .tab-active { background-color: #7c3aed; color: #fff; }
         .tab-inactive { color: #9ca3af; }
         .tab-inactive:hover { color: #fff; }
@@ -32,20 +29,10 @@
         .video-card-overlay { opacity: 0; transition: opacity 0.2s ease; }
         .video-card:hover .video-card-overlay { opacity: 1; }
     </style>
-    <meta property="og:site_name" content="iyou_wun" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Media Gallery — iyou_wun" />
-    <meta property="og:description" content="Sovereign visuals, video, and audio from the iyou_wun mesh." />
-    <meta property="og:image" content="{{ og_image }}" />
-    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
-    <meta name="twitter:card" content="summary_large_image" />
-</head>
-<body class="bg-gray-950 min-h-screen text-white">
-    {% include 'includes/_ecosystem_bar.html' %}
-    {% include 'includes/_standard_header.html' %}
-    {% include '_nav.html' %}
+{% endblock %}
 
-    <main class="max-w-7xl mx-auto px-4 py-8">
+{% block content %}
+    <div class="max-w-7xl mx-auto px-4 py-8">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-2xl font-bold text-white">Media Gallery</h1>
             {% if filter_pubkey %}
@@ -366,22 +353,10 @@
                 <span>Loading more media...</span>
             </div>
         </div>
-    </main>
-
-    <div id="lightboxModal" class="fixed inset-0 z-50 bg-black/90 backdrop-blur-sm flex items-center justify-center" onclick="closeLightbox(event)">
-        <button onclick="closeLightbox()" class="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 z-50">&times;</button>
-        <button onclick="navigateLightbox(-1)" class="absolute left-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 z-50 opacity-60 hover:opacity-100 transition-opacity" id="lbPrev">&#8249;</button>
-        <button onclick="navigateLightbox(1)" class="absolute right-4 top-1/2 -translate-y-1/2 text-white text-4xl hover:text-gray-300 z-50 opacity-60 hover:opacity-100 transition-opacity" id="lbNext">&#8250;</button>
-        <div class="relative max-w-6xl w-full mx-12 max-h-full flex flex-col lg:flex-row gap-0" onclick="event.stopPropagation()">
-            <div id="lbMediaPane" class="flex-1 flex items-center justify-center min-h-0 bg-black rounded-t-xl lg:rounded-l-xl lg:rounded-tr-none overflow-hidden"></div>
-            <div id="lbMetaPane" class="w-full lg:w-80 bg-gray-900 rounded-b-xl lg:rounded-r-xl lg:rounded-bl-none p-5 overflow-y-auto max-h-[40vh] lg:max-h-full flex-shrink-0">
-                <div id="lbAuthor" class="flex items-center gap-3 mb-4"></div>
-                <div id="lbCaption" class="text-sm text-gray-300 mb-4"></div>
-                <div id="lbMeta" class="space-y-2 text-xs text-gray-500"></div>
-            </div>
-        </div>
     </div>
+{% endblock %}
 
+{% block extra_js %}
     <script>
         window.galleryActiveType = "{{ active_type|default:'all' }}";
         window.BLOSSOM_SERVER_URL = "{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}";
@@ -391,20 +366,7 @@
             }
         });
     </script>
-    <script src="{% static 'js/toast_manager.js' %}"></script>
-    <script src="{% static 'js/bridge_client.js' %}"></script>
-    <script src="{% static 'js/relay_pool.js' %}"></script>
-    <script src="{% static 'js/contact_manager.js' %}"></script>
-    <script src="{% static 'js/notification_manager.js' %}"></script>
-    <script src="{% static 'js/floating_chat.js' %}"></script>
     <script src="{% static 'js/trust_lens.js' %}"></script>
-    <script src="{% static 'js/circle_feed_filter.js' %}"></script>
     <script src="{% static 'js/gallery_player.js' %}"
             data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
-    <script src="{% static 'js/theme.js' %}"></script>
-{% if user.is_authenticated %}
-    {% include "includes/_notification_drawer.html" %}
-    {% include "includes/_floating_chat_dock.html" %}
-{% endif %}
-</body>
-</html>
+{% endblock %}

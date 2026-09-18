@@ -942,13 +942,13 @@ def api_chat_session(request):
     level = getattr(settings, "WUN_USER_LEVEL", "2")
     if level == "1":
         xmpp_domain = "iyou.me"
-        xmpp_ws_url = "wss://xmpp.iyou.me:5222/xmpp-websocket"
+        xmpp_ws_url = "wss://xmpp.iyou.me:5281/xmpp-websocket"
     else:
         xmpp_domain = getattr(settings, "XMPP_DOMAIN", "127.0.0.1")
         xmpp_ws_url = getattr(
             settings,
             "XMPP_WS_URL",
-            "wss://home.iyou.me:5222/xmpp-websocket",
+            "wss://home.iyou.me:5281/xmpp-websocket",
         )
 
     jid = f"{pubkey_hex}@{xmpp_domain}" if pubkey_hex else ""

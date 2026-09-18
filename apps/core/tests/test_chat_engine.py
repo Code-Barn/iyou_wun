@@ -45,7 +45,7 @@ class ApiChatSessionTest(TestCase):
         ws_url = getattr(
             settings,
             "XMPP_WS_URL",
-            "wss://home.iyou.me:5222/xmpp-websocket",
+            "wss://home.iyou.me:5281/xmpp-websocket",
         )
 
         self.assertEqual(payload.get("success"), True)
