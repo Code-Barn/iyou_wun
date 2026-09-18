@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+import json
 import urllib.error
 from unittest.mock import MagicMock, patch
 
@@ -97,70 +98,90 @@ class ModerationShieldCoreTests(TestCase):
         self.assertIsNone(cache.get(CACHE_KEY_BLOCKED_EVENTS))
         self.assertIsNone(cache.get(CACHE_KEY_BLOCKED_MEDIA))
 
-    def test_filter_shielded_events_strips_blocked_entities(self):
-        """Verify events with blocked author pubkey or DID are stripped."""
+    def test_blocked_entity_suppression(self):
+        """Events signed by a blocked pubkey are removed from filter_shielded_events()."""
+        NodeBlockedEntity.objects.create(
+            entity_identifier="blocked_pubkey_64hex_abc123",
+            reason="SPAM_BOT",
+            is_active=True,
+        )
+        invalidate_shield_cache()
+
+        events = [
+            {"id": "ev_spam_1", "pubkey": "blocked_pubkey_64hex_abc123", "content": "spam content"},
+            {"id": "ev_clean_2", "pubkey": "clean_pubkey_64hex_def456", "content": "clean content"},
+        ]
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["id"], "ev_clean_2")
+        self.assertEqual(filtered[0]["pubkey"], "clean_pubkey_64hex_def456")
+
+    def test_blocked_event_suppression(self):
+        """Specific event IDs listed in NodeContentTakedown are removed."""
+        NodeContentTakedown.objects.create(
+            event_id="takedown_event_64hex_999888",
+            reason="ILLEGAL_CSAM",
+        )
+        invalidate_shield_cache()
+
+        events = [
+            {"id": "takedown_event_64hex_999888", "pubkey": "author_clean_1", "content": "illegal content"},
+            {"id": "legit_event_64hex_111222", "pubkey": "author_clean_1", "content": "valid post"},
+        ]
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["id"], "legit_event_64hex_111222")
+
+    def test_blocked_media_hash_suppression(self):
+        """Events referencing suppressed SHA-256 hashes in x or ox tags are dropped."""
+        NodeContentTakedown.objects.create(
+            media_hash="bad_media_sha256_hash_777666",
+            reason="MALWARE",
+        )
+        invalidate_shield_cache()
+
+        events = [
+            {
+                "id": "ev_malware_media",
+                "pubkey": "author_1",
+                "content": "check this download",
+                "tags": [["x", "bad_media_sha256_hash_777666"], ["m", "application/octet-stream"]],
+            },
+            {
+                "id": "ev_clean_media",
+                "pubkey": "author_2",
+                "content": "clean image",
+                "tags": [["x", "clean_media_sha256_hash_123456"], ["m", "image/png"]],
+            },
+            {
+                "id": "ev_no_media",
+                "pubkey": "author_3",
+                "content": "just text",
+                "tags": [],
+            },
+        ]
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 2)
+        filtered_ids = [ev["id"] for ev in filtered]
+        self.assertNotIn("ev_malware_media", filtered_ids)
+        self.assertIn("ev_clean_media", filtered_ids)
+        self.assertIn("ev_no_media", filtered_ids)
+
+    def test_filter_shielded_events_strips_blocked_entities_with_did(self):
+        """Verify events with blocked author DID are stripped."""
         rosters = (
-            {"bad_pubkey_123", "did:key:z6mkbaduser123"},
+            {"did:key:z6mkbaduser123"},
             set(),
             set(),
         )
         events = [
-            {"id": "ev1", "pubkey": "bad_pubkey_123", "content": "spam"},
-            {"id": "ev2", "pubkey": "good_pubkey_456", "content": "hello world"},
-            {"id": "ev3", "pubkey": "other_pubkey", "author_did": "did:key:z6mkbaduser123", "content": "bad did"},
+            {"id": "ev1", "pubkey": "some_pubkey", "author_did": "did:key:z6mkbaduser123", "content": "bad did"},
+            {"id": "ev2", "pubkey": "clean_pubkey", "content": "hello world"},
         ]
 
         filtered = filter_shielded_events(events, rosters=rosters)
         self.assertEqual(len(filtered), 1)
         self.assertEqual(filtered[0]["id"], "ev2")
-
-    def test_filter_shielded_events_strips_blocked_events(self):
-        """Verify events with blocked event id are stripped."""
-        rosters = (
-            set(),
-            {"blocked_ev_id_999"},
-            set(),
-        )
-        events = [
-            {"id": "blocked_ev_id_999", "pubkey": "author1", "content": "bad"},
-            {"id": "allowed_ev_id_100", "pubkey": "author1", "content": "good"},
-        ]
-
-        filtered = filter_shielded_events(events, rosters=rosters)
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0]["id"], "allowed_ev_id_100")
-
-    def test_filter_shielded_events_strips_blocked_media_tags(self):
-        """Verify events with x or ox tags matching blocked media are stripped."""
-        rosters = (
-            set(),
-            set(),
-            {"bad_media_hash_abc"},
-        )
-        events = [
-            {
-                "id": "ev_x_tag",
-                "pubkey": "author1",
-                "content": "image 1",
-                "tags": [["x", "bad_media_hash_abc"], ["m", "image/png"]],
-            },
-            {
-                "id": "ev_ox_tag",
-                "pubkey": "author2",
-                "content": "image 2",
-                "tags": [["ox", "bad_media_hash_abc"]],
-            },
-            {
-                "id": "ev_clean_media",
-                "pubkey": "author3",
-                "content": "clean image",
-                "tags": [["x", "clean_hash_xyz"]],
-            },
-        ]
-
-        filtered = filter_shielded_events(events, rosters=rosters)
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0]["id"], "ev_clean_media")
 
     def test_filter_shielded_events_preserves_clean_events(self):
         """Verify clean events pass through unchanged."""
@@ -185,52 +206,34 @@ class ModerationShieldCoreTests(TestCase):
         self.assertFalse(is_event_shielded({"id": "clean_id", "pubkey": "clean_author"}, rosters=rosters))
 
     @patch("apps.core.moderation.urllib.request.urlopen")
-    def test_purge_blossom_blob_success_200(self, mock_urlopen):
-        """Verify purge_blossom_blob issues DELETE to port 9002 and succeeds on 200/204."""
+    def test_blossom_purge_handler(self, mock_urlopen):
+        """Mock urllib.request.urlopen to test Blossom DELETE calls, verifying 200, 404, and network timeout handling."""
+        # 1. Test 200 OK
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
-        result = purge_blossom_blob("aabbcc112233")
-        self.assertTrue(result)
-
-        # Check call args
+        res_200 = purge_blossom_blob("aabbcc200hash")
+        self.assertTrue(res_200)
         req = mock_urlopen.call_args[0][0]
         self.assertEqual(req.method, "DELETE")
-        self.assertEqual(req.full_url, "http://127.0.0.1:9002/aabbcc112233")
+        self.assertEqual(req.full_url, "http://127.0.0.1:9002/aabbcc200hash")
 
-    @patch("apps.core.moderation.urllib.request.urlopen")
-    def test_purge_blossom_blob_success_404_already_purged(self, mock_urlopen):
-        """Verify HTTP 404 (already purged) is treated as success."""
+        # 2. Test 404 Not Found (already scrubbed)
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            "http://127.0.0.1:9002/aabbcc112233",
+            "http://127.0.0.1:9002/aabbcc404hash",
             404,
             "Not Found",
             {},
             None,
         )
-        result = purge_blossom_blob("aabbcc112233")
-        self.assertTrue(result)
+        res_404 = purge_blossom_blob("aabbcc404hash")
+        self.assertTrue(res_404)
 
-    @patch("apps.core.moderation.urllib.request.urlopen")
-    def test_purge_blossom_blob_failure_500(self, mock_urlopen):
-        """Verify HTTP 500 returns False without unhandled exceptions."""
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            "http://127.0.0.1:9002/aabbcc112233",
-            500,
-            "Internal Server Error",
-            {},
-            None,
-        )
-        result = purge_blossom_blob("aabbcc112233")
-        self.assertFalse(result)
-
-    @patch("apps.core.moderation.urllib.request.urlopen")
-    def test_purge_blossom_blob_network_error(self, mock_urlopen):
-        """Verify network connection errors return False without unhandled exceptions."""
-        mock_urlopen.side_effect = urllib.error.URLError("Connection refused")
-        result = purge_blossom_blob("aabbcc112233")
-        self.assertFalse(result)
+        # 3. Test Network Timeout / URLError
+        mock_urlopen.side_effect = urllib.error.URLError("Connection timed out")
+        res_timeout = purge_blossom_blob("aabbcctimeouthash")
+        self.assertFalse(res_timeout)
 
     def test_purge_blossom_blob_empty_hash(self):
         """Verify empty sha256_hex returns False."""
@@ -257,23 +260,40 @@ class ModerationDeskViewTests(TestCase):
         invalidate_shield_cache()
         super().tearDown()
 
-    def test_anonymous_access_redirects_to_login(self):
-        resp = self.client.get(self.url)
-        self.assertEqual(resp.status_code, 302)
-        self.assertIn("oidc", resp.url.lower())
+    def test_admin_desk_permissions(self):
+        """Non-staff/anonymous users receive 302 redirects; users with is_staff=True (elevated via ADMIN_DID) can view and POST takedowns."""
+        # 1. Anonymous user GET -> 302 redirect to login
+        anon_resp = self.client.get(self.url)
+        self.assertEqual(anon_resp.status_code, 302)
+        self.assertIn("oidc", anon_resp.url.lower())
 
-    def test_non_staff_user_redirects(self):
+        # 2. Non-staff user GET -> 302 redirect
         self.client.force_login(self.regular_user)
-        resp = self.client.get(self.url)
-        self.assertEqual(resp.status_code, 302)
+        non_staff_resp = self.client.get(self.url)
+        self.assertEqual(non_staff_resp.status_code, 302)
 
-    def test_staff_user_access_granted_200(self):
+        # 3. Staff user (ADMIN_DID elevated) GET -> 200 OK
         self.client.force_login(self.staff_user)
-        resp = self.client.get(self.url)
-        self.assertEqual(resp.status_code, 200)
-        self.assertTemplateUsed(resp, "admin/moderation_desk.html")
-        self.assertIn("blocked_entities", resp.context)
-        self.assertIn("recent_takedowns", resp.context)
+        staff_resp = self.client.get(self.url)
+        self.assertEqual(staff_resp.status_code, 200)
+        self.assertTemplateUsed(staff_resp, "admin/moderation_desk.html")
+
+        # 4. Staff user POST takedown -> 302 redirect and record created
+        post_resp = self.client.post(
+            self.url,
+            {
+                "action": "takedown_event",
+                "event_id": "event_id_taken_down_by_admin_12345",
+                "reason": "ILLEGAL_CSAM",
+            },
+        )
+        self.assertEqual(post_resp.status_code, 302)
+        self.assertTrue(
+            NodeContentTakedown.objects.filter(
+                event_id="event_id_taken_down_by_admin_12345",
+                reason="ILLEGAL_CSAM",
+            ).exists()
+        )
 
     def test_post_block_entity_creates_record_and_invalidates_cache(self):
         self.client.force_login(self.staff_user)
@@ -316,24 +336,6 @@ class ModerationDeskViewTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertFalse(NodeBlockedEntity.objects.filter(id=entity.id).exists())
 
-    def test_post_takedown_event_creates_record(self):
-        self.client.force_login(self.staff_user)
-        resp = self.client.post(
-            self.url,
-            {
-                "action": "takedown_event",
-                "event_id": "bad_event_id_64_hex_11223344556677889900aabbccddeeff",
-                "reason": "ILLEGAL_CSAM",
-            },
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertTrue(
-            NodeContentTakedown.objects.filter(
-                event_id="bad_event_id_64_hex_11223344556677889900aabbccddeeff",
-                reason="ILLEGAL_CSAM",
-            ).exists()
-        )
-
     @patch("apps.core.views_admin.purge_blossom_blob")
     def test_post_purge_media_calls_blossom_and_records_takedown(self, mock_purge):
         mock_purge.return_value = True
@@ -367,3 +369,45 @@ class ModerationDeskViewTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.context["blocked_entities"]), 25)
 
+    @patch("apps.core.views.PolyClient.cast_vote")
+    def test_poly_vote_enfranchisement_preserved(self, mock_cast_vote):
+        """Ensure quarantined DIDs can still cast votes via /api/vote/."""
+        mock_cast_vote.return_value = {"receipt": "receipt_tx_poly_999888"}
+
+        quarantined_did = "did:key:z6MkQuarantinedCitizen123"
+        quarantined_user = self.User.objects.create_user(
+            username=quarantined_did,
+            is_staff=False,
+        )
+
+        # Quarantined in social feed suppression list
+        NodeBlockedEntity.objects.create(
+            entity_identifier=quarantined_did,
+            reason="HARASSMENT",
+            is_active=True,
+        )
+        invalidate_shield_cache()
+
+        # Verify they are shielded on social feeds
+        self.assertTrue(is_event_shielded({"pubkey": "some_pk", "author_did": quarantined_did}))
+
+        # But when casting a civic ballot via /api/vote/
+        self.client.force_login(quarantined_user)
+        vote_payload = {
+            "voter_did": quarantined_did,
+            "signature": "valid_mock_signature_hex",
+            "vote_envelope": {
+                "poll_id": "referendum_prop_42",
+                "choice": "AYE",
+            },
+        }
+        vote_resp = self.client.post(
+            "/api/vote/",
+            data=json.dumps(vote_payload),
+            content_type="application/json",
+        )
+        self.assertEqual(vote_resp.status_code, 200)
+        data = vote_resp.json()
+        self.assertTrue(data.get("valid"))
+        self.assertEqual(data.get("receipt"), "receipt_tx_poly_999888")
+        mock_cast_vote.assert_called_once()

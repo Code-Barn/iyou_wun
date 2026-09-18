@@ -38,7 +38,7 @@ urlpatterns = [
     path('api/chat/session/', views.api_chat_session, name='api_chat_session'),
     path('api/contacts/follow/', views.api_contacts_follow, name='api_contacts_follow'),
     path('api/profile/save/', views.api_save_profile, name='api_save_profile'),
-    path('api/vote', views.api_cast_vote, name='api_cast_vote'),
+    re_path(r"^api/vote/?$", views.api_cast_vote, name="api_cast_vote"),
 
     path('api/media/upload/', views.api_blossom_upload_proxy, name='media_upload_proxy'),
     path('api/blossom/proxy/', views.api_blossom_upload_proxy, name='api_blossom_proxy'),
