@@ -224,3 +224,102 @@ class NodeContentTakedown(models.Model):
     def __str__(self):
         target = self.event_id or self.media_hash or "unknown"
         return f"<NodeContentTakedown {target} ({self.reason}) purged={self.purged_from_blossom}>"
+
+
+class CommunityFlagLedger(models.Model):
+    REASON_CHOICES = [
+        ("SPAM", "Spam / Flooding"),
+        ("NUDITY_NSFW", "Unmarked Adult Content"),
+        ("HARASSMENT", "Abuse / Targeted Harassment"),
+        ("ILLEGAL", "Illegal / Contraband"),
+        ("MALWARE", "Malicious Links / Exploits"),
+        ("MISINFO", "Deceptive Content"),
+        ("OTHER", "Other Violation"),
+    ]
+
+    target_event_id = models.CharField(
+        max_length=64,
+        db_index=True,
+        blank=True,
+        default="",
+        help_text="Target Nostr Event ID (64-hex).",
+    )
+    target_pubkey = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Target author pubkey hex or DID.",
+    )
+    reporter_did = models.CharField(
+        max_length=255,
+        db_index=True,
+        help_text="Sovereign DID or pubkey of the reporter.",
+    )
+    reason = models.CharField(
+        max_length=32,
+        choices=REASON_CHOICES,
+        default="SPAM",
+    )
+    weight = models.IntegerField(default=1)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["target_event_id", "reporter_did"],
+                condition=~models.Q(target_event_id=""),
+                name="uniq_target_event_reporter_flag",
+            )
+        ]
+        verbose_name = "Community Flag Ledger"
+        verbose_name_plural = "Community Flag Ledgers"
+
+    def __str__(self):
+        target = self.target_event_id or self.target_pubkey
+        return f"<CommunityFlagLedger {self.reporter_did} -> {target} ({self.reason})>"
+
+
+class ModerationReviewDocket(models.Model):
+    DOCKET_TYPE_CHOICES = [
+        ("event", "Nostr Event"),
+        ("pubkey", "Author Identity"),
+    ]
+    STATUS_CHOICES = [
+        ("PENDING", "Pending Review"),
+        ("DISMISSED", "Dismissed by Admin"),
+        ("CONFIRMED", "Confirmed Action"),
+    ]
+
+    target_identifier = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        help_text="Target Event ID or Author DID/Pubkey.",
+    )
+    docket_type = models.CharField(
+        max_length=16,
+        choices=DOCKET_TYPE_CHOICES,
+        default="event",
+    )
+    flag_count = models.PositiveIntegerField(default=1)
+    current_tier = models.PositiveSmallIntegerField(
+        default=1,
+        help_text="1=Blur, 2=Suppressed, 3=Quarantined",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=STATUS_CHOICES,
+        default="PENDING",
+    )
+    reviewed_by_did = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Moderation Review Docket"
+        verbose_name_plural = "Moderation Review Dockets"
+
+    def __str__(self):
+        return f"<ModerationReviewDocket {self.docket_type}:{self.target_identifier} tier={self.current_tier} status={self.status}>"
+
