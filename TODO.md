@@ -535,8 +535,8 @@
 ## Layer 3 — Sovereign Moderation & Safe Harbor Defense
 
 #### Phase 29 — Sovereign Moderation Shield & Node Takedown Engine
-- [ ] Add `NodeBlockedEntity` and `NodeContentTakedown` models to `apps/core/models.py`
-- [ ] Run migrations for local suppression tables
+- [x] Add `NodeBlockedEntity` and `NodeContentTakedown` models to `apps/core/models.py`
+- [x] Run migrations for local suppression tables
 - [ ] Implement `apps/core/moderation.py` with in-memory caching and Blossom port 9002 DELETE purging
 - [ ] Hook `filter_shielded_events()` into `FeedView`, `api_feed()`, and thread lookup in `apps/core/views.py`
 - [ ] Implement `/desk/moderation/` view in `apps/core/views_admin.py` protected by `is_staff`

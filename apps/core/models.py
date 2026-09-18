@@ -157,3 +157,70 @@ class HandleVerificationChallenge(models.Model):
     def is_expired(self):
         from django.utils import timezone
         return self.expires_at <= timezone.now()
+
+
+class NodeBlockedEntity(models.Model):
+    REASON_CHOICES = [
+        ("ILLEGAL_CSAM", "Illegal Content"),
+        ("MALWARE", "Malware"),
+        ("HARASSMENT", "Severe Harassment"),
+        ("SPAM_BOT", "Automated Spam"),
+        ("ADMIN_OVERRIDE", "Operator Emergency Discretion"),
+    ]
+
+    entity_identifier = models.CharField(
+        max_length=255,
+        unique=True,
+        db_index=True,
+        help_text="Pubkey hex (64 chars) or DID string to suppress.",
+    )
+    reason = models.CharField(
+        max_length=32,
+        choices=REASON_CHOICES,
+        default="ADMIN_OVERRIDE",
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Node Blocked Entity"
+        verbose_name_plural = "Node Blocked Entities"
+
+    def __str__(self):
+        return f"<NodeBlockedEntity {self.entity_identifier} ({self.reason}) active={self.is_active}>"
+
+
+class NodeContentTakedown(models.Model):
+    event_id = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        unique=True,
+        db_index=True,
+        help_text="Nostr Event ID (64-hex).",
+    )
+    media_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        null=True,
+        db_index=True,
+        help_text="Blossom media SHA-256 hash (64-hex).",
+    )
+    reason = models.CharField(
+        max_length=32,
+        choices=NodeBlockedEntity.REASON_CHOICES,
+        default="ADMIN_OVERRIDE",
+    )
+    purged_from_blossom = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Node Content Takedown"
+        verbose_name_plural = "Node Content Takedowns"
+
+    def __str__(self):
+        target = self.event_id or self.media_hash or "unknown"
+        return f"<NodeContentTakedown {target} ({self.reason}) purged={self.purged_from_blossom}>"
