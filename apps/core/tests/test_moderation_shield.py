@@ -22,16 +22,26 @@ from django.core.cache import cache
 from django.test import TestCase
 from django.urls import reverse
 
-from apps.core.models import NodeBlockedEntity, NodeContentTakedown
+from apps.core.models import (
+    CommunityFlagLedger,
+    ModerationReviewDocket,
+    NodeBlockedEntity,
+    NodeContentTakedown,
+)
 from apps.core.moderation import (
     CACHE_KEY_BLOCKED_ENTITIES,
     CACHE_KEY_BLOCKED_EVENTS,
     CACHE_KEY_BLOCKED_MEDIA,
+    TIER1_BLUR_THRESHOLD,
+    TIER2_SUPPRESS_THRESHOLD,
+    TIER3_QUARANTINE_THRESHOLD,
+    annotate_progressive_friction,
     filter_shielded_events,
     get_shield_rosters,
     invalidate_shield_cache,
     is_event_shielded,
     purge_blossom_blob,
+    record_community_flag,
 )
 
 
@@ -411,3 +421,240 @@ class ModerationDeskViewTests(TestCase):
         self.assertTrue(data.get("valid"))
         self.assertEqual(data.get("receipt"), "receipt_tx_poly_999888")
         mock_cast_vote.assert_called_once()
+
+
+class ProgressiveFrictionTests(TestCase):
+    def setUp(self):
+        super().setUp()
+        invalidate_shield_cache()
+        self.User = get_user_model()
+        self.user1 = self.User.objects.create_user(username="did:key:z6Mkreporter1", is_staff=False)
+        self.user2 = self.User.objects.create_user(username="did:key:z6Mkreporter2", is_staff=False)
+        self.user3 = self.User.objects.create_user(username="did:key:z6Mkreporter3", is_staff=False)
+
+    def tearDown(self):
+        invalidate_shield_cache()
+        super().tearDown()
+
+    def test_record_community_flag_deduplication(self):
+        """Verify duplicate reports by same DID are idempotently deduplicated."""
+        ev_id = "aabbcc1122334455"
+        pk = "target_pubkey_001"
+
+        res1 = record_community_flag(
+            reporter_did=self.user1.username,
+            target_pubkey=pk,
+            target_event_id=ev_id,
+            reason="SPAM",
+        )
+        self.assertTrue(res1["success"])
+        self.assertEqual(res1["flag_count"], 1)
+        self.assertEqual(res1["tier"], 0)
+
+        # Flag again with same user
+        res2 = record_community_flag(
+            reporter_did=self.user1.username,
+            target_pubkey=pk,
+            target_event_id=ev_id,
+            reason="HARASSMENT",
+        )
+        self.assertTrue(res2["success"])
+        self.assertEqual(res2["flag_count"], 1)
+        self.assertEqual(CommunityFlagLedger.objects.filter(target_event_id=ev_id).count(), 1)
+
+        # Second user flags -> count reaches 2
+        res3 = record_community_flag(
+            reporter_did=self.user2.username,
+            target_pubkey=pk,
+            target_event_id=ev_id,
+            reason="SPAM",
+        )
+        self.assertEqual(res3["flag_count"], 2)
+
+    def test_progressive_friction_tier1_blur(self):
+        """Verify >= 3 flags triggers Tier 1 blur via annotate_progressive_friction."""
+        ev_id = "event_to_blur_001"
+        pk = "target_pubkey_002"
+
+        # Below threshold -> Tier 0
+        for i in range(1, TIER1_BLUR_THRESHOLD):
+            record_community_flag(reporter_did=f"did:key:z6User{i}", target_pubkey=pk, target_event_id=ev_id)
+
+        events = [{"id": ev_id, "pubkey": pk, "content": "hello world"}]
+        # Not blurred yet
+        annotated = annotate_progressive_friction(events)
+        self.assertFalse(annotated[0].get("has_content_warning", False))
+
+        # Reaches TIER1_BLUR_THRESHOLD -> Tier 1
+        res3 = record_community_flag(
+            reporter_did=f"did:key:z6User{TIER1_BLUR_THRESHOLD}",
+            target_pubkey=pk,
+            target_event_id=ev_id,
+        )
+        self.assertEqual(res3["tier"], 1)
+        self.assertEqual(res3["flag_count"], TIER1_BLUR_THRESHOLD)
+
+        docket = ModerationReviewDocket.objects.get(target_identifier=ev_id)
+        self.assertEqual(docket.current_tier, 1)
+
+        # Event remains in feed, but receives content warning annotation
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 1)
+
+        annotated = annotate_progressive_friction(filtered)
+        self.assertTrue(annotated[0].get("has_content_warning"))
+        self.assertEqual(annotated[0].get("warning_reason"), "Flagged by community review")
+
+    def test_progressive_friction_tier2_suppression(self):
+        """Verify >= 7 flags triggers Tier 2 discovery suppression in filter_shielded_events."""
+        ev_id = "event_to_suppress_002"
+        pk = "target_pubkey_003"
+
+        for i in range(TIER2_SUPPRESS_THRESHOLD):
+            res = record_community_flag(
+                reporter_did=f"did:key:z6Rep{i}",
+                target_pubkey=pk,
+                target_event_id=ev_id,
+                reason="SPAM",
+            )
+
+        self.assertEqual(res["tier"], 2)
+        self.assertEqual(res["flag_count"], 7)
+
+        docket = ModerationReviewDocket.objects.get(target_identifier=ev_id)
+        self.assertEqual(docket.current_tier, 2)
+
+        # Note is now excluded by filter_shielded_events
+        events = [{"id": ev_id, "pubkey": pk, "content": "spam content"}]
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 0)
+
+        # If admin dismisses docket, it is restored
+        docket.status = "DISMISSED"
+        docket.save()
+        invalidate_shield_cache()
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 1)
+
+    def test_progressive_friction_tier3_quarantine(self):
+        """Verify >= 15 flags triggers Tier 3 author quarantine in filter_shielded_events."""
+        pk = "target_pubkey_spammer_99"
+
+        for i in range(TIER3_QUARANTINE_THRESHOLD):
+            ev_id = f"spam_event_{i:03d}"
+            record_community_flag(
+                reporter_did=f"did:key:z6Citizen{i}",
+                target_pubkey=pk,
+                target_event_id=ev_id,
+                reason="SPAM",
+            )
+
+        pk_docket = ModerationReviewDocket.objects.get(target_identifier=pk, docket_type="pubkey")
+        self.assertEqual(pk_docket.current_tier, 3)
+
+        # Author's notes are completely quarantined by filter_shielded_events
+        events = [
+            {"id": "innocent_looking_note", "pubkey": pk, "content": "test"},
+            {"id": "other_note", "pubkey": "good_author_pubkey", "content": "valid post"},
+        ]
+        filtered = filter_shielded_events(events)
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["id"], "other_note")
+
+    def test_api_report_flag_endpoint(self):
+        """Verify POST /api/moderation/flag/ creates ledger record and returns status."""
+        self.client.force_login(self.user1)
+        payload = {
+            "event_id": "test_endpoint_ev_01",
+            "target_pubkey": "pubkey_target_01",
+            "reason": "HARASSMENT",
+        }
+        resp = self.client.post(
+            "/api/moderation/flag/",
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data.get("success"))
+        self.assertEqual(data.get("flag_count"), 1)
+        self.assertEqual(data.get("tier"), 0)
+
+        # Also supports form encoded POST
+        self.client.force_login(self.user2)
+        resp2 = self.client.post(
+            "/api/moderation/flag/",
+            data={
+                "event_id": "test_endpoint_ev_01",
+                "target_pubkey": "pubkey_target_01",
+                "reason": "SPAM",
+            },
+        )
+        self.assertEqual(resp2.status_code, 200)
+        data2 = resp2.json()
+        self.assertTrue(data2.get("success"))
+        self.assertEqual(data2.get("flag_count"), 2)
+
+    def test_api_report_flag_requires_auth(self):
+        """Unauthenticated requests are redirected or rejected."""
+        resp = self.client.post(
+            "/api/moderation/flag/",
+            data=json.dumps({"event_id": "ev1", "target_pubkey": "pk1"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 302)
+
+    def test_api_report_flag_invalid_payload(self):
+        """Missing both event_id and target_pubkey returns 400."""
+        self.client.force_login(self.user1)
+        resp = self.client.post(
+            "/api/moderation/flag/",
+            data=json.dumps({"reason": "SPAM"}),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 400)
+        self.assertFalse(resp.json().get("success"))
+
+    @patch("apps.core.views.PolyClient.cast_vote")
+    def test_civic_vote_immune_to_community_flags(self, mock_cast_vote):
+        """Community flags and dockets NEVER disenfranchise users from civic voting."""
+        mock_cast_vote.return_value = {"receipt": "receipt_tx_poly_community_flagged"}
+
+        flagged_did = "did:key:z6MkHeavilyFlaggedAuthor"
+        flagged_user = self.User.objects.create_user(
+            username=flagged_did,
+            is_staff=False,
+        )
+
+        # Author accumulates 20 community flags -> Tier 3 Quarantine
+        for i in range(20):
+            record_community_flag(
+                reporter_did=f"did:key:z6Reporter_{i}",
+                target_pubkey=flagged_did,
+                target_event_id=f"flagged_note_{i}",
+                reason="HARASSMENT",
+            )
+
+        # Confirmed: quarantined from social feed
+        self.assertTrue(is_event_shielded({"pubkey": "any", "author_did": flagged_did}))
+
+        # But /api/vote/ is strictly enfranchised!
+        self.client.force_login(flagged_user)
+        vote_payload = {
+            "voter_did": flagged_did,
+            "signature": "valid_mock_signature_hex",
+            "vote_envelope": {
+                "poll_id": "budget_referendum_2026",
+                "choice": "NAY",
+            },
+        }
+        vote_resp = self.client.post(
+            "/api/vote/",
+            data=json.dumps(vote_payload),
+            content_type="application/json",
+        )
+        self.assertEqual(vote_resp.status_code, 200)
+        data = vote_resp.json()
+        self.assertTrue(data.get("valid"))
+        self.assertEqual(data.get("receipt"), "receipt_tx_poly_community_flagged")
+

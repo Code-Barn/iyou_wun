@@ -20,13 +20,23 @@ from typing import Any
 
 from django.core.cache import cache
 
-from .models import NodeBlockedEntity, NodeContentTakedown
+from .models import (
+    CommunityFlagLedger,
+    ModerationReviewDocket,
+    NodeBlockedEntity,
+    NodeContentTakedown,
+)
 
 logger = logging.getLogger(__name__)
+
+TIER1_BLUR_THRESHOLD = 3
+TIER2_SUPPRESS_THRESHOLD = 7
+TIER3_QUARANTINE_THRESHOLD = 15
 
 CACHE_KEY_BLOCKED_ENTITIES = "wun_shield_blocked_entities"
 CACHE_KEY_BLOCKED_EVENTS = "wun_shield_blocked_events"
 CACHE_KEY_BLOCKED_MEDIA = "wun_shield_blocked_media"
+CACHE_KEY_TIER1_EVENTS = "wun_shield_tier1_events"
 CACHE_TIMEOUT = 300  # 5 minutes
 
 
@@ -70,14 +80,30 @@ class ShieldRosters(tuple):
 
 
 def get_blocked_entities() -> set[str]:
-    """Retrieve active blocked entity identifiers (pubkey hex, DIDs) as an $O(1)$ lookup set."""
+    """Retrieve active blocked and community-quarantined (Tier 3+) entity identifiers as an $O(1)$ lookup set."""
     cached = cache.get(CACHE_KEY_BLOCKED_ENTITIES)
     if cached is not None:
         return cached
 
     entities: set[str] = set()
+    # 1. Operator blocked entities
     qs = NodeBlockedEntity.objects.filter(is_active=True).values_list("entity_identifier", flat=True)
     for identifier in qs:
+        if identifier:
+            clean = str(identifier).strip()
+            entities.add(clean)
+            entities.add(clean.lower())
+
+    # 2. Community review dockets at Tier 3 (social quarantine), unless dismissed
+    docket_pubkeys = (
+        ModerationReviewDocket.objects.filter(
+            docket_type="pubkey",
+            current_tier__gte=3,
+        )
+        .exclude(status="DISMISSED")
+        .values_list("target_identifier", flat=True)
+    )
+    for identifier in docket_pubkeys:
         if identifier:
             clean = str(identifier).strip()
             entities.add(clean)
@@ -88,18 +114,34 @@ def get_blocked_entities() -> set[str]:
 
 
 def get_blocked_events() -> set[str]:
-    """Retrieve active takedown event IDs as an $O(1)$ lookup set."""
+    """Retrieve active takedown and community-suppressed (Tier 2+) event IDs as an $O(1)$ lookup set."""
     cached = cache.get(CACHE_KEY_BLOCKED_EVENTS)
     if cached is not None:
         return cached
 
     events: set[str] = set()
+    # 1. Statutory takedowns
     qs = (
         NodeContentTakedown.objects.filter(event_id__isnull=False)
         .exclude(event_id="")
         .values_list("event_id", flat=True)
     )
     for event_id in qs:
+        if event_id:
+            clean = str(event_id).strip()
+            events.add(clean)
+            events.add(clean.lower())
+
+    # 2. Community review dockets at Tier 2 (discovery suppression) or higher, unless dismissed
+    docket_events = (
+        ModerationReviewDocket.objects.filter(
+            docket_type="event",
+            current_tier__gte=2,
+        )
+        .exclude(status="DISMISSED")
+        .values_list("target_identifier", flat=True)
+    )
+    for event_id in docket_events:
         if event_id:
             clean = str(event_id).strip()
             events.add(clean)
@@ -131,6 +173,31 @@ def get_blocked_media() -> set[str]:
     return media
 
 
+def get_tier1_event_ids() -> set[str]:
+    """Retrieve active event IDs that reached Tier 1 progressive friction (blur)."""
+    cached = cache.get(CACHE_KEY_TIER1_EVENTS)
+    if cached is not None:
+        return cached
+
+    tier1_events: set[str] = set()
+    docket_events = (
+        ModerationReviewDocket.objects.filter(
+            docket_type="event",
+            current_tier__gte=1,
+        )
+        .exclude(status="DISMISSED")
+        .values_list("target_identifier", flat=True)
+    )
+    for event_id in docket_events:
+        if event_id:
+            clean = str(event_id).strip()
+            tier1_events.add(clean)
+            tier1_events.add(clean.lower())
+
+    cache.set(CACHE_KEY_TIER1_EVENTS, tier1_events, CACHE_TIMEOUT)
+    return tier1_events
+
+
 def get_shield_rosters() -> ShieldRosters:
     """
     Return all active moderation shield rosters as a cached tuple of sets:
@@ -144,14 +211,147 @@ def get_shield_rosters() -> ShieldRosters:
 
 
 def invalidate_shield_cache() -> None:
-    """Invalidate all cached moderation shield rosters."""
+    """Invalidate all cached moderation shield rosters and friction sets."""
     for key in (
         CACHE_KEY_BLOCKED_ENTITIES,
         CACHE_KEY_BLOCKED_EVENTS,
         CACHE_KEY_BLOCKED_MEDIA,
+        CACHE_KEY_TIER1_EVENTS,
     ):
         cache.delete(key)
     logger.debug("Moderation shield cache invalidated.")
+
+
+def record_community_flag(
+    reporter_did: str,
+    target_pubkey: str,
+    target_event_id: str = "",
+    reason: str = "SPAM",
+) -> dict:
+    """
+    Ingest and deduplicate a community report/flag, update flag tallies,
+    upsert ModerationReviewDocket, dynamically update suppression caches,
+    and invalidate the shield cache.
+    """
+    clean_reporter = str(reporter_did or "").strip()
+    clean_pubkey = str(target_pubkey or "").strip()
+    clean_event_id = str(target_event_id or "").strip()
+    clean_reason = str(reason or "SPAM").strip().upper()
+
+    valid_reasons = {c[0] for c in CommunityFlagLedger.REASON_CHOICES}
+    if clean_reason not in valid_reasons:
+        clean_reason = "SPAM"
+
+    if not clean_event_id and not clean_pubkey:
+        return {"success": False, "tier": 0, "flag_count": 0}
+
+    # Deduplicate & persist to CommunityFlagLedger
+    if clean_event_id:
+        flag, created = CommunityFlagLedger.objects.get_or_create(
+            target_event_id=clean_event_id,
+            reporter_did=clean_reporter,
+            defaults={
+                "target_pubkey": clean_pubkey,
+                "reason": clean_reason,
+            },
+        )
+        if not created and (flag.reason != clean_reason or (clean_pubkey and not flag.target_pubkey)):
+            flag.reason = clean_reason
+            if clean_pubkey and not flag.target_pubkey:
+                flag.target_pubkey = clean_pubkey
+            flag.save(update_fields=["reason", "target_pubkey"])
+    else:
+        flag, created = CommunityFlagLedger.objects.get_or_create(
+            target_pubkey=clean_pubkey,
+            reporter_did=clean_reporter,
+            target_event_id="",
+            defaults={
+                "reason": clean_reason,
+            },
+        )
+        if not created and flag.reason != clean_reason:
+            flag.reason = clean_reason
+            flag.save(update_fields=["reason"])
+
+    # Tally total unique flags
+    event_flag_count = 0
+    if clean_event_id:
+        event_flag_count = CommunityFlagLedger.objects.filter(target_event_id=clean_event_id).count()
+
+    pubkey_flag_count = 0
+    if clean_pubkey:
+        pubkey_flag_count = CommunityFlagLedger.objects.filter(target_pubkey=clean_pubkey).count()
+
+    # Calculate tiers
+    def _calc_tier(count: int) -> int:
+        if count >= TIER3_QUARANTINE_THRESHOLD:
+            return 3
+        if count >= TIER2_SUPPRESS_THRESHOLD:
+            return 2
+        if count >= TIER1_BLUR_THRESHOLD:
+            return 1
+        return 0
+
+    event_tier = _calc_tier(event_flag_count) if clean_event_id else 0
+    pubkey_tier = _calc_tier(pubkey_flag_count) if clean_pubkey else 0
+
+    # Upsert ModerationReviewDocket
+    if clean_event_id:
+        docket, _ = ModerationReviewDocket.objects.get_or_create(
+            target_identifier=clean_event_id,
+            defaults={
+                "docket_type": "event",
+                "flag_count": event_flag_count,
+                "current_tier": event_tier,
+                "status": "PENDING",
+            },
+        )
+        if docket.flag_count != event_flag_count or docket.current_tier != event_tier:
+            docket.flag_count = event_flag_count
+            docket.current_tier = event_tier
+            docket.save(update_fields=["flag_count", "current_tier", "updated_at"])
+
+    if clean_pubkey and (pubkey_flag_count >= TIER1_BLUR_THRESHOLD or pubkey_tier > 0):
+        pk_docket, _ = ModerationReviewDocket.objects.get_or_create(
+            target_identifier=clean_pubkey,
+            defaults={
+                "docket_type": "pubkey",
+                "flag_count": pubkey_flag_count,
+                "current_tier": pubkey_tier,
+                "status": "PENDING",
+            },
+        )
+        if pk_docket.flag_count != pubkey_flag_count or pk_docket.current_tier != pubkey_tier:
+            pk_docket.flag_count = pubkey_flag_count
+            pk_docket.current_tier = pubkey_tier
+            pk_docket.save(update_fields=["flag_count", "current_tier", "updated_at"])
+
+    # If tally >= TIER2, add target_event_id to dynamic suppression cache
+    if clean_event_id and event_flag_count >= TIER2_SUPPRESS_THRESHOLD:
+        cached_blocked_events = cache.get(CACHE_KEY_BLOCKED_EVENTS)
+        if cached_blocked_events is not None:
+            cached_blocked_events.add(clean_event_id)
+            cached_blocked_events.add(clean_event_id.lower())
+            cache.set(CACHE_KEY_BLOCKED_EVENTS, cached_blocked_events, CACHE_TIMEOUT)
+
+    # If tally >= TIER3, add target_pubkey to dynamic quarantine cache
+    if clean_pubkey and pubkey_flag_count >= TIER3_QUARANTINE_THRESHOLD:
+        cached_blocked_entities = cache.get(CACHE_KEY_BLOCKED_ENTITIES)
+        if cached_blocked_entities is not None:
+            cached_blocked_entities.add(clean_pubkey)
+            cached_blocked_entities.add(clean_pubkey.lower())
+            cache.set(CACHE_KEY_BLOCKED_ENTITIES, cached_blocked_entities, CACHE_TIMEOUT)
+
+    invalidate_shield_cache()
+
+    target_tier = event_tier if clean_event_id else pubkey_tier
+    target_count = event_flag_count if clean_event_id else pubkey_flag_count
+
+    return {
+        "success": True,
+        "tier": target_tier,
+        "flag_count": target_count,
+    }
 
 
 def purge_blossom_blob(
@@ -265,3 +465,47 @@ def filter_shielded_events(
         return list(raw_events)
 
     return [ev for ev in raw_events if not is_event_shielded(ev, rosters=rosters)]
+
+
+def annotate_progressive_friction(
+    events: list[dict],
+    tier1_event_ids: set[str] | None = None,
+) -> list[dict]:
+    """
+    Annotate events whose ID has reached Tier 1 progressive friction with:
+    has_content_warning = True
+    warning_reason = "Flagged by community review"
+    """
+    if not events:
+        return []
+
+    if tier1_event_ids is None:
+        tier1_event_ids = get_tier1_event_ids()
+
+    if not tier1_event_ids:
+        return events
+
+    def _annotate_single(ev: Any) -> Any:
+        if isinstance(ev, dict):
+            ev_id = str(ev.get("id") or "").strip()
+            if ev_id and (ev_id in tier1_event_ids or ev_id.lower() in tier1_event_ids):
+                ev["has_content_warning"] = True
+                if not ev.get("warning_reason"):
+                    ev["warning_reason"] = "Flagged by community review"
+            if "replies" in ev and isinstance(ev["replies"], list):
+                for reply in ev["replies"]:
+                    _annotate_single(reply)
+            return ev
+        else:
+            ev_id = str(getattr(ev, "id", "") or "").strip()
+            if ev_id and (ev_id in tier1_event_ids or ev_id.lower() in tier1_event_ids):
+                try:
+                    setattr(ev, "has_content_warning", True)
+                    if not getattr(ev, "warning_reason", None):
+                        setattr(ev, "warning_reason", "Flagged by community review")
+                except Exception:
+                    pass
+            return ev
+
+    return [_annotate_single(ev) for ev in events]
+

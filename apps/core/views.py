@@ -42,7 +42,7 @@ from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import TemplateView
 from django.views import View
 from websocket import WebSocketApp
@@ -50,6 +50,11 @@ from websocket import WebSocketApp
 from services.poly_client import PolyClient, PolyConnectionError
 
 from .did_kit import b58decode, get_node_signing_key, get_public_key_hex, issue_vc
+from .moderation import (
+    annotate_progressive_friction,
+    filter_shielded_events,
+    record_community_flag,
+)
 from .models import HandleVerificationChallenge, IssuedCredential, UserLinkDeck, UserLinkItem
 from .utils import validate_external_bio_url, verify_external_profile_token
 
@@ -818,6 +823,8 @@ class FeedView(TemplateView):
                     dep_ctx,
                     viewer_id=self.request.user.username if self.request.user.is_authenticated else None,
                 )
+            notes = filter_shielded_events(notes)
+            notes = annotate_progressive_friction(notes)
             notes = attach_social_counts(
                 notes, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
             )
@@ -1358,11 +1365,15 @@ def api_feed(request):
             dep_ctx,
             viewer_id=request.user.username if (request.user and request.user.is_authenticated) else None,
         )
+    roots = filter_shielded_events(roots)
+    roots = annotate_progressive_friction(roots)
 
     # Serialize the flat reply map for JS client-side assembly
     replies_serialized = {}
     for pid, replies in feed_data.get("replies", {}).items():
-        replies_serialized[pid] = [_serialize(r) for r in replies]
+        filtered_replies = filter_shielded_events([_serialize(r) for r in replies])
+        annotated_replies = annotate_progressive_friction(filtered_replies)
+        replies_serialized[pid] = annotated_replies
 
     oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
     has_more = bool(roots and len(roots) > 0)
@@ -1382,6 +1393,51 @@ def api_feed(request):
         "trending_tags_iyou": trending_tags_iyou,
         "trending_tags_global": trending_tags_global,
         "trending_tags": trending_tags_iyou or trending_tags_global,
+    })
+
+
+@login_required
+@require_POST
+def api_report_flag(request):
+    """
+    Ingest a community report / flag for progressive friction evaluation.
+    Accepts JSON or form data: event_id, target_pubkey, reason.
+    """
+    event_id = ""
+    target_pubkey = ""
+    reason = "SPAM"
+
+    if request.content_type == "application/json":
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+            if isinstance(data, dict):
+                event_id = data.get("event_id") or data.get("target_event_id") or ""
+                target_pubkey = data.get("target_pubkey") or data.get("pubkey") or ""
+                reason = data.get("reason") or "SPAM"
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JsonResponse({"success": False, "error": "Invalid JSON payload"}, status=400)
+    else:
+        event_id = request.POST.get("event_id") or request.POST.get("target_event_id") or ""
+        target_pubkey = request.POST.get("target_pubkey") or request.POST.get("pubkey") or ""
+        reason = request.POST.get("reason") or "SPAM"
+
+    if not event_id and not target_pubkey:
+        return JsonResponse(
+            {"success": False, "error": "Either event_id or target_pubkey must be provided"},
+            status=400,
+        )
+
+    res = record_community_flag(
+        reporter_did=request.user.username,
+        target_pubkey=target_pubkey,
+        target_event_id=event_id,
+        reason=reason,
+    )
+
+    return JsonResponse({
+        "success": True,
+        "tier": res.get("tier", 0),
+        "flag_count": res.get("flag_count", 0),
     })
 
 

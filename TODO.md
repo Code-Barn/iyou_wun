@@ -538,7 +538,7 @@
 - [x] Add `NodeBlockedEntity` and `NodeContentTakedown` models to `apps/core/models.py`
 - [x] Run migrations for local suppression tables
 - [x] Implement `apps/core/moderation.py` with in-memory caching and Blossom port 9002 DELETE purging
-- [ ] Hook `filter_shielded_events()` into `FeedView`, `api_feed()`, and thread lookup in `apps/core/views.py`
+- [x] Hook `filter_shielded_events()` into `FeedView`, `api_feed()`, and thread lookup in `apps/core/views.py`
 - [x] Implement `/desk/moderation/` view in `apps/core/views_admin.py` protected by `is_staff`
 - [x] Create UI partial `templates/admin/moderation_desk.html` matching ecosystem Tailwind styles
 - [x] Write unit tests in `apps/core/tests/test_moderation_shield.py` (target: 100% pass)
@@ -546,9 +546,9 @@
 #### Phase 30 — Community Flag Aggregation & Progressive Friction Engine
 - [x] Implement `CommunityFlagLedger` and `ModerationReviewDocket` models in `apps/core/models.py`
 - [x] Run migrations for community flag indexing tables
-- [ ] Implement flag aggregation, threshold evaluation, and NIP-36 dynamic injection in `apps/core/moderation.py`
-- [ ] Create `POST /api/moderation/flag/` endpoint in `apps/core/views.py` wired to `_report_modal.html`
+- [x] Implement flag aggregation, threshold evaluation, and NIP-36 dynamic injection in `apps/core/moderation.py`
+- [x] Create `POST /api/moderation/flag/` endpoint in `apps/core/views.py` wired to `_report_modal.html`
 - [ ] Add Review Docket tab and threshold config controls to `templates/admin/moderation_desk.html` and `apps/core/views_admin.py`
-- [ ] Author automated unit tests in `apps/core/tests/test_community_moderation.py`
+- [x] Author automated unit tests in `apps/core/tests/test_moderation_shield.py` (ProgressiveFrictionTests)
 
 

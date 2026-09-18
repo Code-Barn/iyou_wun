@@ -1,0 +1,82 @@
+{% comment %}
+Copyright (C) 2026 David Byers dba Byers Brands
+Licensed under GNU General Public License v3 or later.
+{% endcomment %}
+
+<div id="reportModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 font-mono text-xs backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="report-modal-title">
+  <div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">
+    <!-- Header -->
+    <div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
+      <div class="flex items-center gap-2">
+        <span class="text-rose-600 dark:text-rose-400 font-bold text-sm">⚠️</span>
+        <h3 id="report-modal-title" class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Report Note (NIP-56 Kind 1984)</h3>
+      </div>
+      <button type="button" onclick="closeReportModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-base leading-none transition-colors" aria-label="Close modal">&times;</button>
+    </div>
+    
+    <!-- Body -->
+    <div class="p-4 space-y-3">
+      <p class="text-slate-500 dark:text-slate-400 text-xs">
+        Flag this note for progressive friction and operator review. Reports are cryptographically signed and broadcast across the mesh.
+      </p>
+
+      <div class="space-y-2" id="report-modal-reasons">
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="SPAM" checked class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Spam / Flooding</span>
+            <span class="text-[10px] text-slate-400">Automated botting, commercial spam, or phishing</span>
+          </div>
+        </label>
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="NUDITY_NSFW" class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Unmarked Adult Content</span>
+            <span class="text-[10px] text-slate-400">Nudity or NSFW media lacking NIP-36 content warnings</span>
+          </div>
+        </label>
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="HARASSMENT" class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Abuse / Targeted Harassment</span>
+            <span class="text-[10px] text-slate-400">Doxxing, severe threats, or targeted abusive campaigns</span>
+          </div>
+        </label>
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="ILLEGAL" class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Illegal / Contraband</span>
+            <span class="text-[10px] text-slate-400">Statutory violations requiring safe harbor takedown</span>
+          </div>
+        </label>
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="MALWARE" class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Malicious Links / Exploits</span>
+            <span class="text-[10px] text-slate-400">Malware distribution, credential harvesters, or exploits</span>
+          </div>
+        </label>
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="MISINFO" class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Deceptive Content</span>
+            <span class="text-[10px] text-slate-400">Intentional disinformation or coordinated manipulation</span>
+          </div>
+        </label>
+        <label class="flex items-center gap-2.5 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer transition">
+          <input type="radio" name="report-reason" value="OTHER" class="accent-rose-600">
+          <div class="flex flex-col">
+            <span class="text-slate-800 dark:text-slate-200 font-medium">Other Violation</span>
+            <span class="text-[10px] text-slate-400">Other community policy infringement</span>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/50 dark:bg-slate-900/50">
+      <button type="button" onclick="closeReportModal()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition">Cancel</button>
+      <button type="button" id="report-submit-btn" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-medium rounded transition shadow-sm">Submit Report</button>
+    </div>
+  </div>
+</div>

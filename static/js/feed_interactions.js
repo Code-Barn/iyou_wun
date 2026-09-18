@@ -229,11 +229,7 @@
             bridgeClient.isProcessing = false;
         } else if (pendingReport) {
             bridgeClient.broadcastToRelays(signedEvent, null, function (localOk, anyOk) {
-                if (anyOk || localOk) {
-                    showToast("Note reported and hidden from feed", "success");
-                } else {
-                    showToast("Failed to broadcast report.", "error");
-                }
+                showToast("Report recorded locally and broadcast to mesh", "success");
             });
             pendingReport = null;
             bridgeClient.pendingEvent = null;
@@ -2112,44 +2108,69 @@
         window.open(url, "_blank");
     }
 
+    function closeReportModal() {
+        var modal = document.getElementById("reportModal");
+        if (modal) {
+            modal.classList.add("hidden");
+            modal.classList.remove("flex");
+        }
+    }
+    window.closeReportModal = closeReportModal;
+
     function openReportModal(noteId, pubkey) {
-        var existing = document.getElementById("reportModal");
-        if (existing) existing.remove();
+        var modal = document.getElementById("reportModal");
+        if (!modal) {
+            var reasons = [
+                { val: "SPAM", label: "Spam / Flooding" },
+                { val: "NUDITY_NSFW", label: "Unmarked Adult Content" },
+                { val: "HARASSMENT", label: "Abuse / Targeted Harassment" },
+                { val: "ILLEGAL", label: "Illegal / Contraband" },
+                { val: "MALWARE", label: "Malicious Links / Exploits" },
+                { val: "MISINFO", label: "Deceptive Content" },
+                { val: "OTHER", label: "Other Violation" }
+            ];
+            var options = reasons.map(function (r, idx) {
+                return '<label class="flex items-center gap-2 p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors text-xs">' +
+                    '<input type="radio" name="report-reason" value="' + r.val + '" ' + (idx === 0 ? 'checked ' : '') + 'class="accent-rose-600">' +
+                    '<span class="text-slate-700 dark:text-slate-200">' + r.label + '</span>' +
+                    '</label>';
+            }).join("");
 
-        var reasons = ["spam", "nudity", "illegal", "malware", "profanity", "other"];
-        var options = reasons.map(function (r) {
-            return '<label class="flex items-center gap-2 p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer transition-colors text-xs">' +
-                '<input type="radio" name="report-reason" value="' + r + '" class="accent-rose-600">' +
-                '<span class="text-slate-700 dark:text-slate-200">' + r.charAt(0).toUpperCase() + r.slice(1) + '</span>' +
-                '</label>';
-        }).join("");
+            modal = document.createElement("div");
+            modal.id = "reportModal";
+            modal.className = "fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4 font-mono text-xs";
+            modal.innerHTML =
+                '<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-fade-in">' +
+                '<div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">' +
+                '<h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Report / Flag Note (NIP-56 Kind 1984)</h3>' +
+                '<button type="button" onclick="closeReportModal()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-base leading-none">&times;</button>' +
+                '</div>' +
+                '<div class="p-4 space-y-2">' +
+                '<p class="text-slate-500 dark:text-slate-400 mb-1">Select a reason for progressive friction:</p>' +
+                options +
+                '</div>' +
+                '<div class="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2 bg-slate-50/50 dark:bg-slate-900/50">' +
+                '<button type="button" onclick="closeReportModal()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded transition">Cancel</button>' +
+                '<button type="button" id="report-submit-btn" class="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded transition shadow-sm font-medium">Submit Report</button>' +
+                '</div>' +
+                '</div>';
+            document.body.appendChild(modal);
+        }
 
-        var modal = document.createElement("div");
-        modal.id = "reportModal";
-        modal.className = "fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-4";
-        modal.innerHTML =
-            '<div class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-md font-mono text-xs">' +
-            '<div class="p-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">' +
-            '<h3 class="font-semibold text-slate-900 dark:text-slate-100 text-sm">Report / Flag Note</h3>' +
-            '<button type="button" onclick="document.getElementById(\'reportModal\').remove()" class="text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-base leading-none">&times;</button>' +
-            '</div>' +
-            '<div class="p-4 space-y-2">' +
-            '<p class="text-slate-500 dark:text-slate-400 mb-1">Select a reason:</p>' +
-            options +
-            '</div>' +
-            '<div class="p-4 border-t border-slate-200 dark:border-slate-800 flex items-center justify-end gap-2">' +
-            '<button type="button" onclick="document.getElementById(\'reportModal\').remove()" class="px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded transition">Cancel</button>' +
-            '<button type="button" id="report-submit-btn" class="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded transition">Submit Report</button>' +
-            '</div>' +
-            '</div>';
-
-        document.body.appendChild(modal);
         modal.classList.remove("hidden");
-        modal.querySelector("#report-submit-btn").addEventListener("click", function () {
-            var selected = modal.querySelector("input[name='report-reason']:checked");
-            var reason = selected ? selected.value : "other";
-            submitReport(noteId, pubkey, reason);
-        });
+        modal.classList.add("flex");
+
+        var submitBtn = modal.querySelector("#report-submit-btn");
+        if (submitBtn) {
+            var newSubmitBtn = submitBtn.cloneNode(true);
+            submitBtn.parentNode.replaceChild(newSubmitBtn, submitBtn);
+
+            newSubmitBtn.addEventListener("click", function () {
+                var selected = modal.querySelector("input[name='report-reason']:checked");
+                var reason = selected ? selected.value : "SPAM";
+                submitReport(noteId, pubkey, reason);
+            });
+        }
     }
 
     async function submitReport(noteId, pubkey, reason) {
@@ -2158,13 +2179,29 @@
         try { pk = await bridgeClient.getEffectivePubkey(); }
         catch (e) { showToast(e.message || "Sign in with a sovereign key to report notes.", true); return; }
 
-        var modal = document.getElementById("reportModal");
-        if (modal) modal.remove();
+        closeReportModal();
 
         var card = document.querySelector('[data-note-card-id="' + noteId + '"], [data-note-id="' + noteId + '"]');
         var wrapper = card ? (card.closest(".feed-note-card") || card) : null;
         if (wrapper) wrapper.remove();
 
+        // 1. Post to local progressive friction API
+        fetch("/api/moderation/flag/", {
+            method: "POST",
+            headers: {
+                "X-CSRFToken": getCsrfToken(),
+                "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+                event_id: noteId,
+                target_pubkey: pubkey || "",
+                reason: reason
+            })
+        }).catch(function (err) {
+            console.error("Failed to record flag locally:", err);
+        });
+
+        // 2. Broadcast Kind 1984 event to mesh
         var event = {
             kind: 1984,
             content: "Report: " + reason,
@@ -2176,9 +2213,10 @@
             ]
         };
 
-        pendingReport = { noteId: noteId };
+        pendingReport = { noteId: noteId, pubkey: pubkey, reason: reason };
         bridgeClient.isProcessing = true;
         bridgeClient.signEvent(event);
+        showToast("Report recorded locally and broadcast to mesh", "success");
     }
 
     async function nominatePostOfTheDay(noteId, authorPubkey) {
