@@ -23,6 +23,7 @@ from django.views.decorators.http import require_http_methods
 
 from .models import (
     CommunityFlagLedger,
+    ModerationAppeal,
     ModerationReviewDocket,
     NodeBlockedEntity,
     NodeContentTakedown,
@@ -223,12 +224,72 @@ def moderation_console(request):
             else:
                 messages.error(request, "Review docket target not found.")
 
+        elif action == "appeal_resolve":
+            appeal_id = request.POST.get("appeal_id")
+            decision = request.POST.get("decision", "").strip().lower()
+
+            appeal = None
+            if appeal_id:
+                try:
+                    appeal = ModerationAppeal.objects.select_related("docket").get(id=int(appeal_id))
+                except (ModerationAppeal.DoesNotExist, ValueError):
+                    appeal = None
+
+            if appeal:
+                docket = appeal.docket
+                if decision in ("accept", "accepted"):
+                    appeal.status = "ACCEPTED"
+                    appeal.reviewed_by_did = request.user.username
+                    appeal.save(update_fields=["status", "reviewed_by_did", "updated_at"])
+
+                    if docket:
+                        docket.status = "DISMISSED"
+                        docket.reviewed_by_did = request.user.username
+                        docket.save(update_fields=["status", "reviewed_by_did", "updated_at"])
+
+                    invalidate_shield_cache()
+                    messages.success(
+                        request,
+                        f"Appeal #{appeal.id} accepted. Restored target '{docket.target_identifier[:32] if docket else ''}' and cleared instance friction.",
+                    )
+                    logger.info(
+                        "Admin %s accepted moderation appeal #%s for docket #%s (%s)",
+                        request.user.username,
+                        appeal.id,
+                        docket.id if docket else None,
+                        docket.target_identifier if docket else "",
+                    )
+                elif decision in ("reject", "rejected"):
+                    appeal.status = "REJECTED"
+                    appeal.reviewed_by_did = request.user.username
+                    appeal.save(update_fields=["status", "reviewed_by_did", "updated_at"])
+
+                    invalidate_shield_cache()
+                    messages.warning(
+                        request,
+                        f"Appeal #{appeal.id} rejected. Enforcement maintained on '{docket.target_identifier[:32] if docket else ''}'.",
+                    )
+                    logger.info(
+                        "Admin %s rejected moderation appeal #%s for docket #%s",
+                        request.user.username,
+                        appeal.id,
+                        docket.id if docket else None,
+                    )
+                else:
+                    messages.error(request, f"Invalid decision '{decision}'. Expected 'accept' or 'reject'.")
+            else:
+                messages.error(request, "Target appeal not found.")
+
         return redirect("moderation_console")
 
     # Pass the 25 most recent takedowns, blocked entities, and pending review dockets
     blocked_entities = NodeBlockedEntity.objects.filter(is_active=True).order_by("-created_at")[:25]
     recent_takedowns = NodeContentTakedown.objects.all().order_by("-created_at")[:25]
-    pending_dockets = list(ModerationReviewDocket.objects.filter(status="PENDING").order_by("-flag_count")[:50])
+    pending_dockets = list(
+        ModerationReviewDocket.objects.filter(status="PENDING")
+        .prefetch_related("appeals")
+        .order_by("-flag_count")[:50]
+    )
 
     for d in pending_dockets:
         if d.docket_type == "event":
@@ -236,6 +297,7 @@ def moderation_console(request):
         else:
             flags = CommunityFlagLedger.objects.filter(target_pubkey=d.target_identifier).values_list("reason", flat=True)
         d.reasons_summary = dict(Counter(flags))
+        d.active_appeal = next((a for a in d.appeals.all() if a.status == "PENDING"), None)
 
     context = {
         "blocked_entities": blocked_entities,

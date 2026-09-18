@@ -384,6 +384,7 @@
         var nsfwPref = "blur";
         var streamLang = "all";
         var noisePref = true;
+        var shieldSensitivity = "standard";
         var hiddenNotes = [];
         var mutedPubkeys = [];
         var blockedPubkeys = [];
@@ -392,6 +393,7 @@
             streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
             var rawNoise = localStorage.getItem("wun_noise_pref");
             noisePref = (rawNoise !== "false" && rawNoise !== "disabled");
+            shieldSensitivity = localStorage.getItem("wun_shield_sensitivity") || "standard";
             var rawHidden = localStorage.getItem("wun_hidden_notes");
             if (rawHidden) hiddenNotes = JSON.parse(rawHidden);
             var rawMuted = localStorage.getItem("wun_muted_pubkeys");
@@ -404,6 +406,7 @@
             streamLang: streamLang,
             langPref: streamLang,
             noisePref: noisePref,
+            shieldSensitivity: shieldSensitivity,
             hiddenNotes: hiddenNotes,
             mutedPubkeys: mutedPubkeys,
             blockedPubkeys: blockedPubkeys
@@ -469,47 +472,108 @@
             return false;
         }
 
-        // 3. NSFW / Content Warning Check
+        // 3. NSFW / Content Warning / Shield Sensitivity Check
+        var shieldSensitivity = (prefs.shieldSensitivity || "standard").toLowerCase();
+
+        var tier = 0;
+        if (card.dataset) {
+            if (card.dataset.tier) tier = parseInt(card.dataset.tier, 10) || 0;
+            else if (card.dataset.isSuppressed === "true") tier = 2;
+        }
+        if (!tier) {
+            var rawTier = card.getAttribute("data-tier");
+            if (rawTier) tier = parseInt(rawTier, 10) || 0;
+            else if (card.getAttribute("data-is-suppressed") === "true") tier = 2;
+        }
+
         var hasCw = (card.dataset && (card.dataset.hasCw === "true" || card.dataset.hasContentWarning === "true")) ||
                     card.getAttribute("data-has-cw") === "true" ||
                     card.getAttribute("data-has-content-warning") === "true" ||
                     (data && data.root && (data.root.getAttribute("data-has-cw") === "true" || data.root.getAttribute("data-has-content-warning") === "true" || (data.root.dataset && (data.root.dataset.hasCw === "true" || data.root.dataset.hasContentWarning === "true")))) ||
                     !!card.querySelector(".content-warning-shield") ||
                     !!card.querySelector(".sensitive-content-warning");
-        if (nsfwPref === "hide" && hasCw) {
-            card.classList.add("sr-hidden");
-            return false;
-        } else {
+
+        if (shieldSensitivity === "raw_mesh") {
+            // Raw Mesh: Never hide Tier 1 or Tier 2; display unblurred with subtle flag badge
             card.classList.remove("sr-hidden");
+        } else if (shieldSensitivity === "strict") {
+            // Strict: Hide Tier 1 and Tier 2
+            if (hasCw || tier >= 1) {
+                card.classList.add("sr-hidden");
+                return false;
+            }
+        } else {
+            // Standard: blur Tier 1, hide Tier 2
+            if (tier >= 2) {
+                card.classList.add("sr-hidden");
+                return false;
+            }
+            if (nsfwPref === "hide" && hasCw) {
+                card.classList.add("sr-hidden");
+                return false;
+            } else {
+                card.classList.remove("sr-hidden");
+            }
         }
 
         return true;
     }
 
     function applyNsfwBlurState(pref) {
-        var nsfwPref = pref || (getSafetyPreferences().nsfwPref);
+        var safetyPrefs = getSafetyPreferences();
+        var nsfwPref = pref || safetyPrefs.nsfwPref;
+        var shieldSensitivity = (safetyPrefs.shieldSensitivity || "standard").toLowerCase();
+
         var shields = document.querySelectorAll(".content-warning-shield, .sensitive-content-warning");
         shields.forEach(function (shield) {
             var blurEls = shield.querySelectorAll(".blur-me, .blur-lg, .blur-sm");
             var btns = shield.querySelectorAll(".content-warning-reveal, .sensitive-content-overlay");
-            if (nsfwPref === "show") {
+
+            if (shieldSensitivity === "raw_mesh") {
+                // In Raw Mesh mode, bypass blur and render a subtle warning chip instead of suppressing
+                blurEls.forEach(function (el) {
+                    el.classList.remove("blur-me", "blur-lg", "blur-sm", "filter", "backdrop-blur-md", "select-none", "pointer-events-none");
+                });
+                btns.forEach(function (btn) {
+                    btn.classList.add("hidden");
+                    btn.style.display = "none";
+                });
+                if (!shield.querySelector(".raw-mesh-warning-chip")) {
+                    var chip = document.createElement("div");
+                    chip.className = "raw-mesh-warning-chip px-2 py-0.5 mb-1.5 inline-flex items-center gap-1 rounded bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-mono font-medium";
+                    chip.innerHTML = '<span>⚠️ Community Flagged (Raw Mesh View)</span>';
+                    shield.insertBefore(chip, shield.firstChild);
+                }
+            } else if (nsfwPref === "show") {
                 blurEls.forEach(function (el) {
                     el.classList.remove("blur-me", "blur-lg", "blur-sm", "filter", "backdrop-blur-md", "select-none", "pointer-events-none");
                 });
                 btns.forEach(function (btn) {
                     btn.classList.add("hidden");
                 });
+                var existingChip = shield.querySelector(".raw-mesh-warning-chip");
+                if (existingChip) existingChip.remove();
             } else if (nsfwPref === "blur") {
+                var existingChip2 = shield.querySelector(".raw-mesh-warning-chip");
+                if (existingChip2) existingChip2.remove();
                 if (!shield.classList.contains("user-revealed")) {
                     blurEls.forEach(function (el) {
                         el.classList.add("backdrop-blur-md", "blur-sm", "select-none", "pointer-events-none");
                     });
                     btns.forEach(function (btn) {
                         btn.classList.remove("hidden");
+                        btn.style.display = "";
                     });
                 }
             }
         });
+
+        // Also check any standalone .blur-me elements in raw_mesh mode
+        if (shieldSensitivity === "raw_mesh") {
+            document.querySelectorAll(".blur-me").forEach(function (el) {
+                el.classList.remove("blur-me", "blur-lg", "blur-sm", "filter", "backdrop-blur-md", "select-none", "pointer-events-none");
+            });
+        }
     }
 
     function updateNsfwShieldStatusUI(pref) {

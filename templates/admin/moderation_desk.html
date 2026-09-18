@@ -277,8 +277,55 @@
           <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs font-mono">
             {% for docket in pending_dockets %}
             <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
-              <td class="px-6 py-3.5 font-bold text-slate-900 dark:text-slate-100 max-w-xs truncate" title="{{ docket.target_identifier }}">
-                {{ docket.target_identifier }}
+              <td class="px-6 py-3.5 font-bold text-slate-900 dark:text-slate-100 max-w-xs">
+                <div class="truncate" title="{{ docket.target_identifier }}">{{ docket.target_identifier }}</div>
+                {% if docket.active_appeal %}
+                <div class="mt-1.5">
+                  <details class="group">
+                    <summary class="cursor-pointer inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30 hover:bg-amber-500/25 transition">
+                      <span>💬 Appeal Submitted</span>
+                      <span class="text-[9px] text-amber-500 group-open:rotate-180 transition-transform">▼</span>
+                    </summary>
+                    <div class="mt-2 p-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-2 text-xs font-mono font-normal">
+                      <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>Appellant: <strong class="text-slate-800 dark:text-slate-200">{{ docket.active_appeal.appellant_did|truncatechars:24 }}</strong></span>
+                        <span>{{ docket.active_appeal.created_at|date:"Y-m-d H:i" }}</span>
+                      </div>
+                      <div class="p-2 bg-white/70 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 rounded-lg text-slate-800 dark:text-slate-200 whitespace-pre-wrap break-words">
+                        "{{ docket.active_appeal.statement }}"
+                      </div>
+                      <div class="flex items-center gap-2 pt-1">
+                        <form method="POST" class="inline">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="appeal_resolve">
+                          <input type="hidden" name="appeal_id" value="{{ docket.active_appeal.id }}">
+                          <input type="hidden" name="decision" value="accept">
+                          <button
+                            type="submit"
+                            class="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-mono text-[11px] font-medium shadow-sm transition flex items-center gap-1"
+                            title="Accept appeal and restore visibility"
+                          >
+                            <span>✓ Accept &amp; Restore</span>
+                          </button>
+                        </form>
+                        <form method="POST" class="inline">
+                          {% csrf_token %}
+                          <input type="hidden" name="action" value="appeal_resolve">
+                          <input type="hidden" name="appeal_id" value="{{ docket.active_appeal.id }}">
+                          <input type="hidden" name="decision" value="reject">
+                          <button
+                            type="submit"
+                            class="px-2.5 py-1 rounded-lg bg-rose-600/90 hover:bg-rose-700 text-white font-mono text-[11px] font-medium shadow-sm transition flex items-center gap-1"
+                            title="Reject appeal and maintain enforcement"
+                          >
+                            <span>✕ Reject Appeal</span>
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+                  </details>
+                </div>
+                {% endif %}
               </td>
               <td class="px-6 py-3.5">
                 {% if docket.docket_type == "event" %}

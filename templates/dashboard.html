@@ -236,7 +236,22 @@
             <p class="text-[11px] text-slate-400">Hides notes in the global firehose that do not match your preferred reading languages.</p>
           </div>
 
-          <!-- 3. Machine Noise Gate -->
+          <!-- 3. Instance Shield Sensitivity (Progressive Friction Lens) -->
+          <div class="space-y-1.5 bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 md:col-span-2">
+            <label for="setting-shield-sensitivity" class="block font-semibold text-slate-800 dark:text-slate-200">
+              Instance Shield Sensitivity
+            </label>
+            <select id="setting-shield-sensitivity"
+                    onchange="saveFeedHygienePreferences()"
+                    class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg p-2 text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500">
+              <option value="standard">Standard (Default: blur Tier 1, hide Tier 2)</option>
+              <option value="strict">Strict (Hide Tier 1 and Tier 2)</option>
+              <option value="raw_mesh">Raw Mesh (Never hide Tier 1/2; display unblurred with subtle flag badge)</option>
+            </select>
+            <p class="text-[10px] text-slate-400">Determines client-side sensitivity for progressive moderation thresholds and community flag friction.</p>
+          </div>
+
+          <!-- 4. Machine Noise Gate -->
           <div class="md:col-span-2 flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800">
             <div class="space-y-0.5 pr-4">
               <label for="setting-noise-gate" class="font-semibold text-slate-800 dark:text-slate-200 cursor-pointer">
@@ -970,27 +985,32 @@
     var nsfwPref = "blur";
     var streamLang = "all";
     var noisePref = true;
+    var shieldSensitivity = "standard";
 
     try {
       nsfwPref = localStorage.getItem("wun_nsfw_pref") || "blur";
       streamLang = localStorage.getItem("wun_stream_lang") || localStorage.getItem("wun_lang_pref") || "all";
       var rawNoise = localStorage.getItem("wun_noise_pref");
       noisePref = (rawNoise !== "false" && rawNoise !== "disabled");
+      shieldSensitivity = localStorage.getItem("wun_shield_sensitivity") || "standard";
     } catch (e) {}
 
     var nsfwEl = document.getElementById("setting-nsfw-pref");
     var langEl = document.getElementById("setting-stream-lang") || document.getElementById("setting-lang-pref");
     var noiseEl = document.getElementById("setting-noise-gate") || document.getElementById("setting-noise-pref");
+    var shieldEl = document.getElementById("setting-shield-sensitivity");
 
     if (nsfwEl) nsfwEl.value = nsfwPref;
     if (langEl) langEl.value = streamLang;
     if (noiseEl) noiseEl.checked = noisePref;
+    if (shieldEl) shieldEl.value = shieldSensitivity;
   }
 
   function saveFeedHygienePreferences() {
     var nsfwEl = document.getElementById("setting-nsfw-pref");
     var langEl = document.getElementById("setting-stream-lang") || document.getElementById("setting-lang-pref");
     var noiseEl = document.getElementById("setting-noise-gate") || document.getElementById("setting-noise-pref");
+    var shieldEl = document.getElementById("setting-shield-sensitivity");
 
     if (nsfwEl) localStorage.setItem("wun_nsfw_pref", nsfwEl.value);
     if (langEl) {
@@ -998,6 +1018,7 @@
       localStorage.setItem("wun_lang_pref", langEl.value);
     }
     if (noiseEl) localStorage.setItem("wun_noise_pref", noiseEl.checked ? "true" : "false");
+    if (shieldEl) localStorage.setItem("wun_shield_sensitivity", shieldEl.value);
 
     if (typeof showToast === "function") {
       showToast("Settings updated", "info");
