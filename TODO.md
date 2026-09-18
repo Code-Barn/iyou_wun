@@ -548,7 +548,7 @@
 - [x] Run migrations for community flag indexing tables
 - [x] Implement flag aggregation, threshold evaluation, and NIP-36 dynamic injection in `apps/core/moderation.py`
 - [x] Create `POST /api/moderation/flag/` endpoint in `apps/core/views.py` wired to `_report_modal.html`
-- [ ] Add Review Docket tab and threshold config controls to `templates/admin/moderation_desk.html` and `apps/core/views_admin.py`
-- [x] Author automated unit tests in `apps/core/tests/test_moderation_shield.py` (ProgressiveFrictionTests)
+- [x] Add Review Docket section and confirmation/dismissal actions to `templates/admin/moderation_desk.html` and `apps/core/views_admin.py`
+- [x] Author automated unit tests in `apps/core/tests/test_community_moderation.py` and `test_moderation_shield.py`
 
 

@@ -40,6 +40,10 @@
       <!-- Quick Metrics Counters -->
       <div class="flex items-center gap-3 text-xs font-mono">
         <div class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 flex items-center gap-2">
+          <span class="text-slate-400">Review Dockets:</span>
+          <span class="font-bold text-amber-600 dark:text-amber-400">{{ total_docket_count }}</span>
+        </div>
+        <div class="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700/60 flex items-center gap-2">
           <span class="text-slate-400">Blocked Entities:</span>
           <span class="font-bold text-rose-600 dark:text-rose-400">{{ total_blocked_count }}</span>
         </div>
@@ -241,6 +245,129 @@
 
   <!-- Management Tables Section -->
   <div class="space-y-6">
+
+    <!-- Table 0: Community Review Docket -->
+    <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden" id="community-review-docket">
+      <div class="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between bg-slate-50/60 dark:bg-slate-950/40">
+        <div class="flex items-center gap-2.5">
+          <span class="text-base">📋</span>
+          <div>
+            <h3 class="text-sm font-bold text-slate-900 dark:text-slate-100">Community Review Docket</h3>
+            <p class="text-xs font-mono text-slate-400">Decentralized peer reports (NIP-56 Kind 1984) pending operator confirmation or dismissal</p>
+          </div>
+        </div>
+        <span class="px-2.5 py-1 rounded-lg text-xs font-mono bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 font-bold">
+          {{ pending_dockets|length }} Pending
+        </span>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-100/60 dark:bg-slate-950/60 border-b border-slate-200 dark:border-slate-800 text-[11px] font-mono text-slate-500 uppercase tracking-wider">
+              <th class="px-6 py-3">Target Identifier</th>
+              <th class="px-6 py-3">Type</th>
+              <th class="px-6 py-3">Flags</th>
+              <th class="px-6 py-3">Assigned Tier</th>
+              <th class="px-6 py-3">Reasons Breakdown</th>
+              <th class="px-6 py-3">Logged Date</th>
+              <th class="px-6 py-3 text-right">Operator Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100 dark:divide-slate-800/60 text-xs font-mono">
+            {% for docket in pending_dockets %}
+            <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/20 transition">
+              <td class="px-6 py-3.5 font-bold text-slate-900 dark:text-slate-100 max-w-xs truncate" title="{{ docket.target_identifier }}">
+                {{ docket.target_identifier }}
+              </td>
+              <td class="px-6 py-3.5">
+                {% if docket.docket_type == "event" %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-500/20 font-medium">
+                    Nostr Event
+                  </span>
+                {% else %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 font-medium">
+                    Author DID/Key
+                  </span>
+                {% endif %}
+              </td>
+              <td class="px-6 py-3.5">
+                <span class="font-bold text-slate-900 dark:text-slate-100">{{ docket.flag_count }}</span>
+                <span class="text-slate-400 text-[10px]">flags</span>
+              </td>
+              <td class="px-6 py-3.5">
+                {% if docket.current_tier >= 3 %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                    Tier 3: Quarantine
+                  </span>
+                {% elif docket.current_tier == 2 %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20">
+                    Tier 2: Suppressed
+                  </span>
+                {% elif docket.current_tier == 1 %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    Tier 1: Blur
+                  </span>
+                {% else %}
+                  <span class="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-500 border border-slate-200 dark:border-slate-700">
+                    Tier 0: Normal
+                  </span>
+                {% endif %}
+              </td>
+              <td class="px-6 py-3.5 max-w-xs">
+                <div class="flex flex-wrap gap-1">
+                  {% for r_name, r_count in docket.reasons_summary.items %}
+                    <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700/80">
+                      {{ r_name }} ({{ r_count }})
+                    </span>
+                  {% empty %}
+                    <span class="text-slate-400 text-[10px]">—</span>
+                  {% endfor %}
+                </div>
+              </td>
+              <td class="px-6 py-3.5 text-slate-400">
+                {{ docket.created_at|date:"Y-m-d H:i" }}
+              </td>
+              <td class="px-6 py-3.5 text-right">
+                <div class="flex items-center justify-end gap-1.5">
+                  <form method="POST" class="inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="docket_confirm">
+                    <input type="hidden" name="docket_id" value="{{ docket.id }}">
+                    <button
+                      type="submit"
+                      class="px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-mono text-[11px] font-medium shadow-sm transition flex items-center gap-1"
+                      title="Elevate to permanent takedown"
+                    >
+                      <span>⚖️ Confirm Takedown</span>
+                    </button>
+                  </form>
+                  <form method="POST" class="inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="docket_dismiss">
+                    <input type="hidden" name="docket_id" value="{{ docket.id }}">
+                    <button
+                      type="submit"
+                      class="px-2.5 py-1 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-mono text-[11px] transition flex items-center gap-1"
+                      title="Dismiss flags and restore visibility"
+                    >
+                      <span>✕ Dismiss / Restore</span>
+                    </button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% empty %}
+            <tr>
+              <td colspan="7" class="px-6 py-8 text-center text-slate-400 dark:text-slate-500 font-mono text-xs">
+                No pending community review dockets. All peer reports resolved.
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
 
     <!-- Table 1: Active Blocked Entities -->
     <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">

@@ -13,6 +13,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+from collections import Counter
 import logging
 
 from django.contrib import messages
@@ -20,7 +21,12 @@ from django.contrib.auth.decorators import user_passes_test
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
 
-from .models import NodeBlockedEntity, NodeContentTakedown
+from .models import (
+    CommunityFlagLedger,
+    ModerationReviewDocket,
+    NodeBlockedEntity,
+    NodeContentTakedown,
+)
 from .moderation import invalidate_shield_cache, purge_blossom_blob
 
 logger = logging.getLogger(__name__)
@@ -142,17 +148,102 @@ def moderation_console(request):
                 messages.success(request, "Content takedown revoked.")
                 logger.info("Admin %s revoked takedown id %s", request.user.username, takedown_id)
 
+        elif action == "docket_confirm":
+            docket_id = request.POST.get("docket_id")
+            target_identifier = request.POST.get("target_identifier", "").strip()
+
+            docket = None
+            if docket_id:
+                docket = ModerationReviewDocket.objects.filter(id=docket_id).first()
+            elif target_identifier:
+                docket = ModerationReviewDocket.objects.filter(target_identifier=target_identifier).first()
+
+            if docket:
+                docket.status = "CONFIRMED"
+                docket.reviewed_by_did = request.user.username
+                docket.save(update_fields=["status", "reviewed_by_did", "updated_at"])
+
+                if docket.docket_type == "pubkey":
+                    NodeBlockedEntity.objects.update_or_create(
+                        entity_identifier=docket.target_identifier,
+                        defaults={
+                            "reason": "ADMIN_OVERRIDE",
+                            "notes": f"Confirmed from Community Review Docket (flags: {docket.flag_count})",
+                            "is_active": True,
+                        },
+                    )
+                else:
+                    NodeContentTakedown.objects.update_or_create(
+                        event_id=docket.target_identifier,
+                        defaults={
+                            "reason": "ADMIN_OVERRIDE",
+                        },
+                    )
+
+                invalidate_shield_cache()
+                messages.success(
+                    request,
+                    f"Docket '{docket.target_identifier[:32]}...' confirmed and elevated to permanent safe harbor suppression.",
+                )
+                logger.info(
+                    "Admin %s confirmed review docket %s (type: %s)",
+                    request.user.username,
+                    docket.target_identifier,
+                    docket.docket_type,
+                )
+            else:
+                messages.error(request, "Review docket target not found.")
+
+        elif action == "docket_dismiss":
+            docket_id = request.POST.get("docket_id")
+            target_identifier = request.POST.get("target_identifier", "").strip()
+
+            docket = None
+            if docket_id:
+                docket = ModerationReviewDocket.objects.filter(id=docket_id).first()
+            elif target_identifier:
+                docket = ModerationReviewDocket.objects.filter(target_identifier=target_identifier).first()
+
+            if docket:
+                docket.status = "DISMISSED"
+                docket.reviewed_by_did = request.user.username
+                docket.save(update_fields=["status", "reviewed_by_did", "updated_at"])
+
+                invalidate_shield_cache()
+                messages.success(
+                    request,
+                    f"Docket '{docket.target_identifier[:32]}...' dismissed. Content/entity restored to public view.",
+                )
+                logger.info(
+                    "Admin %s dismissed review docket %s (type: %s)",
+                    request.user.username,
+                    docket.target_identifier,
+                    docket.docket_type,
+                )
+            else:
+                messages.error(request, "Review docket target not found.")
+
         return redirect("moderation_console")
 
-    # Pass the 25 most recent takedowns and blocked entities to the template
+    # Pass the 25 most recent takedowns, blocked entities, and pending review dockets
     blocked_entities = NodeBlockedEntity.objects.filter(is_active=True).order_by("-created_at")[:25]
     recent_takedowns = NodeContentTakedown.objects.all().order_by("-created_at")[:25]
+    pending_dockets = list(ModerationReviewDocket.objects.filter(status="PENDING").order_by("-flag_count")[:50])
+
+    for d in pending_dockets:
+        if d.docket_type == "event":
+            flags = CommunityFlagLedger.objects.filter(target_event_id=d.target_identifier).values_list("reason", flat=True)
+        else:
+            flags = CommunityFlagLedger.objects.filter(target_pubkey=d.target_identifier).values_list("reason", flat=True)
+        d.reasons_summary = dict(Counter(flags))
 
     context = {
         "blocked_entities": blocked_entities,
         "recent_takedowns": recent_takedowns,
+        "pending_dockets": pending_dockets,
         "reason_choices": NodeBlockedEntity.REASON_CHOICES,
         "total_blocked_count": NodeBlockedEntity.objects.filter(is_active=True).count(),
         "total_takedown_count": NodeContentTakedown.objects.count(),
+        "total_docket_count": ModerationReviewDocket.objects.filter(status="PENDING").count(),
     }
     return render(request, "admin/moderation_desk.html", context)
