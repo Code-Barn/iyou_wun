@@ -29,11 +29,13 @@ def user_identity(request):
     if not request.user.is_authenticated:
         context["user_display_label"] = ""
         context["current_session_did"] = ""
+        context["user_avatar_url"] = ""
         return context
     from .views import hex_to_npub
     from .models import UserLinkDeck
 
     deck = UserLinkDeck.objects.filter(user=request.user).first()
+    avatar_url = deck.avatar_url if (deck and deck.avatar_url) else ""
     handle = ""
     if deck and deck.handle:
         handle = f"@{deck.handle.lstrip('@')}"
@@ -77,6 +79,7 @@ def user_identity(request):
         user_npub=npub,
         user_handle=legacy_handle,
         user_profile_url=f"/profile/{npub}/" if npub else "/dashboard",
+        user_avatar_url=avatar_url,
         is_dependent=dep_ctx["is_dependent"],
         dependent_bracket=dep_ctx["bracket"],
         wot_distance_limit=limit,

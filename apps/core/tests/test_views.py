@@ -3705,4 +3705,37 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         self.assertIn("avatar_url: picture", src)
         self.assertIn("banner_url: banner", src)
 
+    def test_user_identity_context_processor_supplies_user_avatar_url(self):
+        """Context processor user_identity provides user_avatar_url from deck when present."""
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        from apps.core.context_processors import user_identity
+
+        rf = RequestFactory()
+        req = rf.get("/")
+        req.user = AnonymousUser()
+        anon_ctx = user_identity(req)
+        self.assertEqual(anon_ctx["user_avatar_url"], "")
+
+        user = User.objects.create_user(username="did:key:z6Mkavataruser")
+        UserLinkDeck.objects.create(user=user, handle="avataruser", avatar_url="https://cdn.example.com/avatar.png")
+        req.user = user
+        req.session = {}
+        auth_ctx = user_identity(req)
+        self.assertEqual(auth_ctx["user_avatar_url"], "https://cdn.example.com/avatar.png")
+
+    def test_500_template_is_standalone_and_renders_without_context(self):
+        """500.html must be standalone and render cleanly without context or request."""
+        from django.template.loader import render_to_string
+
+        src = (settings.BASE_DIR / "templates" / "500.html").read_text()
+        self.assertNotIn('{% extends "base.html" %}', src)
+        self.assertNotIn("{% extends 'base.html' %}", src)
+        self.assertIn("<!DOCTYPE html>", src)
+        # Must render cleanly with empty context (as Django's default server_error handler does)
+        rendered = render_to_string("500.html")
+        self.assertIn("500", rendered)
+        self.assertIn("Relay Pipeline Exception", rendered)
+
+
 
