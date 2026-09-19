@@ -1,6 +1,6 @@
 {% load static %}
 <script>
-  window.CURRENT_SESSION_DID = "{% firstof current_session_did user.username '' as session_did %}{{ session_did|escapejs }}";
+  window.CURRENT_SESSION_DID = "{{ current_session_did|default:user.username|escapejs }}";
   if (!window.__meshProfileSyncBound) {
     window.__meshProfileSyncBound = true;
     window.addEventListener("meshProfileSync", function(e) {
@@ -23,7 +23,7 @@
   }
 </script>
 <header class="relative z-30 border-b backdrop-blur-sm transition-colors duration-200 bg-white/90 border-slate-200 text-slate-900 dark:bg-[#0B0F19]/90 dark:border-gray-800 dark:text-gray-100">
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 py-3.5 min-h-[64px] flex items-center justify-between" style="min-height: 64px;">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
 
     <!-- Left: Brand Lockup & Sibling Domain Badge -->
     <div class="flex items-center gap-3">
@@ -32,7 +32,7 @@
           src="{% static 'img/logo_square_sm.png' %}"
           onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
           alt="wun"
-          class="h-8 w-8 aspect-square rounded-lg object-contain shadow-sm border border-slate-200 dark:border-slate-800 group-hover:scale-105 transition-transform duration-150"
+          class="w-11 h-11 sm:w-12 sm:h-12 rounded-xl object-cover shadow-sm border border-slate-200 dark:border-slate-800 shrink-0 group-hover:scale-105 transition-transform duration-150"
         />
         <span class="flex items-center"><span class="text-slate-400 dark:text-slate-500 font-medium">iyou</span><span class="text-violet-600 dark:text-violet-400 font-extrabold">_wun</span></span>
       </a>
