@@ -1,6 +1,6 @@
 {% load static %}
 <script>
-  window.CURRENT_SESSION_DID = "{{ current_session_did|default:user.username|escapejs }}";
+  window.CURRENT_SESSION_DID = "{% firstof current_session_did user.username '' as session_did %}{{ session_did|escapejs }}";
   if (!window.__meshProfileSyncBound) {
     window.__meshProfileSyncBound = true;
     window.addEventListener("meshProfileSync", function(e) {

@@ -851,6 +851,11 @@
                 return;
             }
 
+            if (message.type === "profile_sync" && message.profile) {
+                // Dispatch custom event for Layer 1 header and persona enclave hydration
+                window.dispatchEvent(new CustomEvent("meshProfileSync", { detail: message.profile }));
+            }
+
             if (message.type === "profile_sync" || message.type === "profile_activated" || message.type === "active_profile_changed" || message.type === "SET_ACTIVE_PERSONA_RESPONSE") {
                 var prof = message.profile || message.active_profile || message.persona;
                 if (prof) {
@@ -959,6 +964,31 @@
                 self.showFallbackModal();
             }
         }, SIGN_TIMEOUT_MS);
+    };
+
+    /**
+     * Update profile metadata on the local enclave authority (RFC-006).
+     * Dispatches SET_PROFILE_METADATA over the Port 9001 bridge WebSocket.
+     */
+    TauriBridgeClient.prototype.setProfileMetadata = async function ({ profile_id, handle, display_name, avatar_url, banner_url, bio } = {}) {
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+            console.info("[Bridge] Enclave bridge is offline, skipping SET_PROFILE_METADATA");
+            return;
+        }
+        try {
+            const payload = {
+                type: "SET_PROFILE_METADATA",
+                profile_id: profile_id || "",
+                handle: handle !== undefined ? String(handle).replace(/^@/, "").trim() : undefined,
+                display_name: display_name !== undefined ? String(display_name).trim() : undefined,
+                avatar_url: avatar_url || undefined,
+                banner_url: banner_url || undefined,
+                bio: bio || undefined
+            };
+            this.socket.send(JSON.stringify(payload));
+        } catch (err) {
+            console.warn("[Bridge] Error sending SET_PROFILE_METADATA frame:", err);
+        }
     };
 
     // ---------- NIP-04 End-to-End DM Cryptography ----------

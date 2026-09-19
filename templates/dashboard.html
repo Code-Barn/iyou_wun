@@ -779,6 +779,15 @@
     if (lud16) contentObj.lud16 = lud16;
     // NIP-05 is automatically derived from handle, so we don't send it from client
 
+    if (window.bridgeClient && typeof window.bridgeClient.setProfileMetadata === "function") {
+      window.bridgeClient.setProfileMetadata({
+        display_name: name,
+        bio: about,
+        avatar_url: picture,
+        banner_url: banner
+      });
+    }
+
     if (!userPubkey || userPubkey.length !== 64) {
       fallbackServerSave();
       return false;

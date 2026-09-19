@@ -3681,3 +3681,28 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         self.assertContains(response, "auto-tagged")
         self.assertContains(response, 'id="btn-publish-note"')
 
+    def test_rfc006_bridge_client_set_profile_metadata_contract(self):
+        """RFC-006: bridge_client.js exposes setProfileMetadata and emits meshProfileSync."""
+        src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
+        self.assertIn("TauriBridgeClient.prototype.setProfileMetadata", src)
+        self.assertIn('"SET_PROFILE_METADATA"', src)
+        self.assertIn('replace(/^@/, "")', src)
+        self.assertIn("Enclave bridge is offline, skipping SET_PROFILE_METADATA", src)
+        self.assertIn('"meshProfileSync"', src)
+        self.assertIn('window.dispatchEvent(new CustomEvent("meshProfileSync", { detail: message.profile }))', src)
+
+    def test_rfc006_link_deck_manager_wires_handle_claim_ingress(self):
+        """RFC-006: link_deck_manager.js forwards claimed handle to bridgeClient.setProfileMetadata."""
+        src = (settings.BASE_DIR / "static" / "js" / "link_deck_manager.js").read_text()
+        self.assertIn("window.bridgeClient.setProfileMetadata({ handle: claimedHandle })", src)
+
+    def test_rfc006_dashboard_wires_profile_save_ingress(self):
+        """RFC-006: dashboard.html forwards Kind 0 profile updates to bridgeClient.setProfileMetadata."""
+        src = (settings.BASE_DIR / "templates" / "dashboard.html").read_text()
+        self.assertIn("window.bridgeClient.setProfileMetadata", src)
+        self.assertIn("display_name: name", src)
+        self.assertIn("bio: about", src)
+        self.assertIn("avatar_url: picture", src)
+        self.assertIn("banner_url: banner", src)
+
+

@@ -181,7 +181,13 @@
         var btn = document.getElementById("deckClaimBtn");
         btn.disabled = true;
         deckFetch("/api/deck/handle", { method: "POST", body: JSON.stringify({ handle: handle }) })
-            .then(function () { return refreshDeck(); })
+            .then(function (data) {
+                var claimedHandle = (data && data.handle) || handle;
+                if (window.bridgeClient && typeof window.bridgeClient.setProfileMetadata === "function") {
+                    window.bridgeClient.setProfileMetadata({ handle: claimedHandle });
+                }
+                return refreshDeck();
+            })
             .then(function () { showDeckStatus("Handle claimed."); })
             .catch(function (err) { showDeckStatus(err.message, true); })
             .finally(function () { btn.disabled = false; });
@@ -326,7 +332,11 @@
             method: "POST",
             body: JSON.stringify({ token: activeChallenge.token }),
         })
-            .then(function () {
+            .then(function (data) {
+                var claimedHandle = (data && data.handle) || (activeChallenge && activeChallenge.target_handle) || deckInfo.handle;
+                if (claimedHandle && window.bridgeClient && typeof window.bridgeClient.setProfileMetadata === "function") {
+                    window.bridgeClient.setProfileMetadata({ handle: claimedHandle });
+                }
                 showToast("Handle verified and promoted to canonical @handle!");
                 setTimeout(function () { window.location.reload(); }, 900);
             })

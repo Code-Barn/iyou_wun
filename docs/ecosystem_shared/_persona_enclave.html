@@ -10,9 +10,9 @@
     onclick="togglePersonaDropdown()"
   >
     <img
-      src="{{ user_avatar_url|default:user.profile.avatar_url|default:'' }}"
+      src="{% firstof user_avatar_url user.link_deck.avatar_url user.profile.avatar_url '' %}"
       alt=""
-      class="mesh-user-avatar w-4 h-4 rounded-full object-cover shrink-0 {% if not user_avatar_url and not user.profile.avatar_url %}hidden{% endif %}"
+      class="mesh-user-avatar w-4 h-4 rounded-full object-cover shrink-0 {% if not user_avatar_url and not user.link_deck.avatar_url and not user.profile.avatar_url %}hidden{% endif %}"
       onerror="this.classList.add('hidden')"
       onload="this.classList.remove('hidden')"
     />
