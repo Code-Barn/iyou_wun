@@ -876,6 +876,75 @@
                 window.dispatchEvent(new CustomEvent('circleChanged', { detail: { circle: activeCircle } }));
             }
         }
+
+        syncCollapsedCirclePills(activeCircle);
+    }
+
+    function isU14DependentContext() {
+        const depCtx = global.DEPENDENT_CONTEXT || (global.wotGate && typeof global.wotGate.getContext === "function" ? global.wotGate.getContext() : null);
+        return !!(depCtx && depCtx.is_dependent && String(depCtx.bracket || "").toUpperCase() === "U14");
+    }
+
+    function syncCollapsedCirclePills(activeScope) {
+        const bar = document.getElementById("collapsed-circle-pill-bar");
+        if (!bar) return;
+        const buttons = bar.querySelectorAll("[data-collapsed-circle]");
+        buttons.forEach(function (btn) {
+            const circle = btn.getAttribute("data-collapsed-circle");
+            const isActive = (circle === activeScope);
+
+            // Mirror ribbon tab visibility (e.g. Global is hidden for U14 dependents)
+            const primaryBtn = document.querySelector("#app-l2-ribbon [data-circle='" + circle + "']");
+            if (primaryBtn && primaryBtn.classList.contains("hidden")) {
+                btn.classList.add("hidden");
+                return;
+            }
+            btn.classList.remove("hidden");
+
+            btn.classList.toggle("bg-violet-600", isActive);
+            btn.classList.toggle("text-white", isActive);
+            btn.classList.toggle("dark:bg-violet-500", isActive);
+            btn.classList.toggle("dark:text-slate-950", isActive);
+            btn.classList.toggle("font-bold", isActive);
+            btn.classList.toggle("shadow-sm", isActive);
+            btn.classList.toggle("text-slate-600", !isActive);
+            btn.classList.toggle("dark:text-slate-400", !isActive);
+            btn.classList.toggle("hover:text-slate-900", !isActive);
+            btn.classList.toggle("dark:hover:text-slate-200", !isActive);
+            btn.classList.toggle("hover:bg-slate-100", !isActive);
+            btn.classList.toggle("dark:hover:bg-slate-800/60", !isActive);
+        });
+    }
+
+    function initCollapsedCirclePills() {
+        const bar = document.getElementById("collapsed-circle-pill-bar");
+        if (!bar) return;
+
+        if (isU14DependentContext()) {
+            const globalPill = bar.querySelector("[data-collapsed-circle='global']");
+            if (globalPill) globalPill.classList.add("hidden");
+        }
+
+        bar.addEventListener("click", function (e) {
+            const btn = e.target.closest("[data-collapsed-circle]");
+            if (!btn || btn.classList.contains("hidden")) return;
+            const circle = btn.getAttribute("data-collapsed-circle");
+
+            // Forward click to primary L2 circle trigger so the canonical
+            // circle_feed_filter.js handler performs filtering, URL sync, and
+            // network queries identically.
+            const primaryBtn = document.querySelector("#app-l2-ribbon [data-circle='" + circle + "']") ||
+                               document.querySelector("#app-l2-ribbon [data-circle-scope='" + circle + "']");
+            if (primaryBtn) {
+                if (primaryBtn.classList.contains("hidden")) return;
+                primaryBtn.click();
+            } else if (window.circleFeedFilter && typeof window.circleFeedFilter.setCircle === "function") {
+                window.circleFeedFilter.setCircle(circle);
+            } else if (typeof window.setCircle === "function") {
+                window.setCircle(circle);
+            }
+            syncCollapsedCirclePills(circle);
+        });
     }
 
     function setSearchQuery(query) {
@@ -1179,6 +1248,10 @@
 
         // 5. Initial filter application & shield state
         setCircle(activeCircle);
+
+        // 5b. Collapsed-L2 circle pill capsule (feed stream; only meaningful when #app-l2-ribbon is collapsed)
+        initCollapsedCirclePills();
+
         updateNsfwShieldStatusUI();
         applyNsfwBlurState();
 

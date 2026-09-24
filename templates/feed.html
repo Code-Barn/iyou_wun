@@ -149,6 +149,52 @@
         {% else %}
         <!-- Main Feed Mode: Top Composer + Root Posts Stream -->
 
+        <!-- Collapsed L2 Circle Scope Capsule (Visible ONLY when L2 is collapsed) -->
+        <div id="collapsed-circle-pill-bar"
+             class="hidden mb-4 items-center justify-between gap-2 p-1.5 rounded-xl
+                    bg-white/80 dark:bg-[#0B0F19]/80 backdrop-blur-md border border-slate-200
+                    dark:border-slate-800 shadow-sm font-mono text-xs select-none">
+          <div class="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+            <span class="text-[10px] uppercase font-bold tracking-wider text-slate-400 px-2 shrink-0">
+              Scope:
+            </span>
+            <button type="button" data-collapsed-circle="global"
+                    class="circle-pill-btn px-2.5 py-1 rounded-lg transition-all text-[11px] font-medium shrink-0
+                           bg-violet-600 text-white dark:bg-violet-500 dark:text-slate-950 font-bold shadow-sm">
+              🌐 Global
+            </button>
+            <button type="button" data-collapsed-circle="iyou"
+                    class="circle-pill-btn px-2.5 py-1 rounded-lg transition-all text-[11px] font-medium shrink-0
+                           text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60">
+              ⚡ iyou
+            </button>
+            <button type="button" data-collapsed-circle="following"
+                    class="circle-pill-btn px-2.5 py-1 rounded-lg transition-all text-[11px] font-medium shrink-0
+                           text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60">
+              👥 Following
+            </button>
+            <button type="button" data-collapsed-circle="inner"
+                    class="circle-pill-btn px-2.5 py-1 rounded-lg transition-all text-[11px] font-medium shrink-0
+                           text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60">
+              🛡️ Inner Circle
+            </button>
+            <button type="button" data-collapsed-circle="mutual"
+                    class="circle-pill-btn px-2.5 py-1 rounded-lg transition-all text-[11px] font-medium shrink-0
+                           text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/60">
+              🤝 Mutual
+            </button>
+          </div>
+
+          <!-- Quick expand L2 button -->
+          <button type="button" onclick="toggleL2Header(false)"
+                  title="Expand Full App Toolbar"
+                  aria-label="Expand App Toolbar"
+                  class="flex items-center gap-1 px-2 py-1 rounded-lg text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-[11px] shrink-0">
+            <span>Toolbar</span>
+            <svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"/></svg>
+          </button>
+        </div>
+
         <!-- Top Post Composer -->
         {% include "includes/_post_composer.html" %}
 
