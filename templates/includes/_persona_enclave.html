@@ -10,11 +10,11 @@
     onclick="togglePersonaDropdown()"
   >
     <img
-        src="{% firstof user_avatar_url '' %}"
-        alt=""
-        class="mesh-user-avatar w-4 h-4 rounded-full object-cover shrink-0 {% if not user_avatar_url %}hidden{% endif %}"
-        onerror="this.classList.add('hidden')"
-        onload="this.classList.remove('hidden')"
+      src="{% firstof user_avatar_url '' %}"
+      alt=""
+      class="mesh-user-avatar w-4 h-4 rounded-full object-cover shrink-0 {% if not user_avatar_url %}hidden{% endif %}"
+      onerror="this.classList.add('hidden')"
+      onload="this.classList.remove('hidden')"
     />
     <span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse inline-block" id="active-persona-dot" title="Sovereign Key Active"></span>
     <span id="active-persona-display-name" class="mesh-user-handle truncate max-w-[140px] font-mono text-xs font-medium text-slate-700 dark:text-slate-200">
