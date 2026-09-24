@@ -4671,3 +4671,29 @@ def api_translate(request):
     }, status=200)
 
 
+def _error_page_context(request):
+    """Essential L0/L1 chrome context for the branded error pages."""
+    context = {
+        "SHOW_L2_TOGGLE": getattr(settings, "SHOW_L2_TOGGLE", True),
+    }
+    user = getattr(request, "user", None)
+    if user is not None and getattr(user, "is_authenticated", False):
+        from .context_processors import user_identity
+
+        try:
+            context.update(user_identity(request))
+        except Exception:
+            pass
+    return context
+
+
+def handler404(request, exception=None):
+    """Branded cyber-grit 404: route coordinate not found."""
+    return render(request, "404.html", _error_page_context(request), status=404)
+
+
+def handler500(request):
+    """Branded cyber-grit 500: internal node fault, identity intact."""
+    return render(request, "500.html", _error_page_context(request), status=500)
+
+

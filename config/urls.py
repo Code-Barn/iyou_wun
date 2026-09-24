@@ -56,3 +56,6 @@ urlpatterns = [
     path('', include('apps.core.urls')),
 ]
 
+handler404 = "apps.core.views.handler404"
+handler500 = "apps.core.views.handler500"
+

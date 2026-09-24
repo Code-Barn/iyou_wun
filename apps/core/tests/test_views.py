@@ -2623,32 +2623,38 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
 
 class CyberGritErrorViewTests(TestCase):
-    """Verifies branded cyber-grit 404/500 error views render with themed copy."""
+    """Verifies branded cyber-grit 404/500 error views render with themed copy
+    inside the canonical L0/L1 chrome shell via the wired custom handlers."""
 
     def test_custom_404_template_renders(self):
-        from django.test.utils import override_settings
-
         with override_settings(DEBUG=False):
             response = self.client.get("/nonexistent-route-xyz/")
 
         self.assertEqual(response.status_code, 404)
-        self.assertContains(response, "Mesh Node Not Found", status_code=404)
-        self.assertContains(response, "STATUS 404 // ROUTE_DISCONNECTED", status_code=404)
-        self.assertContains(response, "GOSSIP_ACTIVE", status_code=404)
-        self.assertContains(response, 'rel="stylesheet" href="/static/css/output.css"', status_code=404)
+        self.assertContains(response, "<title>404 Route Disconnected — iyou_wun</title>", status_code=404)
+        self.assertContains(response, "Error Code: ROUTE_DISCONNECTED_404", status_code=404)
+        self.assertContains(response, "Mesh Coordinate Not Found", status_code=404)
+        self.assertContains(response, "Return to Mesh Stream", status_code=404)
+        # Branded page renders inside the canonical L0/L1 chrome shell.
+        self.assertContains(response, 'id="sovereign-ecosystem-topbar"', status_code=404)
+        self.assertContains(response, 'id="app-l2-ribbon"', status_code=404)
+        self.assertContains(response, 'id="theme-toggle"', status_code=404)
 
     def test_custom_500_template_renders(self):
-        from django.test import RequestFactory
-        from django.views.defaults import server_error
-
-        request = RequestFactory().get("/boom")
-        response = server_error(request)
+        self.client.raise_request_exception = False
+        url = reverse("feed")
+        with override_settings(DEBUG=False), patch("apps.core.views.FeedView.get", side_effect=RuntimeError("boom")):
+            response = self.client.get(url)
 
         self.assertEqual(response.status_code, 500)
-        self.assertContains(response, "Relay Pipeline Exception", status_code=500)
-        self.assertContains(response, "STATUS 500 // INTERNAL_TRANSMISSION_FAULT", status_code=500)
-        self.assertContains(response, "SECURE_LOG_RECORDED", status_code=500)
-        self.assertContains(response, "Retry Socket", status_code=500)
+        self.assertContains(response, "<title>500 Transmission Fault — iyou_wun</title>", status_code=500)
+        self.assertContains(response, "Error Code: MESH_TRANSMISSION_FAULT_500", status_code=500)
+        self.assertContains(response, "Internal Node Fault", status_code=500)
+        self.assertContains(response, "Retry Transmission", status_code=500)
+        # Branded page renders inside the canonical L0/L1 chrome shell.
+        self.assertContains(response, 'rel="stylesheet" href="/static/css/output.css"', status_code=500)
+        self.assertContains(response, 'id="sovereign-ecosystem-topbar"', status_code=500)
+        self.assertContains(response, 'id="app-l2-ribbon"', status_code=500)
 
 
 class SearchAPITests(TestCase):
@@ -3924,18 +3930,22 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         auth_ctx = user_identity(req)
         self.assertEqual(auth_ctx["user_avatar_url"], "https://cdn.example.com/avatar.png")
 
-    def test_500_template_is_standalone_and_renders_without_context(self):
-        """500.html must be standalone and render cleanly without context or request."""
-        from django.template.loader import render_to_string
+    def test_500_template_extends_base_shell(self):
+        """500.html extends the canonical shell and renders cleanly via handler500."""
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        from apps.core.views import handler500
 
         src = (settings.BASE_DIR / "templates" / "500.html").read_text()
-        self.assertNotIn('{% extends "base.html" %}', src)
-        self.assertNotIn("{% extends 'base.html' %}", src)
-        self.assertIn("<!DOCTYPE html>", src)
-        # Must render cleanly with empty context (as Django's default server_error handler does)
-        rendered = render_to_string("500.html")
-        self.assertIn("500", rendered)
-        self.assertIn("Relay Pipeline Exception", rendered)
+        self.assertIn('{% extends "base.html" %}', src)
+        self.assertIn("Internal Node Fault", src)
+
+        request = RequestFactory().get("/boom")
+        request.user = AnonymousUser()
+        response = handler500(request)
+        self.assertEqual(response.status_code, 500)
+        self.assertContains(response, "Internal Node Fault", status_code=500)
+        self.assertContains(response, 'id="app-l2-ribbon"', status_code=500)
 
 
 
