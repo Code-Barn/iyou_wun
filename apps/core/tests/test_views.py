@@ -1730,6 +1730,54 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         # Global compose button is not rendered in thread mode
         self.assertNotContains(response, 'id="btn-compose-note"')
 
+    def test_thread_mode_renders_connector_guides_and_hero_timestamp(self):
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        hero_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        relay_events = {
+            "guide_root": make_event("guide_root", 1, pubkey=root_pk, created_at=1000, content="Guide root"),
+            "guide_parent": make_event("guide_parent", 1111, pubkey=root_pk, created_at=2000, content="Guide parent", tags=[
+                ["e", "guide_root", "", "root"],
+                ["e", "guide_root", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+            "guide_hero": make_event("guide_hero", 1111, pubkey=hero_pk, created_at=3000, content="Guide hero", tags=[
+                ["e", "guide_root", "", "root"],
+                ["e", "guide_parent", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+            "guide_reply_a": make_event("guide_reply_a", 1111, pubkey=root_pk, created_at=4000, content="Reply A", tags=[
+                ["e", "guide_root", "", "root"],
+                ["e", "guide_hero", "", "reply"],
+                ["p", hero_pk, "", "reply"],
+            ]),
+            "guide_reply_b": make_event("guide_reply_b", 1111, pubkey=hero_pk, created_at=5000, content="Reply B", tags=[
+                ["e", "guide_root", "", "root"],
+                ["e", "guide_hero", "", "reply"],
+                ["p", hero_pk, "", "reply"],
+            ]),
+        }
+
+        connector = "absolute left-5 top-11 bottom-0 w-0.5 bg-slate-200 dark:bg-slate-800 -translate-x-1/2 z-0"
+
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed") + "?thread=guide_hero")
+
+        self.assertEqual(response.status_code, 200)
+        # 2 ancestors always drop the bar, the hero carries it into the replies
+        # deck (replies exist), and the first reply keeps it flowing: 4 total.
+        self.assertContains(response, connector, count=4)
+        # Ancestor cards no longer render the old left-rail box wrapper.
+        self.assertNotContains(response, "pl-4 border-l-2 border-slate-200 dark:border-slate-800 ml-3")
+        # Hero note renders the full timestamp (YYYY-MM-DD HH:MM).
+        content = response.content.decode()
+        self.assertRegex(content, r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}")
+
+        # Connector guides must not bleed into the plain (non-thread) feed.
+        with patch("apps.core.views.relay_req", return_value={}):
+            plain_feed = self.client.get(reverse("feed"))
+        self.assertEqual(plain_feed.status_code, 200)
+        self.assertNotContains(plain_feed, connector)
+
     def test_open_graph_tags_rendered_in_thread_and_profile(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         k0_event = make_event("og_k0_1", 0, pubkey=pk, created_at=1700000000, content=json.dumps({

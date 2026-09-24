@@ -152,13 +152,11 @@
           </div>
           {% endif %}
 
-          <!-- Ancestor Chain -->
+          <!-- Ancestor Chain (Phase 16.2: continuous vertical connector guides) -->
           {% if ancestors %}
-          <div class="space-y-3 pl-4 border-l-2 border-slate-200 dark:border-slate-800 ml-3">
+          <div class="space-y-3">
             {% for ancestor in ancestors %}
-            <div class="bg-white/60 dark:bg-slate-900/60 rounded-xl p-3.5 border border-slate-200 dark:border-slate-800/80">
               {% include "includes/_thread_post.html" with note=ancestor is_ancestor=True %}
-            </div>
             {% endfor %}
           </div>
           {% endif %}
@@ -209,7 +207,7 @@
             <div class="space-y-3">
               {% for reply in thread_root.replies %}
               <div class="bg-white dark:bg-slate-900 rounded-xl p-4 border border-slate-200 dark:border-slate-800">
-                {% include "includes/_thread_post.html" with note=reply is_reply=True %}
+                {% include "includes/_thread_post.html" with note=reply is_reply=True is_last_reply=forloop.last %}
                 
                 <!-- Sub-Thread Drilldown Pill (if reply has its own replies) -->
                 {% if reply.reply_count and reply.reply_count > 0 %}

@@ -497,6 +497,96 @@ class ProcessIntoFeedTest(TestCase):
             ["root_post", "grand_reply", "intermediate"],
         )
 
+    def test_fetch_thread_resolves_five_level_lineage_in_topological_order(self):
+        from apps.core.views import fetch_thread
+
+        root_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        other_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+
+        # Story: root -> level1 -> level2 -> level3 -> deep_target (4 ancestors,
+        # 5 levels deep). The raw_events dict is intentionally out of order and
+        # timestamps climb down the chain; the ancestor ladder must come back
+        # root-first/chronologically and stay NIP-10 topological.
+        raw_events = {
+            "level2": make_event("level2", 1111, pubkey=other_pk, created_at=300000, content="Hop 2", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "level1", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+            "deep_target": make_event("deep_target", 1111, pubkey=other_pk, created_at=500000, content="Deep target", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "level3", "", "reply"],
+                ["p", other_pk, "", "reply"],
+            ]),
+            "root_post": make_event("root_post", 1, pubkey=root_pk, created_at=100000, content="Root"),
+            "level3": make_event("level3", 1111, pubkey=other_pk, created_at=400000, content="Hop 3", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "level2", "", "reply"],
+                ["p", other_pk, "", "reply"],
+            ]),
+            "level1": make_event("level1", 1111, pubkey=root_pk, created_at=200000, content="Hop 1", tags=[
+                ["e", "root_post", "", "root"],
+                ["e", "root_post", "", "reply"],
+                ["p", root_pk, "", "reply"],
+            ]),
+            "kind7_like_root": make_event("kind7_like_root", 7, pubkey=other_pk, created_at=600000, content="+", tags=[
+                ["e", "root_post", "", "root"],
+            ]),
+        }
+
+        with patch("apps.core.views.relay_req", return_value=raw_events):
+            result = fetch_thread("deep_target")
+
+        self.assertEqual(result["thread_root"]["id"], "deep_target")
+        ancestor_ids = [a["id"] for a in result["ancestors"]]
+        self.assertEqual(
+            ancestor_ids,
+            ["root_post", "level1", "level2", "level3"],
+        )
+
+        # Chronological ladder: created_at strictly ascending root -> hero, and
+        # every ancestor except the first is a direct child of its predecessor.
+        timestamps = [a.get("created_at_ts") or 0 for a in result["ancestors"]]
+        self.assertEqual(timestamps, sorted(timestamps))
+        self.assertEqual(timestamps[0], 100000)
+        self.assertEqual(timestamps[-1], 400000)
+        for index, ancestor in enumerate(result["ancestors"][1:], start=1):
+            self.assertEqual(ancestor.get("parent_id"), result["ancestors"][index - 1]["id"])
+        self.assertEqual(result["ancestors"][0].get("parent_id"), "")
+
+        # Phase 16.2: social engagement counts attached to every resolved ancestor
+        self.assertEqual(result["ancestors"][0]["like_count"], 1)
+        self.assertIn("repost_count", result["ancestors"][0])
+        self.assertIn("reply_count", result["ancestors"][2])
+
+    def test_fetch_thread_ancestor_ladder_hits_depth_safety_bound(self):
+        from apps.core.views import fetch_thread
+
+        chain = {}
+        prev = "root_cap"
+        chain["root_cap"] = make_event("root_cap", 1, created_at=9000, content="Cap root")
+        for hop in range(1, 10):
+            eid = f"cap_hop_{hop}"
+            chain[eid] = make_event(eid, 1111, created_at=9000 + hop, content=f"Cap hop {hop}", tags=[
+                ["e", prev, "", "reply"],
+            ])
+            prev = eid
+        chain["cap_target"] = make_event("cap_target", 1111, created_at=9910, content="Cap target", tags=[
+            ["e", "cap_hop_9", "", "reply"],
+        ])
+
+        with patch("apps.core.views.relay_req", return_value=chain):
+            result = fetch_thread("cap_target")
+
+        # MAX_ANCESTOR_DEPTH = 8: the ladder truncates at the safety bound and
+        # preserves lineage order among the kept hops.
+        ancestors = result["ancestors"]
+        self.assertEqual(len(ancestors), 8)
+        self.assertEqual(ancestors[0]["id"], "cap_hop_2")
+        self.assertEqual(ancestors[-1]["id"], "cap_hop_9")
+        for index, ancestor in enumerate(ancestors[1:], start=1):
+            self.assertEqual(ancestor.get("parent_id"), ancestors[index - 1]["id"])
+
     def test_kind_1_extracts_embedded_image_and_video_urls(self):
         from apps.core.nip10 import extract_media_from_note
 

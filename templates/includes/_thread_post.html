@@ -1,13 +1,20 @@
 {% load static i18n %}
-<div class="flex items-start gap-3.5 sm:gap-4 relative group" 
+<div class="flex items-start gap-3.5 sm:gap-4 relative group {% if is_ancestor %}pb-6{% endif %}" 
      data-note-card-id="{{ note.id }}" 
      data-author-pubkey="{{ note.pubkey }}"
      data-is-iyou="{% if note.is_iyou_native or note.is_iyou_circle %}true{% else %}false{% endif %}"
      {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}data-is-blocked="true"{% endif %}
      {% if note.has_content_warning %}data-has-cw="true" data-has-content-warning="true"{% endif %}
      data-lang="{{ note.lang|default:'en' }}">
+  <!-- (Phase 16.2) Vertical Thread Connector Guide
+       Ancestors always drop the bar down to the next reply; direct replies
+       (except the last) keep the bar flowing; the focused hero carries the
+       guide into the replies deck only when replies exist below it. -->
+  {% if is_ancestor or is_reply and feed_mode == 'thread' and not is_last_reply or is_hero and thread_root.replies %}
+  <div class="absolute left-5 top-11 bottom-0 w-0.5 bg-slate-200 dark:bg-slate-800 -translate-x-1/2 z-0" aria-hidden="true"></div>
+  {% endif %}
   <!-- Author Avatar -->
-  <div class="shrink-0">
+  <div class="relative z-10 shrink-0">
     {% if note.author_avatar %}
     <a href="{% url 'profile' npub=note.npub %}">
       <img src="{{ note.author_avatar }}" alt="{{ note.author_name }}"
@@ -100,7 +107,7 @@
           <time class="note-timestamp text-slate-400 dark:text-slate-500 hover:underline"
                 data-timestamp="{{ note.created_at_ts|default:note.created_at }}"
                 title="{% if note.created_at_datetime %}{{ note.created_at_datetime|date:'c' }}{% else %}{{ note.created_at }}{% endif %}">
-            {{ note.time_ago|default:note.created_at }}
+            {% if is_hero %}{{ note.created_at_datetime|default:note.created_at|date:"Y-m-d H:i" }}{% else %}{{ note.time_ago|default:note.created_at }}{% endif %}
           </time>
         </a>
 

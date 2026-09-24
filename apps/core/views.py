@@ -789,6 +789,10 @@ class FeedView(TemplateView):
                         context["meta_image"] = _media[0].get("url")
                     elif _focused.get("author_avatar"):
                         context["meta_image"] = _focused["author_avatar"]
+
+            # (Phase 16.2) The inspected hero note is exposed alongside the ordered
+            # ancestor ladder and the direct-reply deck for the connector UI.
+            context["focused_note"] = context.get("thread_root")
         else:
             from .context import get_dependent_context
             from apps.feed.selectors import filter_feed_for_dependent, is_feed_circle_allowed
@@ -2143,7 +2147,9 @@ def fetch_text_notes(authors=None, limit=20, relay_urls=None):
 
 
 
-MAX_ANCESTOR_DEPTH = 32
+# (Phase 16.2) Recursion safety bound for resolving the full root-to-leaf
+# ancestor lineage of an inspected reply — never chase deeper than 8 hops.
+MAX_ANCESTOR_DEPTH = 8
 
 
 def og_fallback_image(request):
@@ -2267,10 +2273,17 @@ def fetch_thread(thread_id, relay_urls=None, deadline=None):
         return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
 
     # 2. Ancestor Resolution: Build strictly ordered list [root, …, grandparent, parent]
+    #    (Phase 16.2) bounded by the recursion safety limit, then ordered
+    #    chronologically so the thread reads top-to-bottom toward the focused note.
     ancestors = []
     curr_id = thread_root.get("parent_id") or thread_root.get("root_id")
     visited_ancestors = set()
-    while curr_id and curr_id not in visited_ancestors and curr_id != thread_id:
+    while (
+        curr_id
+        and curr_id not in visited_ancestors
+        and curr_id != thread_id
+        and len(ancestors) < MAX_ANCESTOR_DEPTH
+    ):
         visited_ancestors.add(curr_id)
         anc = all_enriched.get(curr_id)
         if anc:
@@ -2282,6 +2295,8 @@ def fetch_thread(thread_id, relay_urls=None, deadline=None):
                 curr_id = None
         else:
             break
+
+    ancestors.sort(key=lambda n: n.get("created_at_ts") or 0)
 
     # 3. Direct Replies Only (1-Level Down)
     direct_replies = []
@@ -2309,7 +2324,11 @@ def fetch_thread(thread_id, relay_urls=None, deadline=None):
     thread_root["replies"] = direct_replies
     thread_root["reply_count"] = len(direct_replies)
 
-    attach_quoted_notes([thread_root] + ancestors + direct_replies, relay_urls=relay_urls)
+    all_thread_notes = [thread_root] + ancestors + direct_replies
+    attach_quoted_notes(all_thread_notes, relay_urls=relay_urls, deadline=deadline)
+    # (Phase 16.2) Social engagement counts on the full lineage: hero root,
+    # every resolved ancestor, and each direct reply.
+    attach_social_counts(all_thread_notes, relay_urls=relay_urls, timeout=8, deadline=deadline)
 
     return {
         "thread_root": thread_root,
