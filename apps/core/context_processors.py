@@ -58,6 +58,15 @@ def user_identity(request):
     else:
         display_label = f"{request.user.username[:16]}... (L{level})"
 
+    if deck and deck.display_name:
+        display_name = deck.display_name
+    elif deck and deck.handle:
+        display_name = deck.handle.lstrip("@")
+    elif persona_name:
+        display_name = persona_name
+    else:
+        display_name = ""
+
     from .views import get_effective_user_pubkey
     pubkey = get_effective_user_pubkey(request)
     npub = hex_to_npub(pubkey) if pubkey else ""
@@ -74,6 +83,8 @@ def user_identity(request):
 
     context.update(
         user_display_label=display_label,
+        user_display_name=display_name,
+        user_is_verified=bool(deck and deck.is_verified),
         active_persona_level=level,
         active_persona_name=persona_name,
         current_session_did=request.user.username,
