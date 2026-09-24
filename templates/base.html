@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="overflow-x-hidden w-full max-w-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -85,7 +85,7 @@
     {% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-hidden">
+<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-hidden w-full max-w-full">
     {% include "includes/_ecosystem_bar.html" %}
     {% include "includes/_standard_header.html" %}
     {% include "_nav.html" %}
