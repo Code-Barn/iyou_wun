@@ -689,8 +689,10 @@ class DashboardProfileTest(TestCase):
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "lg:col-span-8")
-        self.assertContains(response, "lg:col-span-4")
+        # Sprint 3: base.html re-parented into the 3-column shell (left rail /
+        # stream column / right rail). Left + right rail cells are root markers.
+        self.assertContains(response, 'id="left-rail"')
+        self.assertContains(response, 'id="right-rail"')
         self.assertContains(response, "TRENDING TOPICS")
 
     def test_sovereign_creators_render_valid_profile_links(self):

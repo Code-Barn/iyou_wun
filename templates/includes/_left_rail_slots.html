@@ -1,0 +1,226 @@
+<!--
+  _left_rail_slots.html — Shared navigation slot roster for the iyou_wun shell.
+
+  Pattern: Desktop sticky rail (ATT-001, Primal MIT c96ee211) + mobile 5-slot
+  dock (ATT-003, Damus MIT 4a94f666). This partial is the single source of
+  truth for the nav-item loop used by BOTH the desktop rail
+  (templates/includes/_left_rail.html) and the MD–LG flyout panel inside
+  _standard_header.html (AUDIT-005 §7.3). Do NOT duplicate the loop elsewhere.
+
+  Context consumed (all optional — the empty-block fallback below is a full
+  static roster so the partial is deployable before a rail_slots context
+  processor exists):
+
+    slot_style   : "rail" (default) -> labels hidden below xl, icons centered in
+                   the 48px mini-rail; "flyout" -> labels always visible, items
+                   full-width (used by the MD flyout).
+    rail_slots   : iterable of dicts:
+                     { "url", "label", "icon", "active",
+                       "unread", "uses_count", "count",
+                       "unread_sync", "count_sync" }
+                   icon is one of: feed | explore | notifications | chat |
+                   gallery | bookmarks | link_deck | poly | dashboard
+                   unread_sync  : "notification" | "chat" -> badge mirror source
+                   count_sync   : "chat"                     -> numeric mirror source
+
+  Badge contract (AUDIT-005 §3.2):
+    - dot-not-count on every slot EXCEPT chat:  rounded-full bg-violet-500
+    - chat ONLY: numeric rose pill (bg-rose-500) driven by floating_chat
+    - badges carrying data-unread-mirror / data-count-mirror are hydrated by the
+      badge-mirror script shipped in _left_rail.html and _mobile_bottom_dock.html
+      (client-side unread state lives in the browser; server should render the
+      dot only when it already knows the value).
+-->
+{% load static %}
+
+{% if slot_style == "flyout" %}
+  <ul id="left-rail-slot-list" class="space-y-1 py-3 pr-2" aria-label="Primary navigation">
+{% else %}
+  <ul id="left-rail-slot-list" class="flex-1 space-y-1 px-2 xl:px-3 overflow-y-auto no-scrollbar" aria-label="Primary navigation">
+{% endif %}
+
+  {% for item in rail_slots %}
+  <li>
+    <a href="{{ item.url }}"
+       {% if item.active %}aria-current="page"{% endif %}
+       title="{{ item.label }}"
+       class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+              {% if item.active %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+              {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70
+              dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+              {% if slot_style == 'flyout' %}justify-start px-4
+              {% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+
+      {# ---- 20px stroke icon slot ---- #}
+      {% if item.icon == "feed" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+      {% elif item.icon == "explore" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      {% elif item.icon == "notifications" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      {% elif item.icon == "chat" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      {% elif item.icon == "gallery" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      {% elif item.icon == "bookmarks" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+      {% elif item.icon == "link_deck" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+      {% elif item.icon == "poly" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+      {% elif item.icon == "dashboard" %}
+      <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M2 14h4M10 8h4M18 16h4"/></svg>
+      {% else %}
+      <span class="w-5 h-5 rounded-full bg-slate-300 dark:bg-slate-700 shrink-0" aria-hidden="true"></span>
+      {% endif %}
+
+      {# ---- label (responsive: hidden on mini-rail, always visible in flyout) ---- #}
+      {% if slot_style == "flyout" %}
+      <span class="inline truncate">{{ item.label }}</span>
+      {% else %}
+      <span class="hidden xl:inline truncate">{{ item.label }}</span>
+      {% endif %}
+
+      {# ---- dot-not-count badge (everything except chat; AUDIT-005 §3.2) ---- #}
+      {% if item.unread and not item.uses_count %}
+      <span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-violet-500{% if item.unread_sync %}" data-unread-mirror="{{ item.unread_sync }}"{% else %} animate-pulse{% endif %} aria-hidden="true"></span>
+      {% endif %}
+
+      {# ---- numeric rose pill (chat ONLY; AUDIT-002 §4.3 lock) ---- #}
+      {% if item.unread and item.uses_count %}
+      <span class="absolute right-1.5 top-1 min-w-[18px] h-[18px] rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white flex items-center justify-center{% if item.count_sync %}" data-count-mirror="{{ item.count_sync }}"{% else %}{% endif %}>{{ item.count|default:0 }}</span>
+      {% endif %}
+    </a>
+  </li>
+  {% empty %}
+    {# ============ STATIC FALLBACK ROSTER (deploy-ready without context) ============ #}
+    {# Feed — dot appears when client last-seen advances (data-unread-source="feed") #}
+    <li>
+      <a href="{% url 'feed' %}"
+         {% if request.resolver_match.url_name == 'feed' and not request.GET.explore %}aria-current="page"{% endif %}
+         title="Stream"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'feed' and not request.GET.explore %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Stream</span>{% else %}<span class="hidden xl:inline truncate">Stream</span>{% endif %}
+        <span id="rail-feed-unread-dot" class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-violet-500 hidden" aria-hidden="true"></span>
+      </a>
+    </li>
+    {# Explore — triage flyout routed to /feed?explore=1 #}
+    <li>
+      <a href="{% url 'feed' %}?explore=1"
+         {% if request.GET.explore %}aria-current="page"{% endif %}
+         title="Explore"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.GET.explore %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Explore</span>{% else %}<span class="hidden xl:inline truncate">Explore</span>{% endif %}
+      </a>
+    </li>
+    {# Notifications — dot synced from header bell (data-unread-mirror="notification") #}
+    <li>
+      <a href="{% url 'notifications' %}"
+         {% if request.resolver_match.url_name == 'notifications' %}aria-current="page"{% endif %}
+         title="Notifications"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'notifications' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Notifications</span>{% else %}<span class="hidden xl:inline truncate">Notifications</span>{% endif %}
+        <span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-violet-500 hidden" data-unread-mirror="notification" aria-hidden="true"></span>
+      </a>
+    </li>
+    {# Chat / DMs — numeric rose pill mirror of #floating-chat-unread-badge (AUDIT-002 lock) #}
+    <li>
+      <a href="{% url 'chat' %}"
+         {% if request.resolver_match.url_name == 'chat' %}aria-current="page"{% endif %}
+         title="Chat &amp; Direct Messages"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'chat' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Chat</span>{% else %}<span class="hidden xl:inline truncate">Chat</span>{% endif %}
+        <span id="rail-chat-unread-pill" class="absolute right-1.5 top-1 min-w-[18px] h-[18px] rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white flex items-center justify-center hidden" data-count-mirror="chat">0</span>
+      </a>
+    </li>
+    {# Media Gallery #}
+    <li>
+      <a href="{% url 'gallery' %}"
+         {% if request.resolver_match.url_name == 'gallery' %}aria-current="page"{% endif %}
+         title="Media Gallery"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'gallery' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Gallery</span>{% else %}<span class="hidden xl:inline truncate">Gallery</span>{% endif %}
+      </a>
+    </li>
+
+    {# ---------------------------------------------------------------- divider #}
+    <li class="pt-2 pb-1 border-t border-slate-200 dark:border-slate-800"></li>
+
+    {# Bookmarks — NIP-51 gap, wired to deck manager (AUDIT-005 §3.3) #}
+    <li>
+      <a href="{% url 'dashboard' %}#deck"
+         {% if request.resolver_match.url_name == 'dashboard' and request.GET.deck %}aria-current="page"{% endif %}
+         title="Bookmarks (NIP-51 collection — gap: wired to deck manager)"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'dashboard' and request.GET.deck %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Bookmarks</span>{% else %}<span class="hidden xl:inline truncate">Bookmarks</span>{% endif %}
+      </a>
+    </li>
+    {# Sovereign Link Deck — always the /u/<did_key> route: `user_handle` can be a
+       username arbitrary in length/charset (hex nsecs, DIDs, dots...), guaranteed to
+       fail the strict `link_deck` regex `^@[a-z0-9_-]{3,32}$` at reverse() → 500.
+       The /@handle vanity remains reachable from profiles and the deck manager. #}
+    {% if user.is_authenticated or user_display_label %}
+    <li>
+      <a href="{% url 'link_deck_did' did_key=current_session_did|default:user.username %}"
+         {% if request.resolver_match.url_name == 'link_deck' or request.resolver_match.url_name == 'link_deck_did' %}aria-current="page"{% endif %}
+         title="Sovereign Link Deck"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'link_deck' or request.resolver_match.url_name == 'link_deck_did' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Link Deck</span>{% else %}<span class="hidden xl:inline truncate">Link Deck</span>{% endif %}
+      </a>
+    </li>
+    {% endif %}
+    {# Poly Governance (external sibling domain) #}
+    <li>
+      <a href="https://poly.iyou.me" target="_blank" rel="noopener noreferrer"
+         title="Poly Governance"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Poly</span>{% else %}<span class="hidden xl:inline truncate">Poly</span>{% endif %}
+      </a>
+    </li>
+    {# Dashboard / Settings #}
+    <li>
+      <a href="{% url 'dashboard' %}"
+         {% if request.resolver_match.url_name == 'dashboard' %}aria-current="page"{% endif %}
+         title="Dashboard &amp; Settings"
+         class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
+                {% if request.resolver_match.url_name == 'dashboard' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
+                {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
+        <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3"/><path d="M2 14h4M10 8h4M18 16h4"/></svg>
+        {% if slot_style == "flyout" %}<span class="inline truncate">Dashboard</span>{% else %}<span class="hidden xl:inline truncate">Dashboard</span>{% endif %}
+      </a>
+    </li>
+  {% endfor %}
+
+</ul>

@@ -27,7 +27,7 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6">
+<div class="max-w-7xl mx-auto py-4 sm:py-6">
     {% if messages %} {% for message in messages %}
     <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
         <div class="flex">
@@ -37,10 +37,8 @@
     </div>
     {% endfor %} {% endif %}
 
-    <div class="grid grid-cols-1 {% if feed_mode != 'thread' %}lg:grid-cols-12{% endif %} gap-6 items-start">
-      
-      <!-- Main Feed Column (Left 8 Cols in main mode, centered in thread mode) -->
-      <div class="{% if feed_mode != 'thread' %}lg:col-span-8{% else %}max-w-2xl mx-auto w-full{% endif %} space-y-4 min-w-0">
+      <!-- Main Feed Column (shell cell B provides width/centering; thread stays centered) -->
+      <div class="{% if feed_mode != 'thread' %}min-w-0{% else %}max-w-2xl mx-auto w-full min-w-0{% endif %} space-y-4 pb-28 lg:pb-0">
         
         {% if feed_mode == 'thread' %}
         <!-- Thread Mode: Dedicated Conversation View -->
@@ -242,16 +240,15 @@
         {% endif %}
 
       </div>
-
-      <!-- Right Rail Adaptive Sticky Column -->
-      {% if feed_mode != 'thread' %}
-      <aside class="hidden lg:block lg:col-span-4 sticky top-4 max-h-[calc(100vh-2rem)] overflow-y-auto no-scrollbar space-y-4">
-        {% include "includes/_feed_right_rail.html" %}
-      </aside>
-      {% endif %}
-
-    </div>
 </div>
+{% endblock %}
+
+{% block right_rail %}
+{% if request.resolver_match.url_name == 'feed' and feed_mode != 'thread' %}
+<div class="sticky top-[128px] max-h-[calc(100vh-128px)] overflow-y-auto no-scrollbar space-y-4">
+  {% include "includes/_feed_right_rail.html" %}
+</div>
+{% endif %}
 {% endblock %}
 
 {% block extra_body %}

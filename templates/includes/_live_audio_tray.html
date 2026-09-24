@@ -1,0 +1,271 @@
+<!--
+  _live_audio_tray.html — Docked live-audio player tray (AUDIT-005 §5.2).
+
+  Pattern: Nostrich NIP-53 Kind-30311 live-room reader (ATT-002, MIT 8965e31)
+  footprint "Listen In" — no SFU, no WebRTC phase-1:
+    - Transport day-one: room.streaming_url first; .mp3/.ogg/.aac/.m4a via native
+      <audio>; .m3u8 via hls.js (MIT) when window.Hls is present; Replay uses
+      .recording_url when status:ended (AUDIT-003 §7 1.2–1.3).
+    - Collapsed pill: 28px cover thumb + LIVE · title + watcher count + play/pause
+      + Leave. Expanded panel: title, host line, watcher row, Replay on ended.
+    - Mounted INSIDE #floating-chat-root (base.html companion #11 of AUDIT-005
+      §8) so it survives route changes — no new chrome layer.
+    - Vertical stacking: on <768 sits above the mobile bottom dock (parent flips
+      via max-md mb offset, AUDIT-005 §4.2/§5.2); ≥768 it sits left of the docked
+      chat windows inside the flex root.
+    - Empty/absence contract (AUDIT-003 §5.1): the whole tray carries `hidden`
+      until a live room is advertised; viewer removes it when stream ends.
+
+  DOM contract consumed by live_rooms.js / feed relay subscription:
+    window.LiveAudioTray.attach(room)  room = {
+      title, host_name, host_avatar, cover, status ('live'|'scheduled'|'ended'),
+      participants, current_participants, started_at, recording_url, streaming_url }
+    window.LiveAudioTray.hide()
+    #live-audio-tray            root (hidden until attach)
+    #live-tray-pill             collapsed pill (toggle panel on click)
+    #live-tray-panel            expanded panel (absolute, bottom-full)
+    #live-tray-audio            native <audio> transport
+    #live-tray-toggle           play/pause button (updates glyph)
+    #live-tray-leave            leave button -> hide + stop
+-->
+{% load static %}
+<div id="live-audio-tray" class="hidden relative pointer-events-auto select-none font-mono text-xs">
+  {# ---- Collapsed pill (AUDIT-003 §5.1 / AUDIT-005 §5.2) ---- #}
+  <button id="live-tray-pill" type="button"
+          class="flex items-center gap-2 px-3 py-2 rounded-full bg-slate-900/90 dark:bg-black/80
+                 text-slate-100 backdrop-blur-md border border-slate-700/60 shadow-xl
+                 hover:border-violet-500/60 transition max-w-[260px]">
+    <img id="live-tray-thumb" src="" alt=""
+         class="w-7 h-7 rounded-full object-cover bg-slate-700 shrink-0 hidden"
+         referrerpolicy="no-referrer" />
+    <span id="live-tray-live-dot" class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" aria-hidden="true"></span>
+    <span id="live-tray-title" class="truncate">LIVE · Untitled Room</span>
+    <span id="live-tray-count" class="shrink-0 px-1.5 py-0.5 rounded-full text-[10px]
+          bg-slate-800/90 text-slate-300 truncate max-w-[64px]"></span>
+    <span id="live-tray-toggle" class="shrink-0 w-6 h-6 rounded-full bg-violet-600 text-white
+          flex items-center justify-center text-[10px] leading-none" aria-hidden="true">▶</span>
+    <span id="live-tray-leave" class="shrink-0 text-slate-400 hover:text-rose-400 text-[11px] px-1" role="button" aria-label="Leave live room">✕</span>
+  </button>
+
+  {# ---- Expanded panel (title / host / watchers / replay) ---- #}
+  <div id="live-tray-panel" class="hidden absolute bottom-full mb-3 left-0 w-80 max-w-[85vw]
+       rounded-xl bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800
+       shadow-2xl p-3 space-y-2">
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <p id="live-tray-panel-title" class="font-semibold text-slate-900 dark:text-slate-100 leading-snug line-clamp-2 break-words"></p>
+        <p id="live-tray-panel-status" class="mt-0.5 text-[10px] text-slate-400 flex items-center gap-1"></p>
+      </div>
+      <button id="live-tray-panel-close" type="button" class="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs" aria-label="Collapse">−</button>
+    </div>
+    <div class="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/70">
+      <img id="live-tray-host-avatar" src="" alt=""
+           class="w-6 h-6 rounded-full object-cover bg-slate-200 dark:bg-slate-800 hidden"
+           referrerpolicy="no-referrer" />
+      <span id="live-tray-host-name" class="truncate text-slate-600 dark:text-slate-300"></span>
+    </div>
+    <div id="live-tray-replay" class="hidden pt-1">
+      <button id="live-tray-replay-btn" type="button"
+              class="w-full px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800
+                     hover:bg-violet-50 dark:hover:bg-violet-950/40 text-violet-600 dark:text-violet-400
+                     text-[11px] transition">↻ Replay Recording</button>
+    </div>
+  </div>
+
+  {# ---- Native audio transport (hidden; hls.js attaches here for .m3u8) ---- #}
+  <audio id="live-tray-audio" class="hidden" preload="none" playsinline></audio>
+</div>
+
+<script>
+  // NIP-53 Kind-30311 docked live-audio tray controller (ATT-002).
+  // Phase-1 transport: native <audio> for streaming/recording URLs; hls.js
+  // (MIT) for .m3u8 when present. No WebRTC/SFU (AUDIT-003 §7 gating).
+  (function (global) {
+    "use strict";
+    if (global.__wunLiveTrayBound) return;
+    global.__wunLiveTrayBound = true;
+
+    var tray, pill, panel, audio, toggleBtn, leaveBtn, thumb, titleEl, countEl, dotEl;
+    var hostAvatar, hostName, panelTitle, panelStatus, replayRow, replayBtn;
+
+    function $(id) { return document.getElementById(id); }
+
+    function initRefs() {
+      tray = $("live-audio-tray"); pill = $("live-tray-pill"); panel = $("live-tray-panel");
+      audio = $("live-tray-audio"); toggleBtn = $("live-tray-toggle"); leaveBtn = $("live-tray-leave");
+      thumb = $("live-tray-thumb"); titleEl = $("live-tray-title"); countEl = $("live-tray-count");
+      dotEl = $("live-tray-live-dot");
+      hostAvatar = $("live-tray-host-avatar"); hostName = $("live-tray-host-name");
+      panelTitle = $("live-tray-panel-title"); panelStatus = $("live-tray-panel-status");
+      replayRow = $("live-tray-replay"); replayBtn = $("live-tray-replay-btn");
+    }
+
+    var STATE = { playing: false, room: null, hls: null };
+
+    function compactCount(n) {
+      n = parseInt(n, 10) || 0;
+      if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
+      if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
+      return String(n);
+    }
+
+    function relativeStart(startedAt) {
+      if (!startedAt) return "";
+      var diff = Math.max(0, Math.floor(Date.now() / 1000) - startedAt);
+      if (diff < 60) return "Started just now";
+      if (diff < 3600) return "Started " + Math.floor(diff / 60) + "m ago";
+      if (diff < 86400) return "Started " + Math.floor(diff / 3600) + "h ago";
+      return "Scheduled";
+    }
+
+    function rawText(color) {
+      // fallback used when cover/avatar are missing: colored initial glyph.
+      return '<span class="w-7 h-7 rounded-full ' + (color || "bg-slate-700") +
+        ' flex items-center justify-center text-[10px] text-slate-300 shrink-0">LIVE</span>';
+    }
+
+    function ensureThumb(src) {
+      if (!src) { thumb.classList.add("hidden"); return; }
+      thumb.src = src;
+      thumb.classList.remove("hidden");
+    }
+
+    function ensureHost(room) {
+      if (room.host_avatar) {
+        hostAvatar.src = room.host_avatar;
+        hostAvatar.classList.remove("hidden");
+      } else {
+        hostAvatar.classList.add("hidden");
+      }
+      hostName.textContent = room.host_name || "Unknown host";
+    }
+
+    function setDurationText() {
+      // status line per AUDIT-003 §5.1 contract.
+      var s = STATE.room || {};
+      var line = "";
+      if (s.status === "ended") line = "Stream ended" + (s.started_at ? " · " + relativeStart(s.started_at).replace("  ago", "") : "");
+      else if (s.status === "live") line = relativeStart(s.started_at);
+      else line = "Scheduled";
+      if (panelStatus) panelStatus.textContent = line;
+    }
+
+    function render(room) {
+      STATE.room = room || {};
+      var w = STATE.room.current_participants !== undefined
+        ? STATE.room.current_participants : STATE.room.participants;
+      if ((w || 0) > 0) countEl.textContent = compactCount(w);
+      else countEl.textContent = "";
+      titleEl.textContent = "LIVE · " + (STATE.room.title || "Untitled Room");
+      panelTitle.textContent = STATE.room.title || "Untitled Room";
+      ensureThumb(STATE.room.cover);
+      ensureHost(STATE.room);
+      setDurationText();
+      replayRow.classList.toggle("hidden", !(STATE.room.status === "ended" && STATE.room.recording_url));
+    }
+
+    function teardownHls() {
+      if (STATE.hls) { try { STATE.hls.destroy(); } catch (e) { /* ignore */ } STATE.hls = null; }
+      if (audio) audio.removeAttribute("src");
+    }
+
+    function resolveUrl(room) {
+      var u = "";
+      if (room.status === "ended" && room.recording_url) u = room.recording_url.trim();
+      else if (room.streaming_url) u = room.streaming_url.trim();
+      return u;
+    }
+
+    function start() {
+      var room = STATE.room || {};
+      var url = resolveUrl(room);
+      if (!url || !audio) { STATE.playing = false; updateGlyph(); return false; }
+      teardownHls();
+      var isHls = /\.m3u8([?#].*)?$/i.test(url);
+      var willHls = isHls && global.Hls && global.Hls.isSupported();
+      audio.src = url;
+      if (willHls) {
+        STATE.hls = new global.Hls();
+        STATE.hls.loadSource(url);
+        STATE.hls.attachMedia(audio);
+      }
+      var p = audio.play();
+      if (p && p.catch) p.catch(function () { STATE.playing = false; updateGlyph(); });
+      STATE.playing = true;
+      updateGlyph();
+      return true;
+    }
+
+    function stop() {
+      STATE.playing = false;
+      teardownHls();
+      if (audio) { audio.pause(); audio.currentTime = 0; }
+      updateGlyph();
+    }
+
+    function updateGlyph() {
+      if (toggleBtn) toggleBtn.textContent = STATE.playing ? "❚❚" : "▶";
+    }
+
+    function attach(room) {
+      initRefs();
+      if (!tray) return;
+      render(room || {});
+      tray.classList.remove("hidden");
+      if (room && room.autoplay) start();
+      updateGlyph();
+      if (pill && !pill._wunHooked) {
+        pill._wunHooked = true;
+        pill.addEventListener("click", function (e) {
+          if (e.target === leaveBtn) return;
+          if (replayRow && replayRow.classList.contains("hidden")) {
+            if (panel) panel.classList.toggle("hidden");
+          } else {
+            start(); // replay recording from panel
+            if (panel) panel.classList.add("hidden");
+          }
+        });
+      }
+      if (toggleBtn && !toggleBtn._wunHooked) {
+        toggleBtn._wunHooked = true;
+        toggleBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (STATE.playing) stop();
+          else start();
+        });
+      }
+      if (leaveBtn && !leaveBtn._wunHooked) {
+        leaveBtn._wunHooked = true;
+        leaveBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          stop(); hide();
+        });
+      }
+      var close = $("live-tray-panel-close");
+      if (close && !close._wunHooked) { close._wunHooked = true; close.addEventListener("click", function () { if (panel) panel.classList.add("hidden"); }); }
+      if (replayBtn && !replayBtn._wunHooked) { replayBtn._wunHooked = true; replayBtn.addEventListener("click", function () { start(); if (panel) panel.classList.add("hidden"); }); }
+      if (audio && !audio._wunHooked) {
+        audio._wunHooked = true;
+        audio.addEventListener("ended", function () { STATE.playing = false; updateGlyph(); });
+      }
+    }
+
+    function hide() {
+      if (tray) tray.classList.add("hidden");
+      if (panel) panel.classList.add("hidden");
+      // AUDIT-003 §5.1: reader hides itself when stream ends ("nothing rather
+      // than a broken card").
+    }
+
+    global.LiveAudioTray = { attach: attach, hide: hide, stop: stop };
+
+    document.addEventListener("DOMContentLoaded", function () {
+      initRefs();
+      // Hydrate a server-rendered room if present, else stay hidden (empty state).
+      if (tray && typeof global.__LIVE_ROOM__ === "object" && global.__LIVE_ROOM__) attach(global.__LIVE_ROOM__);
+      // Interactive autoplay is intentionally deferred to user gesture; a
+      // relay-driven live_rooms.js may call attach() directly.
+    });
+
+  })(typeof window !== "undefined" ? window : globalThis);
+</script>

@@ -1,0 +1,144 @@
+<!--
+  _left_rail.html — Desktop sticky left rail for the iyou_wun shell.
+
+  Pattern: Primal left-nav (ATT-001, MIT c96ee211) collapsed onto a single
+  sticky in-flow grid cell below the L1(_standard_header) + L2(_nav) stack.
+  AUDIT-005 §2 geometry: sticky top-[128px], h-[calc(100vh-128px)], own scroll.
+
+  DOM contract:
+    - The rail is the LEFT cell of the `lg:` 3-column shell in base.html
+      (grid-cols-[184px_minmax(0,1fr)_348px]; mini-rail track 48px on
+      1024-1280). Parent grid row must be `items-start` so the cell clamps.
+    - Renders the shared slot roster via includes/_left_rail_slots.html with
+      slot_style="rail" (labels `hidden xl:inline`, centered on mini-rail).
+    - Compose morph also used by the mobile dock FAB → same global
+      `openPostComposer()` (polyfilled here if a newer controller is absent).
+    - Identity footer morphs: persona enclave pill at xl+, compact avatar link
+      on the mini-rail (identity dot, AUDIT-005 §2.3).
+    - Ships includes/_left_rail_badges.js contract as inline fallback —
+      hydrates [data-unread-mirror]/[data-count-mirror] on the slots from the
+      header bell dot and the floating-chat numeric badge. Deploy option: move
+      to static/js/_rail_badges.js and include once in base.html (companion #17).
+-->
+{% load static %}
+{% if user.is_authenticated or request.user.is_authenticated %}
+<nav id="left-rail-nav" aria-label="Primary desktop navigation"
+     class="hidden lg:flex flex-col w-full h-[calc(100vh-128px)] max-h-[calc(100vh-128px)] sticky top-[128px]
+            font-mono text-xs">
+
+  {# ---- [1] Brand lockup: 48px band (AUDIT-005 §3.2) ---- #}
+  <div class="h-12 flex items-center gap-2 px-3 xl:px-4 shrink-0">
+    <a href="{% url 'feed' %}" class="flex items-center gap-2 min-w-0" title="iyou_wun — Stream">
+      <img src="{% static 'img/logo_square_sm.png' %}" alt="wun"
+           onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
+           class="w-6 h-6 xl:w-8 xl:h-8 rounded-lg object-cover shrink-0
+                  bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"/>
+      <span class="hidden xl:inline min-w-0 text-slate-900 dark:text-slate-100 font-extrabold tracking-tight whitespace-nowrap">
+        iyou<span class="text-violet-600 dark:text-violet-400">_wun</span>
+      </span>
+    </a>
+  </div>
+
+  {# ---- Nav stack: shared slot roster (rail variant) ---- #}
+  {% include "includes/_left_rail_slots.html" with slot_style="rail" %}
+
+  {# ---- Compose CTA: full pill (>1280) / 36px square (<=1280) (AUDIT-005 §2.3) ---- #}
+  <div class="px-3 pb-3 pt-2 shrink-0">
+    <button id="rail-compose-btn" type="button"
+            class="flex items-center justify-center gap-2 rounded-full font-semibold
+                   bg-violet-600 hover:bg-violet-500 text-white shadow-lg transition active:scale-95
+                   w-full h-[48px] xl:w-full
+                   max-xl:!w-9 max-xl:!h-9 max-xl:rounded-lg max-xl:mx-auto"
+            onclick="openPostComposer()"
+            aria-label="New Note"
+            title="New Note">
+      <span class="text-lg leading-none" aria-hidden="true">＋</span>
+      <span class="hidden xl:inline text-xs">New Note</span>
+    </button>
+  </div>
+
+  {# ---- Identity footer dock (AUDIT-005 §2.3 / §3.2) ---- #}
+  <div class="border-t border-slate-200 dark:border-slate-800 p-2 shrink-0">
+    <div class="hidden xl:block">
+      {% include "includes/_persona_enclave.html" %}
+    </div>
+    {# Mini-rail identity dot: compact avatar → dashboard (40×40) #}
+    <div class="xl:hidden">
+      <a href="{% url 'dashboard' %}"
+         title="Dashboard &amp; Settings"
+         aria-label="Dashboard and settings"
+         class="flex items-center justify-center w-10 h-10 mx-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+        <img src="{% firstof user_avatar_url '' %}" alt=""
+             class="mesh-user-avatar w-6 h-6 rounded-full object-cover {% if not user_avatar_url %}hidden{% endif %}"
+             onerror="this.classList.add('hidden')"
+             onload="this.classList.remove('hidden')"/>
+        <span class="w-5 h-5 rounded-full bg-violet-500 flex items-center justify-center text-[10px] font-bold text-white {% if user_avatar_url %}hidden{% endif %}">
+          {{ user_display_label|default:user.username|truncatechars:1|upper }}
+        </span>
+      </a>
+    </div>
+  </div>
+</nav>
+
+{# ---- Badge mirror hydration (slot dots/pills from live client state) ---- #}
+{% endif %}
+<script>
+  // Rail badge mirror: hydrate [data-unread-mirror]/[data-count-mirror] badges
+  // inside #left-rail-slot-list from authoritative client-side sources:
+  //   - notification unread dot  -> #notification-unread-dot (notification_manager.js)
+  //   - chat numeric pill         -> #floating-chat-unread-badge (floating_chat)
+  // Idempotent + source-absent-safe (dock and rail both ship it in Sprint 2).
+  (function (global) {
+    "use strict";
+    if (global.__wunLeftRailBadgesBound) return;
+    global.__wunLeftRailBadgesBound = true;
+
+    function srcOf(name) {
+      return name === "notification"
+        ? document.getElementById("notification-unread-dot")
+        : name === "chat"
+          ? document.getElementById("floating-chat-unread-badge")
+          : null;
+    }
+
+    function apply() {
+      var list = document.getElementById("left-rail-slot-list");
+      if (!list) return;
+
+      Array.prototype.forEach.call(list.querySelectorAll("[data-unread-mirror]"), function (dot) {
+        var src = srcOf(dot.getAttribute("data-unread-mirror"));
+        if (!src) return;
+        dot.classList.toggle("hidden", src.classList.contains("hidden") ||
+          (src.textContent && parseInt(src.textContent, 10) === 0));
+      });
+
+      Array.prototype.forEach.call(list.querySelectorAll("[data-count-mirror]"), function (pill) {
+        var src = srcOf(pill.getAttribute("data-count-mirror"));
+        if (!src) return;
+        var n = parseInt(src.textContent, 10) || 0;
+        pill.textContent = n > 99 ? "99+" : String(n);
+        pill.classList.toggle("hidden", n === 0);
+      });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        apply();
+        new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+      });
+    } else {
+      apply();
+      new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+    }
+
+    global.openPostComposer = global.openPostComposer || function () {
+      var content = document.getElementById("postContent");
+      if (content) {
+        content.scrollIntoView({ behavior: "smooth", block: "center" });
+        content.focus();
+      } else {
+        global.location.assign("/feed#compose");
+      }
+    };
+  })(typeof window !== "undefined" ? window : globalThis);
+</script>

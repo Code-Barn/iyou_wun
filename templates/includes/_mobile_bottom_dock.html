@@ -1,0 +1,142 @@
+<!--
+  _mobile_bottom_dock.html — Mobile bottom navigation dock (AUDIT-005 §4).
+
+  Pattern: Damus tab bar (ATT-003, MIT 4a94f666) formalized to a 5-cell dock:
+  Feed · Gallery · Chat · Notifications · Compose-FAB. Consumes AUDIT-002 §9
+  locked decisions:
+    - h-14 (56px) + env(safe-area-inset-bottom); slat z-30 lg:hidden glass.
+    - dot-not-count for Feed/Gallery/Notifications; numeric rose pill for Chat ONLY.
+    - Never jitters: static, no handleScrollHide; 24px icons + min-h-[44px] targets.
+    - FAB cell (5th) opens composer via global openPostComposer().
+
+  DOM contract:
+    - Included in base.html AFTER _floating_chat_dock.html, gated on the
+      authenticated-user check (see include guard below); visibility constrained
+      to <768px via lg:hidden (MD uses the L1 flyout rail variant instead,
+      AUDIT-005 §2.3).
+    - Feed dot id rail-independent: mobile-feed-unread-dot. Chat pill id
+      mobile-chat-unread-pill is hydrated from #floating-chat-unread-badge by
+      the same mirroring window.__wunMobileDockBadgesBound guard used on the
+      lock; notifications dot synced from #notification-unread-dot.
+    - Compose FAB and rail CTA share the one global openPostComposer().
+    - Bottom-of-stream clearance: parents must apply pb-28 lg:pb-0 (companion
+      edits base/feed/gallery/notifications).
+-->
+{% load static %}
+{% if user.is_authenticated or request.user.is_authenticated %}
+<nav id="mobile-bottom-dock" aria-label="Primary"
+     class="fixed inset-x-0 bottom-0 z-30 lg:hidden border-t border-slate-200
+            dark:border-gray-800/80 bg-white/85 dark:bg-[#0B0F19]/85 backdrop-blur-md font-mono">
+  <div class="mx-auto grid max-w-screen-sm grid-cols-5 items-stretch h-14 pb-[env(safe-area-inset-bottom)]">
+
+    {# ---- 1 · Stream / Feed (dot) ---- #}
+    <a href="{% url 'feed' %}"
+       {% if request.resolver_match.url_name == 'feed' and not request.GET.explore %}aria-current="page"{% endif %}
+       aria-label="{% if request.resolver_match.url_name == 'feed' %}Stream, current page{% else %}Stream{% endif %}"
+       title="Stream"
+       class="relative flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors
+              {% if request.resolver_match.url_name == 'feed' and not request.GET.explore %}text-violet-600 dark:text-violet-400{% else %}text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400{% endif %}">
+      <svg class="w-6 h-6 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12l9-9 9 9"/><path d="M5 10v10h14V10"/></svg>
+      <span class="text-[9px] leading-none uppercase tracking-wider">Stream</span>
+      <span id="mobile-feed-unread-dot" class="absolute top-1 right-4 h-2 w-2 rounded-full bg-violet-500 hidden" aria-hidden="true"></span>
+    </a>
+
+    {# ---- 2 · Gallery (dot) ---- #}
+    <a href="{% url 'gallery' %}"
+       {% if request.resolver_match.url_name == 'gallery' %}aria-current="page"{% endif %}
+       aria-label="{% if request.resolver_match.url_name == 'gallery' %}Gallery, current page{% else %}Gallery{% endif %}"
+       title="Gallery"
+       class="relative flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors
+              {% if request.resolver_match.url_name == 'gallery' %}text-violet-600 dark:text-violet-400{% else %}text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400{% endif %}">
+      <svg class="w-6 h-6 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+      <span class="text-[9px] leading-none uppercase tracking-wider">Gallery</span>
+      <span id="mobile-gallery-unread-dot" class="absolute top-1 right-4 h-2 w-2 rounded-full bg-violet-500 hidden" aria-hidden="true"></span>
+    </a>
+
+    {# ---- 3 · Chat / DMs (NUMERIC pill — the only reliable counter, AUDIT-002 lock) ---- #}
+    <a href="{% url 'chat' %}"
+       {% if request.resolver_match.url_name == 'chat' %}aria-current="page"{% endif %}
+       aria-label="{% if request.resolver_match.url_name == 'chat' %}Chat, current page{% else %}Chat{% endif %}"
+       title="Chat &amp; Direct Messages"
+       class="relative flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors
+              {% if request.resolver_match.url_name == 'chat' %}text-violet-600 dark:text-violet-400{% else %}text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400{% endif %}">
+      <svg class="w-6 h-6 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <span class="text-[9px] leading-none uppercase tracking-wider">Chat</span>
+      <span id="mobile-chat-unread-pill" class="absolute top-0.5 right-4 min-w-[18px] h-[18px] rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white flex items-center justify-center hidden">0</span>
+    </a>
+
+    {# ---- 4 · Notifications (dot, synced to header bell) ---- #}
+    <a href="{% url 'notifications' %}"
+       {% if request.resolver_match.url_name == 'notifications' %}aria-current="page"{% endif %}
+       aria-label="{% if request.resolver_match.url_name == 'notifications' %}Notifications, current page{% else %}Notifications{% endif %}"
+       title="Notifications"
+       class="relative flex flex-col items-center justify-center gap-0.5 min-h-[44px] transition-colors
+              {% if request.resolver_match.url_name == 'notifications' %}text-violet-600 dark:text-violet-400{% else %}text-slate-500 hover:text-violet-600 dark:text-slate-400 dark:hover:text-violet-400{% endif %}">
+      <svg class="w-6 h-6 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
+      <span class="text-[9px] leading-none uppercase tracking-wider">Notif</span>
+      <span id="mobile-notif-unread-dot" class="absolute top-1 right-4 h-2 w-2 rounded-full bg-violet-500 hidden" aria-hidden="true"></span>
+    </a>
+
+    {# ---- 5 · Compose FAB (opens the existing composer; AUDIT-002 §9.1) ---- #}
+    <button id="mobile-compose-fab" type="button"
+            onclick="openPostComposer()"
+            aria-label="Compose new note"
+            title="New Note"
+            class="flex items-center justify-center min-h-[44px] transition active:scale-95">
+      <span class="w-11 h-11 rounded-full bg-violet-600 hover:bg-violet-500 text-white text-xl leading-none shadow-lg flex items-center justify-center" aria-hidden="true">＋</span>
+    </button>
+
+  </div>
+</nav>
+{% endif %}
+<script>
+  // Mobile dock badge mirror: hydrate the dock dots/pill from authoritative
+  // client-side sources (idempotent + source-absent safe):
+  //   - chat numeric pill      <- #floating-chat-unread-badge (floating_chat)
+  //   - notifications dot      <- #notification-unread-dot   (notification_manager.js)
+  //   - feed/gallery dots      <- reserved; fed by client last-seen store later
+  // Shared contract with rail (window.__wunMobileDockBadgesBound is dock-local).
+  (function (global) {
+    "use strict";
+    if (global.__wunMobileDockBadgesBound) return;
+    global.__wunMobileDockBadgesBound = true;
+
+    function apply() {
+      var chatSrc = document.getElementById("floating-chat-unread-badge");
+      if (chatSrc) {
+        var pill = document.getElementById("mobile-chat-unread-pill");
+        if (pill) {
+          var n = parseInt(chatSrc.textContent, 10) || 0;
+          pill.textContent = n > 99 ? "99+" : String(n);
+          pill.classList.toggle("hidden", n === 0);
+        }
+      }
+      var notifSrc = document.getElementById("notification-unread-dot");
+      if (notifSrc) {
+        var dot = document.getElementById("mobile-notif-unread-dot");
+        if (dot) dot.classList.toggle("hidden", notifSrc.classList.contains("hidden"));
+      }
+    }
+
+    function init() {
+      apply();
+      new MutationObserver(apply).observe(document.body, { childList: true, subtree: true });
+    }
+
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", init);
+    } else {
+      init();
+    }
+
+    global.openPostComposer = global.openPostComposer || function () {
+      var content = document.getElementById("postContent");
+      if (content) {
+        content.scrollIntoView({ behavior: "smooth", block: "center" });
+        content.focus();
+      } else {
+        global.location.assign("/feed#compose");
+      }
+    };
+  })(typeof window !== "undefined" ? window : globalThis);
+</script>
