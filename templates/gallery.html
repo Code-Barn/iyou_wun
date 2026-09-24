@@ -3,15 +3,13 @@
 
 {% block title %}Media Gallery - iyou_wun{% endblock %}
 
-{% block og_tags %}
-    <meta property="og:site_name" content="iyou_wun" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Media Gallery — iyou_wun" />
-    <meta property="og:description" content="Sovereign visuals, video, and audio from the iyou_wun mesh." />
-    <meta property="og:image" content="{{ og_image }}" />
-    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
-    <meta name="twitter:card" content="summary_large_image" />
-{% endblock %}
+{% block og_title %}Media Gallery — iyou_wun{% endblock %}
+{% block og_description %}Sovereign visuals, video, and audio from the iyou_wun mesh.{% endblock %}
+{% block og_image %}{{ og_image }}{% endblock %}
+{% block twitter_card %}summary_large_image{% endblock %}
+{% block twitter_title %}Media Gallery — iyou_wun{% endblock %}
+{% block twitter_description %}Sovereign visuals, video, and audio from the iyou_wun mesh.{% endblock %}
+{% block twitter_image %}{{ og_image }}{% endblock %}
 
 {% block extra_head %}
     <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />

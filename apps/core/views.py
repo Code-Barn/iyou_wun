@@ -769,6 +769,26 @@ class FeedView(TemplateView):
                 for _replies in (thread_data.get("replies") or {}).values():
                     for _r in _replies:
                         enrich_image_grid(_r)
+
+                # Phase 16.1 — Dynamic OG unfurling: preview the focused thread note.
+                _focused = context.get("thread_root") or {}
+                if _focused:
+                    context["meta_title"] = (
+                        f"{_focused.get('author_display_name') or _focused.get('author_name') or 'Note'} on iyou_wun"
+                    )
+                    _text = (
+                        _focused.get("clean_content")
+                        or _focused.get("display_content")
+                        or _focused.get("content")
+                        or ""
+                    ).strip()
+                    context["meta_description"] = _text[:160] or "Decentralized note on iyou_wun"
+                    _media = _focused.get("media_attachments")
+                    if _media:
+                        context["twitter_card"] = "summary_large_image"
+                        context["meta_image"] = _media[0].get("url")
+                    elif _focused.get("author_avatar"):
+                        context["meta_image"] = _focused["author_avatar"]
         else:
             from .context import get_dependent_context
             from apps.feed.selectors import filter_feed_for_dependent, is_feed_circle_allowed
@@ -3598,6 +3618,18 @@ class ProfileView(TemplateView):
 
         context["profile"] = profile
 
+        # Phase 16.1 — Dynamic OG unfurling for sovereign profiles.
+        _disp_name = (
+            profile.get("display_name")
+            or profile.get("name")
+            or (context.get("npub") or "")[:12]
+            or "wun"
+        )
+        context["meta_title"] = f"{_disp_name} (@{profile.get('nip05') or 'wun'})"
+        context["meta_description"] = (profile.get("about") or "").strip()[:160] or "Decentralized profile on iyou_wun"
+        if profile.get("picture"):
+            context["meta_image"] = profile.get("picture")
+
         author_did = owner_user.username if owner_user else ""
         context["target_did"] = author_did
         context["profile_did"] = author_did
@@ -3842,6 +3874,20 @@ class LinkDeckView(TemplateView):
                 if request.user.is_authenticated
                 else ""
             ),
+            # Phase 16.1 — Dynamic OG unfurling for link decks.
+            "meta_title": (
+                f"{(target_deck.headline if target_deck else '') or (target_deck.display_handle if target_deck else '') or 'iyou_wun'} — Sovereign Link Deck"
+            ),
+            "meta_description": (
+                (profile.get("about") or "")
+                or ((target_deck.headline if target_deck else "") or "")
+            )[:160] or "Verified decentralized identity and social coordinates.",
+            "meta_image": (
+                (target_deck.avatar_url if target_deck else "")
+                or (profile.get("picture") if profile else "")
+                or ""
+            ),
+            "twitter_card": "summary",
         }
         return self.render_to_response(context)
 

@@ -1,21 +1,16 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}Feed — iyou_wun{% endblock %}
+{% block head_title %}{{ meta_title|default:"iyou_wun — Sovereign Social Hub" }}{% endblock %}
 
-{% block og_tags %}
-{% if feed_mode == 'thread' and thread_root %}
-<meta property="og:site_name" content="iyou_wun" />
-<meta property="og:type" content="article" />
-<meta property="og:title" content="{{ thread_root.author_name|default:thread_root.npub|truncatechars:20 }} on iyou_wun" />
-<meta property="og:description" content="{{ thread_root.display_content|default:thread_root.content|striptags|truncatechars:180 }}" />
-<meta property="og:image" content="{{ thread_root.media_attachments.0.url|default:thread_root.author_avatar|default:og_image }}" />
-<meta property="og:url" content="{{ request.build_absolute_uri }}" />
-<meta name="twitter:card" content="summary_large_image" />
-{% else %}
-{{ block.super }}
-{% endif %}
-{% endblock %}
+{% block og_type %}{% if feed_mode == 'thread' and thread_root %}article{% else %}website{% endif %}{% endblock %}
+{% block og_title %}{{ meta_title|default:"iyou_wun — Sovereign Social Hub" }}{% endblock %}
+{% block og_description %}{{ meta_description|default:block.super }}{% endblock %}
+{% block og_image %}{{ meta_image|default:block.super }}{% endblock %}
+{% block twitter_card %}{{ twitter_card|default:"summary" }}{% endblock %}
+{% block twitter_title %}{{ meta_title|default:block.super }}{% endblock %}
+{% block twitter_description %}{{ meta_description|default:block.super }}{% endblock %}
+{% block twitter_image %}{{ meta_image|default:block.super }}{% endblock %}
 
 {% block extra_head %}
 <style>

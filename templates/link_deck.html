@@ -3,6 +3,17 @@
 <html>
 <head>
     <title>{% if display_handle %}{{ display_handle }}{% elif profile.name %}{{ profile.name }}{% else %}Link Deck{% endif %} - iyou_wun</title>
+    <meta name="description" content="{{ meta_description|default:'Verified decentralized identity and social coordinates.' }}" />
+    <meta property="og:site_name" content="iyou_wun" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
+    <meta property="og:title" content="{{ meta_title|default:'iyou_wun — Sovereign Social Hub' }}" />
+    <meta property="og:description" content="{{ meta_description|default:'Verified decentralized identity and social coordinates.' }}" />
+    <meta property="og:image" content="{% if meta_image %}{{ meta_image }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'img/logo_square.png' %}{% endif %}" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="{{ meta_title|default:'iyou_wun — Sovereign Social Hub' }}" />
+    <meta name="twitter:description" content="{{ meta_description|default:'Verified decentralized identity and social coordinates.' }}" />
+    <meta name="twitter:image" content="{% if meta_image %}{{ meta_image }}{% else %}{{ request.scheme }}://{{ request.get_host }}{% static 'img/logo_square.png' %}{% endif %}" />
     <script>
       (function() {
         const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}iyou_wun{% endblock %}</title>
+    <title>{% block head_title %}{% block title %}iyou_wun — Sovereign Social Hub{% endblock %}{% endblock %}</title>
     <script>
       (function() {
         const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
@@ -79,13 +79,17 @@
     <meta name="apple-mobile-web-app-title" content="wun">
     <link rel="manifest" href="{% static 'manifest.json' %}">
     {% block og_tags %}
+    <meta name="description" content="{% block head_description %}Sovereign social feed on the decentralized mesh. Verified cryptographic identity without centralized intermediaries.{% endblock %}" />
     <meta property="og:site_name" content="iyou_wun" />
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="iyou_wun — Sovereign Microblogging & Social Mesh" />
-    <meta property="og:description" content="Decentralized notes, links, media, and governance on the sovereign mesh." />
-    <meta property="og:image" content="{{ request.scheme }}://{{ request.get_host }}{% static 'img/iyou_symbol.png' %}" />
-    <meta property="og:url" content="{{ request.build_absolute_uri }}" />
-    <meta name="twitter:card" content="summary_large_image" />
+    <meta property="og:type" content="{% block og_type %}website{% endblock %}" />
+    <meta property="og:url" content="{% block og_url %}{{ request.build_absolute_uri }}{% endblock %}" />
+    <meta property="og:title" content="{% block og_title %}iyou_wun — Sovereign Social Hub{% endblock %}" />
+    <meta property="og:description" content="{% block og_description %}Sovereign social feed on the decentralized mesh. Verified cryptographic identity without centralized intermediaries.{% endblock %}" />
+    <meta property="og:image" content="{% block og_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'img/logo_square.png' %}{% endblock %}" />
+    <meta name="twitter:card" content="{% block twitter_card %}summary{% endblock %}" />
+    <meta name="twitter:title" content="{% block twitter_title %}iyou_wun — Sovereign Social Hub{% endblock %}" />
+    <meta name="twitter:description" content="{% block twitter_description %}Sovereign social feed on the decentralized mesh. Verified cryptographic identity without centralized intermediaries.{% endblock %}" />
+    <meta name="twitter:image" content="{% block twitter_image %}{{ request.scheme }}://{{ request.get_host }}{% static 'img/logo_square.png' %}{% endblock %}" />
     {% endblock %}
     {% block extra_head %}{% endblock %}
 </head>

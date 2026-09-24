@@ -1747,13 +1747,57 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, '<meta property="og:title" content="OG Alice on iyou_wun"')
         self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/og_avatar.png"')
 
-        # Profile mode: profile metadata populates the og tags
+        # Profile mode: dynamic meta_title mirrors display name + NIP-05 identity
         npub = hex_to_npub(pk)
         with patch("apps.core.views.relay_req", return_value=relay_data):
             response = self.client.get(reverse("profile", kwargs={"npub": npub}))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '<meta property="og:title" content="OG Alice on iyou_wun"')
+        self.assertContains(response, '<meta property="og:title" content="OG Alice (@wun)"')
         self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/og_avatar.png"')
+        self.assertContains(response, '<meta property="og:description" content="Thread OG test creator"')
+        self.assertContains(response, '<meta name="twitter:card" content="summary"')
+
+    def test_open_graph_defaults_branded_on_plain_feed(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<meta property="og:title" content="iyou_wun — Sovereign Social Hub"')
+        self.assertContains(response, '<meta name="twitter:card" content="summary"')
+        self.assertContains(response, '<title>iyou_wun — Sovereign Social Hub</title>')
+
+    def test_open_graph_uses_large_image_card_when_thread_has_media(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        hero_event = make_event("og_media_1", 1063, pubkey=pk, created_at=1700000100, content="OG media note", tags=[
+            ["url", "https://cdn.iyou.me/og_media.png"],
+            ["m", "image/png"],
+        ])
+        with patch("apps.core.views.relay_req", return_value={"og_media_1": hero_event}):
+            response = self.client.get(reverse("feed") + "?thread=og_media_1")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<meta name="twitter:card" content="summary_large_image"')
+        self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/og_media.png"')
+        self.assertEqual(response.context.get("meta_title"), "Note on iyou_wun")
+        self.assertTrue(response.context.get("meta_description").startswith("OG media note"))
+
+    def test_open_graph_tags_rendered_on_link_deck_page(self):
+        pk = "4444444444444444444444444444444444444444444444444444444444444444"
+        user = User.objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(
+            user=user,
+            handle="ogdeck",
+            is_public=True,
+            headline="Deck OG headline",
+            avatar_url="https://cdn.iyou.me/deck_avatar.png",
+        )
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get("/@ogdeck")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '<meta property="og:title" content="Deck OG headline — Sovereign Link Deck"')
+        self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/deck_avatar.png"')
+        self.assertContains(response, '<meta property="og:description" content="Deck OG headline"')
+        self.assertContains(response, '<meta name="twitter:card" content="summary"')
 
     def test_nip56_report_action_markup_present_in_kebab_menu(self):
         with patch("apps.core.views.relay_req", return_value={
