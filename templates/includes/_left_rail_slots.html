@@ -166,13 +166,13 @@
     {# ---------------------------------------------------------------- divider #}
     <li class="pt-2 pb-1 border-t border-slate-200 dark:border-slate-800"></li>
 
-    {# Bookmarks — NIP-51 gap, wired to deck manager (AUDIT-005 §3.3) #}
+    {# Bookmarks — sovereign per-user note collection (Phase 27) #}
     <li>
-      <a href="{% url 'dashboard' %}#deck"
-         {% if request.resolver_match.url_name == 'dashboard' and request.GET.deck %}aria-current="page"{% endif %}
-         title="Bookmarks (NIP-51 collection — gap: wired to deck manager)"
+      <a href="{% url 'bookmarks' %}"
+         {% if request.resolver_match.url_name == 'bookmarks' %}aria-current="page"{% endif %}
+         title="Bookmarks"
          class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
-                {% if request.resolver_match.url_name == 'dashboard' and request.GET.deck %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
+                {% if request.resolver_match.url_name == 'bookmarks' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950
                 {% else %}text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-800/60{% endif %}
                 {% if slot_style == 'flyout' %}justify-start px-4{% else %}justify-center px-1 xl:justify-start xl:px-3{% endif %}">
         <svg class="w-5 h-5 shrink-0 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>

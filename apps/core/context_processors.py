@@ -1,6 +1,16 @@
 from django.conf import settings
 
 
+def bookmark_ids(request):
+    """Set of the signed-in user's bookmarked event_ids for kebab-menu toggling."""
+    if not request.user.is_authenticated:
+        return {"user_bookmark_ids": set()}
+    from .models import Bookmark
+
+    ids = Bookmark.objects.filter(user=request.user).values_list("event_id", flat=True)[:200]
+    return {"user_bookmark_ids": set(ids)}
+
+
 def satellite_urls(request):
     level = getattr(settings, "WUN_USER_LEVEL", "2")
     if level == "1":

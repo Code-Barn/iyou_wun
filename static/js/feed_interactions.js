@@ -923,6 +923,9 @@
             '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-950/50 hover:text-violet-600 dark:hover:text-violet-400 flex items-center gap-2" onclick="suggestToDev(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\', \'' + snippetEscaped + '\')">💡 Suggest to Dev</button>' +
             '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-amber-50 dark:hover:bg-amber-950/50 hover:text-amber-600 dark:hover:text-amber-400 flex items-center gap-2" onclick="nominatePostOfTheDay(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')">🏆 Post of the Day</button>' +
             '<button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-emerald-50 dark:hover:bg-emerald-950/50 hover:text-emerald-600 dark:hover:text-emerald-400 flex items-center gap-2" onclick="setEnclavePetname(\'' + escapeAttr(pubkey) + '\', \'' + escapeAttr(authorName) + '\')">🛡️ Set Enclave Petname</button>' +
+            '<button type="button" class="bookmark-toggle-btn w-full flex items-center gap-2 px-3 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-left text-xs" data-bookmarked="' + (getBookmarkIdSet().has(noteId) ? "true" : "false") + '" onclick="toggleBookmark(\'' + escapeAttr(noteId) + '\', this, event)">' +
+            '<svg class="w-3.5 h-3.5 shrink-0 stroke-current stroke-2 bookmark-icon ' + (getBookmarkIdSet().has(noteId) ? "fill-current" : "fill-none") + '" fill="none" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" /></svg>' +
+            '<span class="bookmark-label">' + (getBookmarkIdSet().has(noteId) ? "Remove Bookmark" : "Bookmark Note") + '</span></button>' +
             '<div class="border-t border-slate-100 dark:border-slate-800 my-1"></div>' +
             '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="viewRawEventJson(\'' + escapeAttr(noteId) + '\')">📄 View Raw JSON</button>' +
             '<button type="button" class="w-full text-left px-3 py-1.5 text-slate-500 hover:text-slate-800 dark:hover:text-slate-300 flex items-center gap-2" onclick="copyNotePermalink(\'' + escapeAttr(noteId) + '\')">🔗 Copy Event ID / Link</button>' +
@@ -2383,6 +2386,95 @@
         }
     }
 
+    // ---------- Sovereign Bookmarks (Phase 27) ----------
+
+    function getBookmarkIdSet() {
+        if (!window.__bookmarkIds) window.__bookmarkIds = new Set();
+        return window.__bookmarkIds;
+    }
+
+    function syncBookmarkButton(btn, isBookmarked) {
+        if (!btn) return;
+        btn.setAttribute("data-bookmarked", isBookmarked ? "true" : "false");
+        var icon = btn.querySelector(".bookmark-icon");
+        if (icon) {
+            icon.classList.toggle("fill-current", !!isBookmarked);
+            icon.classList.toggle("fill-none", !isBookmarked);
+        }
+        var label = btn.querySelector(".bookmark-label");
+        if (label) label.textContent = isBookmarked ? "Remove Bookmark" : "Bookmark Note";
+    }
+
+    function initBookmarkIdsMirror() {
+        if (!window.__bookmarkIdsLoaded && window.userPubkey) {
+            window.__bookmarkIdsLoaded = true;
+            fetch("/api/bookmarks/ids/", { credentials: "same-origin" })
+                .then(function (res) { return res.ok ? res.json() : { ids: [] }; })
+                .then(function (data) {
+                    var idSet = getBookmarkIdSet();
+                    (data.ids || []).forEach(function (id) { idSet.add(id); });
+                    document.querySelectorAll(".bookmark-toggle-btn").forEach(function (btn) {
+                        var card = btn.closest("[data-note-card-id]");
+                        var noteId = card ? card.getAttribute("data-note-card-id") : "";
+                        if (noteId && idSet.has(noteId)) {
+                            syncBookmarkButton(btn, true);
+                        }
+                    });
+                })
+                .catch(function () {});
+        }
+    }
+
+    function toggleBookmark(noteId, el, event) {
+        if (event && typeof event.stopPropagation === "function") event.stopPropagation();
+        if (!noteId) return;
+        var btn = (el && typeof el.closest === "function") ? el.closest(".bookmark-toggle-btn") : null;
+        if (!btn) {
+            var cardEl = document.querySelector('.feed-note-card[data-note-card-id="' + noteId + '"]');
+            btn = cardEl ? cardEl.querySelector(".bookmark-toggle-btn") : null;
+        }
+        var csrf = getCsrfToken();
+        var headers = { "Content-Type": "application/json" };
+        if (csrf) headers["X-CSRFToken"] = csrf;
+        fetch("/api/bookmarks/toggle/", {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify({ event_id: noteId }),
+            credentials: "same-origin",
+        })
+            .then(function (res) {
+                if (!res.ok) throw new Error("Bookmark toggle failed with status " + res.status);
+                return res.json();
+            })
+            .then(function (data) {
+                var idSet = getBookmarkIdSet();
+                if (data.bookmarked) idSet.add(noteId); else idSet.delete(noteId);
+                syncBookmarkButton(btn, !!data.bookmarked);
+                showToast(data.bookmarked ? "Note saved to Bookmarks" : "Bookmark removed", "info", 2200);
+                if (!data.bookmarked) {
+                    var card = document.querySelector('.feed-note-card[data-note-card-id="' + noteId + '"]');
+                    if (card) {
+                        card.style.transition = "opacity 0.25s ease, transform 0.25s ease";
+                        card.style.opacity = "0";
+                        card.style.transform = "scale(0.98)";
+                        setTimeout(function () {
+                            if (card.parentNode) card.parentNode.removeChild(card);
+                            var remaining = document.querySelectorAll(".feed-note-card").length;
+                            var emptyState = document.getElementById("bookmarks-empty-state");
+                            var countLabel = document.getElementById("bookmarks-count-label");
+                            if (countLabel) countLabel.textContent = remaining + " saved post" + (remaining === 1 ? "" : "s");
+                            if (emptyState && remaining === 0) {
+                                emptyState.classList.remove("hidden");
+                            }
+                        }, 280);
+                    }
+                }
+            })
+            .catch(function (err) {
+                showToast(err && err.message ? err.message : "Could not update bookmark", "error", 2600);
+            });
+    }
+
     function toggleKebabMenu(event) {
         event.stopPropagation();
         var btn = event.currentTarget;
@@ -2554,6 +2646,7 @@
     window.viewRawEventJson = viewRawEventJson;
     window.copyNotePermalink = copyNotePermalink;
     window.shareNote = shareNote;
+    window.toggleBookmark = toggleBookmark;
     window.handleContextualAction = handleContextualAction;
     window.openReportModal = openReportModal;
     window.submitReport = submitReport;
@@ -2887,6 +2980,8 @@
         // an empty shell (marked data-hydrate), kick off the background stream
         // fetch immediately on DOMContentLoaded for fast perceived load.
         fetchInitialFeedStream();
+
+        initBookmarkIdsMirror();
 
         // Apply "Read More" clamping to server-rendered note bodies
         checkAndApplyClamping(document);

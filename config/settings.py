@@ -131,6 +131,7 @@ TEMPLATES = [
                 "django.contrib.messages.context_processors.messages",
                 "apps.core.context_processors.satellite_urls",
                 "apps.core.context_processors.user_identity",
+                "apps.core.context_processors.bookmark_ids",
             ],
         },
 

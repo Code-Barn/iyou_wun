@@ -24,6 +24,9 @@ urlpatterns = [
     path('feed', views.FeedView.as_view(), name='feed'),
     path('notifications/', views.NotificationsView.as_view(), name='notifications'),
     path('gallery', views.GalleryView.as_view(), name='gallery'),
+    path('bookmarks/', views.BookmarksView.as_view(), name='bookmarks'),
+    path('api/bookmarks/toggle/', views.api_toggle_bookmark, name='api_toggle_bookmark'),
+    path('api/bookmarks/ids/', views.api_bookmark_ids, name='api_bookmark_ids'),
     re_path(
         r"^profile/(?P<npub>[a-zA-Z0-9_@.-]+)/?$",
         views.ProfileView.as_view(),

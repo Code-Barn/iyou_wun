@@ -57,7 +57,13 @@ from .moderation import (
     record_community_flag,
     submit_moderation_appeal,
 )
-from .models import HandleVerificationChallenge, IssuedCredential, UserLinkDeck, UserLinkItem
+from .models import (
+    Bookmark,
+    HandleVerificationChallenge,
+    IssuedCredential,
+    UserLinkDeck,
+    UserLinkItem,
+)
 from .utils import validate_external_bio_url, verify_external_profile_token
 
 logger = logging.getLogger(__name__)
@@ -3374,6 +3380,93 @@ class GalleryView(TemplateView):
             "videos": len(videos),
             "audio": len(audio),
         }
+        return context
+
+
+@login_required
+def api_toggle_bookmark(request):
+    """Toggle a bookmark for the signed-in user. JSON POST {"event_id": "<hex>"}."""
+    if request.method != "POST":
+        return JsonResponse({"status": "error", "error": "POST required"}, status=405)
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, TypeError):
+        return HttpResponseBadRequest(json.dumps({"status": "error", "error": "invalid JSON"}))
+
+    event_id = (data.get("event_id") or "").strip().lower()
+    if not event_id or not re.match(r"^[0-9a-f]{1,64}$", event_id):
+        return JsonResponse(
+            {"status": "error", "error": "event_id must be a hex nostr event id"}, status=400
+        )
+
+    bookmarked = False
+    try:
+        with transaction.atomic():
+            _, created = Bookmark.objects.get_or_create(user=request.user, event_id=event_id)
+            if not created:
+                Bookmark.objects.filter(user=request.user, event_id=event_id).delete()
+            bookmarked = created
+    except IntegrityError:
+        Bookmark.objects.filter(user=request.user, event_id=event_id).delete()
+        bookmarked = False
+
+    return JsonResponse({"status": "ok", "bookmarked": bookmarked})
+
+
+def api_bookmark_ids(request):
+    """Current user's saved bookmark event ids (empty list for anonymous)."""
+    ids = []
+    if request.user.is_authenticated:
+        ids = list(
+            Bookmark.objects.filter(user=request.user).values_list("event_id", flat=True)[:200]
+        )
+    return JsonResponse({"status": "ok", "ids": ids})
+
+
+class BookmarksView(LoginRequiredMixin, TemplateView):
+    """Sovereign Bookmarks: hydrates the user's bookmarked note ids from relays
+    through the three-column shell."""
+
+    template_name = "bookmarks.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        relays = get_relays_for_request(self.request)
+        user_pubkey = get_effective_user_pubkey(self.request)
+
+        context["user_pubkey"] = user_pubkey
+        context["user_npub"] = hex_to_npub(user_pubkey) if user_pubkey else ""
+        context["user_did"] = self.request.user.username
+        context["relays_json"] = json.dumps(relays)
+        context["relays"] = relays
+        context["og_image"] = og_fallback_image(self.request)
+
+        event_ids = list(
+            Bookmark.objects.filter(user=self.request.user).values_list("event_id", flat=True)[:50]
+        )
+        context["feed_mode"] = "bookmarks"
+        context["bookmarks_count"] = len(event_ids)
+
+        notes = []
+        if event_ids:
+            raw_events = {}
+            try:
+                raw_events = relay_req(
+                    {"kinds": [1, 1063, 30023], "ids": event_ids}, relay_urls=relays
+                )
+            except Exception:
+                logger.exception("BookmarksView relay hydration failed")
+            feed_data = process_into_feed(raw_events or {})
+            notes = feed_data.get("roots") or []
+            notes = attach_social_counts(notes, relay_urls=relays)
+            for note in notes:
+                enrich_image_grid(note)
+            for reply_list in (feed_data.get("replies") or {}).values():
+                for reply in reply_list:
+                    enrich_image_grid(reply)
+        context["notes"] = notes
+        context["oldest_timestamp"] = None
         return context
 
 

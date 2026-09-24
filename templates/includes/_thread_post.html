@@ -125,6 +125,17 @@
               <span class="btn-label">➕ {% trans "Follow @author" %}</span>
             </button>
             {% endif %}
+            {% if user.is_authenticated %}
+            <button type="button"
+                    onclick="toggleBookmark('{{ note.id }}', this, event)"
+                    data-bookmarked="{% if note.id in user_bookmark_ids %}true{% else %}false{% endif %}"
+                    class="bookmark-toggle-btn w-full flex items-center gap-2 px-3 py-2 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition text-left text-xs">
+              <svg class="w-3.5 h-3.5 shrink-0 stroke-current stroke-2 bookmark-icon {% if note.id in user_bookmark_ids %}fill-current{% else %}fill-none{% endif %}" fill="none" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0111.186 0z" />
+              </svg>
+              <span class="bookmark-label">{% if note.id in user_bookmark_ids %}{% trans "Remove Bookmark" %}{% else %}{% trans "Bookmark Note" %}{% endif %}</span>
+            </button>
+            {% endif %}
             <button type="button" class="w-full text-left px-3 py-2 text-slate-700 dark:text-slate-200 hover:bg-violet-50 dark:hover:bg-violet-950/50 hover:text-violet-600 dark:hover:text-violet-400 flex items-center gap-2" onclick="suggestToDev('{{ note.id }}', '{{ note.pubkey }}', '{{ note.content|truncatechars:100|escapejs }}')">
               💡 Suggest to Dev
             </button>

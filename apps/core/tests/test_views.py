@@ -29,7 +29,7 @@ from django.conf import settings
 
 from .helpers import make_event, VALID_PUBKEY_HEX
 from apps.core.views import hex_to_npub
-from apps.core.models import UserLinkDeck, UserLinkItem
+from apps.core.models import Bookmark, UserLinkDeck, UserLinkItem
 
 
 
@@ -2820,6 +2820,88 @@ class ApiContactsFollowTests(TestCase):
         bad = self._post(target_pubkey="not-a-pubkey", action="follow")
         self.assertEqual(bad.status_code, 400)
         self.assertFalse(bad.json()["success"])
+
+
+class BookmarkEndpointsTests(TestCase):
+    """Sovereign Bookmarks (Phase 27): toggle API, ids API, and /bookmarks/ shell."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(username=f"did:iyou:0x{VALID_PUBKEY_HEX}")
+        self.client.force_login(self.user)
+
+    def _toggle(self, event_id):
+        return self.client.post(
+            "/api/bookmarks/toggle/",
+            data=json.dumps({"event_id": event_id}),
+            content_type="application/json",
+        )
+
+    def test_toggle_bookmark_requires_login(self):
+        self.client.logout()
+        resp = self._toggle("a" * 64)
+        self.assertEqual(resp.status_code, 302)
+
+    def test_toggle_bookmark_round_trip(self):
+        resp = self._toggle("a" * 64)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["bookmarked"])
+        self.assertTrue(Bookmark.objects.filter(user=self.user, event_id="a" * 64).exists())
+
+        resp = self._toggle("a" * 64)
+        self.assertEqual(resp.status_code, 200)
+        self.assertFalse(resp.json()["bookmarked"])
+        self.assertFalse(Bookmark.objects.filter(user=self.user, event_id="a" * 64).exists())
+
+    def test_toggle_bookmark_rejects_bad_payload(self):
+        bad = self._toggle("not-a-hex-id")
+        self.assertEqual(bad.status_code, 400)
+
+        malformed = self.client.post(
+            "/api/bookmarks/toggle/",
+            data="{not json",
+            content_type="application/json",
+        )
+        self.assertEqual(malformed.status_code, 400)
+
+    def test_api_bookmark_ids_lists_saved(self):
+        self._toggle("a" * 64)
+        self._toggle("b" * 64)
+        resp = self.client.get("/api/bookmarks/ids/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(sorted(resp.json()["ids"]), ["a" * 64, "b" * 64])
+
+        self.client.logout()
+        anon = self.client.get("/api/bookmarks/ids/")
+        self.assertEqual(anon.status_code, 200)
+        self.assertEqual(anon.json()["ids"], [])
+
+    def test_bookmarks_page_requires_login(self):
+        self.client.logout()
+        resp = self.client.get(reverse("bookmarks"))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_bookmarks_page_renders_hydrated_notes(self):
+        Bookmark.objects.create(user=self.user, event_id="book_note_1")
+        relay_events = {
+            "book_note_1": make_event("book_note_1", 1, content="A bookmarked note."),
+        }
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            resp = self.client.get(reverse("bookmarks"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTemplateUsed(resp, "bookmarks.html")
+        self.assertEqual(resp.context["feed_mode"], "bookmarks")
+        self.assertEqual(resp.context["bookmarks_count"], 1)
+        self.assertContains(resp, "A bookmarked note.")
+        self.assertContains(resp, "1 saved post")
+        self.assertContains(resp, "bookmark-toggle-btn")
+        self.assertContains(resp, "Remove Bookmark")
+
+    def test_bookmarks_page_empty_state(self):
+        resp = self.client.get(reverse("bookmarks"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "No bookmarks saved yet.")
+        self.assertContains(resp, "0 saved posts")
 
 
 class _FakeNip05Resp:

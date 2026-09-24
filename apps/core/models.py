@@ -108,6 +108,25 @@ class UserLinkDeck(models.Model):
         super().save(*args, **kwargs)
 
 
+class Bookmark(models.Model):
+    """A user's sovereign bookmark of a nostr note (event_id)."""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bookmarks",
+    )
+    event_id = models.CharField(max_length=64, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "event_id")
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"<Bookmark {self.user.username} -> {self.event_id[:16]}...>"
+
+
 class UserLinkItem(models.Model):
     ICON_CATEGORY_CHOICES = [
         ("x", "X"),
