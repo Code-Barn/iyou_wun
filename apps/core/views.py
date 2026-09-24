@@ -785,17 +785,22 @@ class FeedView(TemplateView):
             dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
 
             if instant_shell:
+                query_relays = relays
                 notes = []
                 feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
             elif circle == "iyou":
                 iyou_pks = get_iyou_pubkeys()
+                # Phase 6 (AUDIT-004): prioritize author NIP-65 (Kind 10002)
+                # outbox hints so queries land on relays the iyou ecosystem
+                # actually publishes to, while staying above the bootstrap floor.
+                query_relays = aggregate_author_outbox_relays(iyou_pks, relays)
                 # Inclusive iyou circle: authors query (when ecosystem keys exist)
                 # merged with the #t iyou tag query so tag-only companion frames
                 # still surface server-side.
                 feed_data = fetch_unified_feed(
                     authors=iyou_pks or None,
                     tags={"t": ["iyou"]},
-                    relay_urls=relays,
+                    relay_urls=query_relays,
                     deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT,
                     dev_mode=dev_mode,
                 )
@@ -804,20 +809,24 @@ class FeedView(TemplateView):
                     user_pubkey, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
                 )
                 if contacts:
+                    query_relays = aggregate_author_outbox_relays(contacts, relays)
                     feed_data = fetch_unified_feed(
-                        authors=contacts, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                        authors=contacts, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                     )
                 else:
+                    query_relays = aggregate_author_outbox_relays(CURATED_AUTHORS, relays)
                     feed_data = fetch_unified_feed(
-                        authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                        authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                     )
             elif circle in ("following", "network") and not user_pubkey:
+                query_relays = aggregate_author_outbox_relays(CURATED_AUTHORS, relays)
                 feed_data = fetch_unified_feed(
-                    authors=CURATED_AUTHORS, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                    authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                 )
             else:
+                query_relays = relays
                 feed_data = fetch_unified_feed(
-                    relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                    relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
                 )
 
             notes = feed_data["roots"]
@@ -830,7 +839,7 @@ class FeedView(TemplateView):
             notes = filter_shielded_events(notes)
             notes = annotate_progressive_friction(notes)
             notes = attach_social_counts(
-                notes, relay_urls=relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
+                notes, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT
             )
             timestamps = []
             for n in notes:
@@ -2311,9 +2320,19 @@ DEFAULT_RELAYS = [
     "wss://purplerelay.com",
     "wss://nostr.mom",
     "wss://nos.lol",
-    "wss://relay.damus.io",
-    "ws://127.0.0.1:9003",
+"wss://relay.damus.io",
+     "ws://127.0.0.1:9003",
 ]
+
+# Phase 6 — Outbox Gossip Routing (AUDIT-004): author NIP-65 (Kind 10002)
+# relay-list metadata is aggregated to prioritize the relay query set for the
+# feed's known authors. Every relay query set is pinned to at least this many
+# active bootstrap connections so a poisoned/wedged relay list can never starve
+# a feed below the survivability floor.
+MIN_RELAY_FLOOR = 3
+# The outbox hint query is strictly opportunistic: it must fit inside the
+# initial-feed shell budget without stealing time from the notes fetch itself.
+FEED_OUTBOX_TIMEOUT = 0.8
 
 # Phase 34 — Instant Shell Architecture: the initial Feed page render is
 # bounded to this many seconds. Remote relay resolution that cannot complete
@@ -2399,6 +2418,11 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
     if relay_urls is None:
         relay_urls = DEFAULT_RELAYS
 
+    # Phase 6 (AUDIT-004): the relay query set never drops below the active
+    # bootstrap floor, even when a poisoned relay list or session config tries
+    # to shrink it below survivability.
+    relay_urls = ensure_min_relay_floor(relay_urls)
+
     if not relay_urls:
         return {}
 
@@ -2457,6 +2481,61 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
             future.cancel()
 
     return aggregated_events
+
+
+def ensure_min_relay_floor(relays, min_count=MIN_RELAY_FLOOR):
+    """Guarantee a relay query set never drops below `min_count` active bootstrap
+    connections by padding with DEFAULT_RELAYS.
+
+    Mirrors the caller's https filter decision: when the incoming set already
+    dropped plain ws:// relays (secure origin / session filter), the floor must
+    not re-introduce the ws:// local loopback.
+    """
+    if not relays:
+        relays = DEFAULT_RELAYS
+    result = list(dict.fromkeys(relays))
+    has_insecure = any(str(u).startswith("ws://") for u in result)
+    for url in DEFAULT_RELAYS:
+        if len(result) >= min_count:
+            break
+        if url in result:
+            continue
+        if not has_insecure and str(url).startswith("ws://"):
+            continue
+        result.append(url)
+    return result
+
+
+def aggregate_author_outbox_relays(author_pubkeys, base_relays, timeout=FEED_OUTBOX_TIMEOUT):
+    """Aggregate author outbox hints (NIP-65 Kind 10002 relay lists) for the
+    given known authors and prepend them to `base_relays` so feed queries
+    prioritize the relays each author actually publishes to.
+
+    Opportunistic by design: failures and empty metadata fall back to the base
+    set unchanged, and the result is always pinned above MIN_RELAY_FLOOR.
+    """
+    if not base_relays:
+        base_relays = DEFAULT_RELAYS
+    keys = [k for k in (author_pubkeys or []) if k]
+    if not keys:
+        return ensure_min_relay_floor(base_relays)
+
+    extra = []
+    try:
+        events = relay_req(
+            {"kinds": [10002], "authors": keys},
+            relay_urls=base_relays,
+            timeout=timeout,
+        )
+        for event in events.values():
+            for tag in (event.get("tags") or []):
+                if tag and tag[0] == "r" and len(tag) > 1 and tag[1]:
+                    extra.append(str(tag[1]).strip())
+    except Exception:
+        extra = []
+
+    merged = list(dict.fromkeys(extra + list(base_relays)))
+    return ensure_min_relay_floor(merged)
 
 
 def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=True, dev_mode=False):

@@ -2413,6 +2413,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
         with patch("apps.core.views.relay_req") as mock_relay:
             mock_relay.side_effect = [
+                {},  # Phase 6 outbox probe (Kind 10002 relay-list aggregation)
                 {"root": root_event},
                 {},
                 {"rep": reply_event},

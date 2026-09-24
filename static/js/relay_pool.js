@@ -55,6 +55,13 @@
 
     var BOOTSTRAP_RELAYS = buildBootstrapRelays();
 
+    // Phase 6 — NIP-65 Weighted-Take: normalized bootstrap membership set used to
+    // give public-default relays a fixed quality tier in author-outbox selection.
+    var BOOTSTRAP_NORMS = {};
+    BOOTSTRAP_RELAYS.forEach(function (r) {
+        BOOTSTRAP_NORMS[normalizeUrl(r.url)] = true;
+    });
+
     var STORAGE_KEY = "wun_relays";
     var CUSTOM_STORAGE_KEY = "wun_custom_relays";
     var NIP65_STORAGE_KEY = "wun_nip65_relays";
@@ -91,6 +98,7 @@
     var MAX_BACKOFF_MS = 60000;
     var QUARANTINE_THRESHOLD = 3;   // consecutive drop/timeout failures to quarantine
     var QUARANTINE_COOLDOWN_MS = 90000; // re-probe window for quarantined relays
+    var MIN_RELAY_FLOOR = 3;        // Phase 6 — selected relay sets never dip below this
 
     function RelayPool() {
         this.relays = new Map(); // url -> { url, read, write, isLocal, primary, status, latencyMs, lastProbe, failCount }
@@ -295,6 +303,142 @@
             else if (r.status === "quarantined") quarantined++;
         });
         return { online: online, total: total, quarantined: quarantined };
+    };
+
+    /**
+     * Phase 6 — NIP-65 Weighted-Take Relay Selection (AUDIT-004).
+     * Quality score steering every author-outbox selection decision:
+     *   0.0  disabled / quarantined / mid-reconnect-cooldown relays are never picked
+     *   1.0  connected relays and the primary mesh relay (wss://relay.iyou.me)
+     *   0.9  responsive relays that have produced a measured probe latency
+     *   0.8  public bootstrap defaults
+     *   0.7  every other known relay (NIP-65 / custom entries)
+     */
+    RelayPool.prototype.getRelayQuality = function (relayUrl) {
+        var norm = normalizeUrl(relayUrl);
+        var record = this.relays.get(norm);
+        if (!record || record.enabled === false) return 0;
+        if (record.status === "quarantined") return 0;
+
+        // Error cooldown: a relay still inside its exponential reconnect window
+        // (pending reconnect timer or backoff not yet elapsed) is unusable.
+        if (record.status !== "online") {
+            var entry = this.connections.get(norm);
+            if (entry && entry.reconnectTimer) return 0;
+            var since = record.lastProbe || 0;
+            var backoff = Math.min(Math.pow(2, (record.failCount || 1) - 1) * RECONNECT_BASE_MS, RECONNECT_MAX_MS);
+            if (since && (Date.now() - since) < backoff) return 0;
+        }
+
+        if (record.status === "online" || record.primary) return 1.0;
+        if (record.latencyMs != null) return 0.9;
+        if (BOOTSTRAP_NORMS[norm]) return 0.8;
+        return 0.7;
+    };
+
+    /**
+     * Phase 6 — Weighted author-outbox relay sampling.
+     * Share-of-voice per relay across the requested authors' NIP-65 outboxes is
+     * multiplicatively soft-capped by relay quality, then uniform jitter breaks
+     * the ties (weighted-take). Returns up to `limit` (default 10) relay URLs,
+     * padded back up to the MIN_RELAY_FLOOR bootstrap set when the sample is thin.
+     */
+    RelayPool.prototype.selectRelaysForAuthors = function (outboxMap, limit) {
+        var self = this;
+        var target = (typeof limit === "number" && limit > 0) ? limit : 10;
+        var perRelay = {};
+        var canonical = {};
+
+        var map = (outboxMap && typeof outboxMap === "object") ? outboxMap : {};
+        Object.keys(map).forEach(function (author) {
+            var urls = map[author];
+            if (!Array.isArray(urls)) return;
+            urls.forEach(function (relayUrl) {
+                if (!relayUrl) return;
+                var norm = normalizeUrl(relayUrl);
+                if (!norm) return;
+                perRelay[norm] = (perRelay[norm] || 0) + 1;
+                if (!canonical[norm]) canonical[norm] = String(relayUrl).trim();
+            });
+        });
+
+        var candidates = [];
+        Object.keys(perRelay).forEach(function (norm) {
+            var url = canonical[norm];
+            if (isMixedContentRelay(url)) return;
+            var quality = self.getRelayQuality(url);
+            if (quality <= 0) return;
+            candidates.push({ norm: norm, url: url, weight: perRelay[norm], quality: quality });
+        });
+
+        // Weighted-take: score higher for (quality * log(1 + weight)); the negation
+        // plus random jitter makes low-score relays sort first with probability.
+        var scored = candidates.map(function (c) {
+            return { candidate: c, rank: -(c.quality * Math.log(1 + c.weight) * Math.random()) };
+        });
+        scored.sort(function (a, b) { return a.rank - b.rank; });
+
+        var picked = scored.slice(0, target).map(function (s) { return s.candidate.url; });
+
+        // Fallback floor: pad with default bootstrap relays when below minimum.
+        var seen = {};
+        picked.forEach(function (u) { seen[normalizeUrl(u)] = true; });
+        if (picked.length < MIN_RELAY_FLOOR) {
+            BOOTSTRAP_RELAYS.forEach(function (r) {
+                if (picked.length >= MIN_RELAY_FLOOR) return;
+                var norm = normalizeUrl(r.url);
+                if (seen[norm]) return;
+                if (isMixedContentRelay(r.url)) return;
+                if (self.getRelayQuality(r.url) <= 0) return;
+                picked.push(r.url);
+                seen[norm] = true;
+            });
+        }
+        return picked;
+    };
+
+    /**
+     * Phase 6 — NIP-65 relay-list publisher.
+     * Formats a Kind 10002 event whose `r` tags carry read/write markers taken
+     * from the live pool state, then broadcasts it to the unconstrained union of
+     * the previous and current relay lists (no cap is applied to the fan-out set).
+     */
+    RelayPool.prototype.publishNip65List = function (originalUrls, currentUrls) {
+        var self = this;
+        var union = Array.from(new Set((originalUrls || []).concat(currentUrls || [])));
+
+        if (union.length === 0) {
+            return Promise.resolve({ localSuccess: false, globalSuccess: false, successfulRelays: [], failedRelays: [] });
+        }
+
+        var tags = [];
+        union.forEach(function (relayUrl) {
+            if (!relayUrl) return;
+            var norm = normalizeUrl(relayUrl);
+            var record = self.relays.get(norm);
+            var read = record ? record.read !== false : true;
+            var write = record ? record.write !== false : true;
+            var tag = ["r", String(relayUrl).trim()];
+            if (read && !write) {
+                tag.push("read");
+            } else if (write && !read) {
+                tag.push("write");
+            }
+            tags.push(tag);
+        });
+
+        var event = {
+            kind: 10002,
+            content: "",
+            tags: tags,
+            created_at: Math.floor(Date.now() / 1000),
+            pubkey: (typeof window !== "undefined" && window.userPubkey) ? window.userPubkey : "",
+            id: "",
+            sig: ""
+        };
+
+        // Unconstrained fan-out: every relay referenced in either list.
+        return this.broadcast(event, union, 0);
     };
 
     /**
