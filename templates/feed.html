@@ -296,6 +296,7 @@
         data-bridge-url="{{ BRIDGE_WS_URL|default:idp_home_ws_url|default:'' }}"
         data-blossom-url="{{ BLOSSOM_SERVER_URL|default:blossom_server_url|default:'' }}"></script>
 <script src="{% static 'js/trust_lens.js' %}"></script>
+<script src="{% static 'js/live_rooms.js' %}"></script>
 <script>
     document.addEventListener("DOMContentLoaded", function () {
         bridgeClient.connect(handleSignedEvent);
