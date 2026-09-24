@@ -3,7 +3,9 @@
 
   Pattern: Primal left-nav (ATT-001, MIT c96ee211) collapsed onto a single
   sticky in-flow grid cell below the L1(_standard_header) + L2(_nav) stack.
-  AUDIT-005 §2 geometry: sticky top-[128px], h-[calc(100vh-128px)], own scroll.
+  AUDIT-005 §2 geometry: #left-rail sticky geometry (--rail-top, height, own
+  scroll) is owned by the dynamic L2 style block in base.html; this node fills
+  the sticky cell via h-full.
 
   DOM contract:
     - The rail is the LEFT cell of the `lg:` 3-column shell in base.html
@@ -24,8 +26,7 @@
       to static/js/_rail_badges.js and include once in base.html (companion #17).
 -->
 <nav id="left-rail-nav" aria-label="Primary desktop navigation"
-     class="hidden lg:flex flex-col w-full h-[calc(100vh-128px)] max-h-[calc(100vh-128px)] sticky top-[128px]
-            font-mono text-xs">
+     class="hidden lg:flex flex-col w-full h-full font-mono text-xs">
 
   {# ---- Nav stack: shared slot roster (rail variant) ---- #}
   {% include "includes/_left_rail_slots.html" with slot_style="rail" %}

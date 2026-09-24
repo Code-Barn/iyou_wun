@@ -1,6 +1,6 @@
 {% load static %}
 <!DOCTYPE html>
-<html lang="en" class="overflow-x-hidden w-full max-w-full">
+<html lang="en" class="w-full max-w-full">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -33,14 +33,18 @@
         display: flex !important;
       }
       #left-rail {
+        position: sticky !important;
         top: var(--rail-top, 128px);
         height: calc(100vh - var(--rail-top, 128px));
         max-height: calc(100vh - var(--rail-top, 128px));
         transition: top 0.2s ease;
       }
+
       #right-rail {
+        position: sticky !important;
         top: var(--rail-top, 128px);
         max-height: calc(100vh - var(--rail-top, 128px));
+        overflow-y: auto;
         transition: top 0.2s ease;
       }
     </style>
@@ -85,20 +89,20 @@
     {% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-hidden w-full max-w-full">
+<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-clip w-full max-w-full">
     {% include "includes/_ecosystem_bar.html" %}
     {% include "includes/_standard_header.html" %}
     {% include "_nav.html" %}
 
     <main class="flex-1 w-full">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:grid lg:items-start lg:gap-6 lg:grid-cols-[48px_minmax(0,1fr)_300px] xl:grid-cols-[184px_minmax(0,1fr)_348px]">
-            <aside id="left-rail" class="hidden lg:flex min-w-0 sticky overflow-y-auto no-scrollbar">
+            <aside id="left-rail" class="hidden lg:flex lg:col-span-1 min-w-0">
                 {% include "includes/_left_rail.html" %}
             </aside>
             <div id="stream-column" class="min-w-0 mx-auto w-full max-w-[640px]">
                 {% block content %}{% endblock %}
             </div>
-            <aside id="right-rail" class="hidden lg:block lg:col-span-1 min-w-0 sticky overflow-y-auto no-scrollbar">
+            <aside id="right-rail" class="hidden lg:block lg:col-span-1 min-w-0 no-scrollbar">
                 {% block right_rail %}{% endblock %}
             </aside>
         </div>
