@@ -3522,6 +3522,8 @@ class ProfileView(TemplateView):
         )
         context["is_iyou_native"] = is_iyou_native
         context["deck_items"] = list(owner_deck.items.filter(is_active=True)) if owner_deck else []
+        context["relays"] = get_relays_for_request(self.request)
+        context["relay_count"] = len(context["relays"])
         context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
 
         context["user_pubkey"] = (

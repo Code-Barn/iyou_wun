@@ -264,6 +264,12 @@
 </div>
 {% endblock %}
 
+{% block right_rail %}
+<div class="space-y-4">
+  {% include "includes/_profile_right_rail.html" %}
+</div>
+{% endblock %}
+
 {% block extra_js %}
 {{ block.super }}
 <script src="{% static 'js/feed_interactions.js' %}"></script>
