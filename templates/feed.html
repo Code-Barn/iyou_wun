@@ -340,6 +340,7 @@
             {% endif %}
           </div>
           {% empty %}
+          {% if not notes and feed_mode != 'bookmarks' and not is_explore %}
           <div id="feed-empty-state" class="text-center py-12 text-slate-400 font-mono text-xs {% if not notes %}hidden{% endif %}">
             {% if feed_circle == 'iyou' or not feed_circle or selected_circle == 'iyou' %}
             No notes from the iyou ecosystem yet. Notes posted by registered accounts will appear here.
@@ -347,6 +348,7 @@
             No notes found in this circle.
             {% endif %}
           </div>
+          {% endif %}
           {% endfor %}
         </div>
 

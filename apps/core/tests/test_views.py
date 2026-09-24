@@ -2902,6 +2902,24 @@ class BookmarkEndpointsTests(TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, "No bookmarks saved yet.")
         self.assertContains(resp, "0 saved posts")
+        # The generic feed empty state must not leak onto /bookmarks/.
+        self.assertNotContains(resp, "No notes from the iyou ecosystem yet.")
+
+    def test_bookmarks_page_relay_sync_state_when_db_has_bookmarks_but_relays_empty(self):
+        # Bookmarked in the DB, but relays produce no events -> informative
+        # relay-querying card instead of the "no bookmarks" invite.
+        Bookmark.objects.create(user=self.user, event_id="b" * 64)
+        with patch("apps.core.views.relay_req", return_value={}):
+            resp = self.client.get(reverse("bookmarks"))
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.context["bookmarks_count"], 1)
+        self.assertEqual(resp.context["notes"], [])
+        self.assertContains(resp, "bookmarks-syncing-state")
+        self.assertContains(resp, "Querying mesh relays for 1 saved note...")
+        self.assertContains(resp, "Retry Relays")
+        self.assertNotContains(resp, "No bookmarks saved yet.")
+        self.assertNotContains(resp, "No notes from the iyou ecosystem yet.")
 
 
 class _FakeNip05Resp:
