@@ -16,28 +16,16 @@
     - Identity footer morphs: static profile badge at xl+ (or "Sign In" for
       anonymous visitors), compact avatar link on the mini-rail (identity dot,
       AUDIT-005 §2.3). The persona enclave switcher lives ONLY in the header.
+    - Brand lockup lives ONLY in Layer 1 (_standard_header.html); the rail
+      starts directly with the nav roster so "Stream" aligns with the stream.
     - Ships includes/_left_rail_badges.js contract as inline fallback —
       hydrates [data-unread-mirror]/[data-count-mirror] on the slots from the
       header bell dot and the floating-chat numeric badge. Deploy option: move
       to static/js/_rail_badges.js and include once in base.html (companion #17).
 -->
-{% load static %}
 <nav id="left-rail-nav" aria-label="Primary desktop navigation"
      class="hidden lg:flex flex-col w-full h-[calc(100vh-128px)] max-h-[calc(100vh-128px)] sticky top-[128px]
             font-mono text-xs">
-
-  {# ---- [1] Brand lockup: 48px band (AUDIT-005 §3.2) ---- #}
-  <div class="h-12 flex items-center gap-2 px-3 xl:px-4 shrink-0">
-    <a href="{% url 'feed' %}" class="flex items-center gap-2 min-w-0" title="iyou_wun — Stream">
-      <img src="{% static 'img/logo_square_sm.png' %}" alt="wun"
-           onerror="this.onerror=null;this.src='{% static 'img/logo_square.png' %}';"
-           class="w-6 h-6 xl:w-8 xl:h-8 rounded-lg object-cover shrink-0
-                  bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700"/>
-      <span class="hidden xl:inline min-w-0 text-slate-900 dark:text-slate-100 font-extrabold tracking-tight whitespace-nowrap">
-        iyou<span class="text-violet-600 dark:text-violet-400">_wun</span>
-      </span>
-    </a>
-  </div>
 
   {# ---- Nav stack: shared slot roster (rail variant) ---- #}
   {% include "includes/_left_rail_slots.html" with slot_style="rail" %}
