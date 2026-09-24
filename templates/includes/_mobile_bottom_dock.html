@@ -107,14 +107,25 @@
         var pill = document.getElementById("mobile-chat-unread-pill");
         if (pill) {
           var n = parseInt(chatSrc.textContent, 10) || 0;
-          pill.textContent = n > 99 ? "99+" : String(n);
-          pill.classList.toggle("hidden", n === 0);
+          var targetText = n > 99 ? "99+" : String(n);
+          if (pill.textContent !== targetText) {
+            pill.textContent = targetText;
+          }
+          var shouldHide = (n === 0);
+          if (pill.classList.contains("hidden") !== shouldHide) {
+            pill.classList.toggle("hidden", shouldHide);
+          }
         }
       }
       var notifSrc = document.getElementById("notification-unread-dot");
       if (notifSrc) {
         var dot = document.getElementById("mobile-notif-unread-dot");
-        if (dot) dot.classList.toggle("hidden", notifSrc.classList.contains("hidden"));
+        if (dot) {
+          var dotHidden = notifSrc.classList.contains("hidden");
+          if (dot.classList.contains("hidden") !== dotHidden) {
+            dot.classList.toggle("hidden", dotHidden);
+          }
+        }
       }
     }
 

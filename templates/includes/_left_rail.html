@@ -13,15 +13,15 @@
       slot_style="rail" (labels `hidden xl:inline`, centered on mini-rail).
     - Compose morph also used by the mobile dock FAB → same global
       `openPostComposer()` (polyfilled here if a newer controller is absent).
-    - Identity footer morphs: persona enclave pill at xl+, compact avatar link
-      on the mini-rail (identity dot, AUDIT-005 §2.3).
+    - Identity footer morphs: static profile badge at xl+ (or "Sign In" for
+      anonymous visitors), compact avatar link on the mini-rail (identity dot,
+      AUDIT-005 §2.3). The persona enclave switcher lives ONLY in the header.
     - Ships includes/_left_rail_badges.js contract as inline fallback —
       hydrates [data-unread-mirror]/[data-count-mirror] on the slots from the
       header bell dot and the floating-chat numeric badge. Deploy option: move
       to static/js/_rail_badges.js and include once in base.html (companion #17).
 -->
 {% load static %}
-{% if user.is_authenticated or request.user.is_authenticated %}
 <nav id="left-rail-nav" aria-label="Primary desktop navigation"
      class="hidden lg:flex flex-col w-full h-[calc(100vh-128px)] max-h-[calc(100vh-128px)] sticky top-[128px]
             font-mono text-xs">
@@ -42,6 +42,7 @@
   {# ---- Nav stack: shared slot roster (rail variant) ---- #}
   {% include "includes/_left_rail_slots.html" with slot_style="rail" %}
 
+  {% if user.is_authenticated or request.user.is_authenticated %}
   {# ---- Compose CTA: full pill (>1280) / 36px square (<=1280) (AUDIT-005 §2.3) ---- #}
   <div class="px-3 pb-3 pt-2 shrink-0">
     <button id="rail-compose-btn" type="button"
@@ -56,14 +57,39 @@
       <span class="hidden xl:inline text-xs">New Note</span>
     </button>
   </div>
+  {% endif %}
 
   {# ---- Identity footer dock (AUDIT-005 §2.3 / §3.2) ---- #}
   <div class="border-t border-slate-200 dark:border-slate-800 p-2 shrink-0">
     <div class="hidden xl:block">
-      {% include "includes/_persona_enclave.html" %}
+      {% if user.is_authenticated or request.user.is_authenticated %}
+      <a href="{% url 'dashboard' %}"
+         title="Dashboard &amp; Settings"
+         aria-label="Dashboard and settings"
+         class="flex items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-slate-200/70 dark:hover:bg-slate-800/60 transition min-w-0">
+        <img src="{% firstof user_avatar_url '' %}" alt=""
+             class="mesh-user-avatar w-6 h-6 rounded-full object-cover shrink-0 {% if not user_avatar_url %}hidden{% endif %}"
+             onerror="this.classList.add('hidden')"
+             onload="this.classList.remove('hidden')"/>
+        <span class="w-6 h-6 rounded-full bg-violet-500 flex items-center justify-center text-[10px] font-bold text-white shrink-0 {% if user_avatar_url %}hidden{% endif %}">
+          {{ user_display_label|default:user.username|truncatechars:1|upper }}
+        </span>
+        <span class="truncate min-w-0 text-xs font-semibold text-slate-700 dark:text-slate-300">
+          {{ user_display_label|default:user.username|truncatechars:14 }}
+        </span>
+      </a>
+      {% else %}
+      <a href="{% url 'oidc_authentication_init' %}"
+         title="Sign in with your sovereign key"
+         aria-label="Sign in"
+         class="flex items-center justify-center gap-2 rounded-lg px-2 py-2 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800/60 transition text-xs font-semibold">
+        Sign In
+      </a>
+      {% endif %}
     </div>
     {# Mini-rail identity dot: compact avatar → dashboard (40×40) #}
     <div class="xl:hidden">
+      {% if user.is_authenticated or request.user.is_authenticated %}
       <a href="{% url 'dashboard' %}"
          title="Dashboard &amp; Settings"
          aria-label="Dashboard and settings"
@@ -76,12 +102,19 @@
           {{ user_display_label|default:user.username|truncatechars:1|upper }}
         </span>
       </a>
+      {% else %}
+      <a href="{% url 'oidc_authentication_init' %}"
+         title="Sign in"
+         aria-label="Sign in"
+         class="flex items-center justify-center w-10 h-10 mx-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+        <svg class="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/></svg>
+      </a>
+      {% endif %}
     </div>
   </div>
 </nav>
 
 {# ---- Badge mirror hydration (slot dots/pills from live client state) ---- #}
-{% endif %}
 <script>
   // Rail badge mirror: hydrate [data-unread-mirror]/[data-count-mirror] badges
   // inside #left-rail-slot-list from authoritative client-side sources:
@@ -108,16 +141,25 @@
       Array.prototype.forEach.call(list.querySelectorAll("[data-unread-mirror]"), function (dot) {
         var src = srcOf(dot.getAttribute("data-unread-mirror"));
         if (!src) return;
-        dot.classList.toggle("hidden", src.classList.contains("hidden") ||
-          (src.textContent && parseInt(src.textContent, 10) === 0));
+        var isHidden = src.classList.contains("hidden") ||
+          (src.textContent && parseInt(src.textContent, 10) === 0);
+        if (dot.classList.contains("hidden") !== isHidden) {
+          dot.classList.toggle("hidden", isHidden);
+        }
       });
 
       Array.prototype.forEach.call(list.querySelectorAll("[data-count-mirror]"), function (pill) {
         var src = srcOf(pill.getAttribute("data-count-mirror"));
         if (!src) return;
         var n = parseInt(src.textContent, 10) || 0;
-        pill.textContent = n > 99 ? "99+" : String(n);
-        pill.classList.toggle("hidden", n === 0);
+        var targetText = n > 99 ? "99+" : String(n);
+        if (pill.textContent !== targetText) {
+          pill.textContent = targetText;
+        }
+        var shouldHide = (n === 0);
+        if (pill.classList.contains("hidden") !== shouldHide) {
+          pill.classList.toggle("hidden", shouldHide);
+        }
       });
     }
 

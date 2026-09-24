@@ -179,10 +179,10 @@
         {% if slot_style == "flyout" %}<span class="inline truncate">Bookmarks</span>{% else %}<span class="hidden xl:inline truncate">Bookmarks</span>{% endif %}
       </a>
     </li>
-    {# Sovereign Link Deck — always the /u/<did_key> route: `user_handle` can be a
-       username arbitrary in length/charset (hex nsecs, DIDs, dots...), guaranteed to
-       fail the strict `link_deck` regex `^@[a-z0-9_-]{3,32}$` at reverse() → 500.
-       The /@handle vanity remains reachable from profiles and the deck manager. #}
+    {# Sovereign Link Deck — always the /u/<did_key> route: `user_handle` may be #}
+    {# arbitrary case/length (hex nsecs, DIDs, dots...) and fails the strict #}
+    {# link_deck regex at reverse() → 500; the /@handle vanity remains reachable #}
+    {# from profiles and the deck manager. #}
     {% if user.is_authenticated or user_display_label %}
     <li>
       <a href="{% url 'link_deck_did' did_key=current_session_did|default:user.username %}"
