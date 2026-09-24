@@ -663,6 +663,14 @@
      */
     TauriBridgeClient.prototype.syncKeysToServer = function (nostrPubkeyHex) {
         if (!nostrPubkeyHex || !isHex64(nostrPubkeyHex)) return;
+        // Suppress unauthenticated key-sync: when the session is anonymous the
+        // bridge would otherwise flood POST /api/auth/sync-keys/ on every
+        // connect/reconnect and the 401 rejection churns a tight retry loop.
+        var sessionDid = (typeof window.CURRENT_SESSION_DID === "string") ? window.CURRENT_SESSION_DID : "";
+        if (!sessionDid || sessionDid === "None" || sessionDid === "") {
+            // User is unauthenticated or anonymous; suppress server key sync
+            return;
+        }
         try {
             fetch("/api/auth/sync-keys/", {
                 method: "POST",

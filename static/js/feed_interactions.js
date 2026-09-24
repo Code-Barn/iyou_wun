@@ -1342,6 +1342,7 @@
                     }
                     emptyState.classList.remove("hidden");
                     emptyState.style.display = "";
+                    hydrateFromRelayPool();
                 }
 
                 container.removeAttribute("data-hydrate");
@@ -1360,10 +1361,81 @@
                 var skeleton = document.getElementById("feed-skeleton-container");
                 if (skeleton) skeleton.remove();
                 container.removeAttribute("data-hydrate");
+                hydrateFromRelayPool();
             })
             .finally(function () {
                 _hydratingInitialFeed = false;
             });
+    }
+
+    // ---------- Phase 16.6: Client-Side Relay Hydration Fallback ----------
+    // When the server shell (or the instant-shell /api/feed batch) resolves
+    // with zero cards, re-query the browser relay pool directly and mount
+    // notes through the client card renderer instead of hanging on the
+    // "querying mesh" / empty-state fork.
+
+    var _relayHydrating = false;
+
+    function hydrateFromRelayPool() {
+        if (_relayHydrating) return;
+        var container = document.getElementById("feed-container");
+        if (!container) return;
+        if (container.querySelectorAll(".feed-note-card").length > 0) return;
+        var syncing = document.getElementById("bookmarks-syncing-state");
+        var empty = document.getElementById("feed-empty-state");
+        if (!syncing && !empty) return;
+        if (!window.relayPool || typeof window.relayPool.requestEvents !== "function") return;
+
+        var isBookmarks = !!syncing;
+        var filter;
+        if (isBookmarks) {
+            var ids = (Array.isArray(window.BOOKMARK_IDS) && window.BOOKMARK_IDS.length > 0)
+                ? window.BOOKMARK_IDS.filter(function (id) { return !!id; })
+                : [];
+            if (!ids.length) return;
+            filter = { "ids": ids };
+        } else {
+            filter = { "kinds": [1, 1063, 30023], "limit": 25 };
+        }
+
+        _relayHydrating = true;
+
+        window.relayPool.requestEvents(filter, function (event, relayUrl) {
+            if (!event || !event.id) return;
+            var kind = Number(event.kind);
+            if (kind !== 1 && kind !== 1063 && kind !== 30023) return;
+            if (document.querySelector('[data-note-card-id="' + event.id + '"]')) return;
+            try {
+                addNoteToFeed(event);
+                var syncingEl = document.getElementById("bookmarks-syncing-state");
+                if (syncingEl && syncingEl.parentNode) {
+                    syncingEl.parentNode.removeChild(syncingEl);
+                }
+                var emptyEl = document.getElementById("feed-empty-state");
+                if (emptyEl) {
+                    emptyEl.classList.add("hidden");
+                    emptyEl.style.display = "none";
+                }
+                var containerEl = document.getElementById("feed-container");
+                if (containerEl) containerEl.removeAttribute("data-hydrate");
+                if (window.TrustLens && typeof window.TrustLens.scanDOM === "function") {
+                    window.TrustLens.scanDOM();
+                } else if (window.trustLens && typeof window.trustLens.scan === "function") {
+                    window.trustLens.scan(containerEl);
+                }
+                hydrateLocalTimestamps(document);
+                checkAndApplyClamping(document);
+            } catch (err) {
+                console.warn("Relay-pool hydration render failed for " + event.id + ":", err);
+            }
+        }, null, 2500);
+
+        // Bound the fallback window: if the mesh answered with nothing, reset
+        // the guard and leave the syncing/empty state in place so the user
+        // keeps the honest "still waiting" spinner + retry affordance.
+        setTimeout(function () {
+            _relayHydrating = false;
+        }, 2800);
     }
 
     var _feedFetchSequence = 0;
@@ -2982,6 +3054,11 @@
         fetchInitialFeedStream();
 
         initBookmarkIdsMirror();
+
+        // Phase 16.6 — client-side relay hydration fallback: if the shell
+        // rendered zero cards (server relay latency/outage), ask the browser
+        // relay pool to recover the feed/bookmarks directly from the mesh.
+        hydrateFromRelayPool();
 
         // Apply "Read More" clamping to server-rendered note bodies
         checkAndApplyClamping(document);

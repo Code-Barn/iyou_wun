@@ -68,3 +68,13 @@
   </div>
 </div>
 {% endblock %}
+
+{% block extra_js %}
+<script>
+    // Phase 16.6 — client-side relay hydration fallback: the browser-side
+    // feed pool re-queries these bookmarked ids directly from the relay mesh
+    // when the server shell resolves empty.
+    window.BOOKMARK_IDS = {{ bookmark_ids_json|default:'[]'|safe }};
+</script>
+{{ block.super }}
+{% endblock %}

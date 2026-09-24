@@ -275,6 +275,92 @@
         return urls.length > 0 ? urls : this.getRelays();
     };
 
+    /**
+     * Phase 16.6 — One-shot client-side relay hydration fan-out.
+     * Issues a NIP-01 REQ `filter` across the connected read relay pool and
+     * invokes `onEvent(eventObj, relayUrl)` for every fresh EVENT that carries
+     * a unique `id`. Uses dedicated short-lived sockets (mirroring the
+     * notification manager pattern) so it never clobbers live handlers on the
+     * managed pool connections. Returns a cancel() function; all sockets are
+     * closed after `timeoutMs` (default 4s) or on EOSE.
+     */
+    RelayPool.prototype.requestEvents = function (filter, onEvent, relayUrls, timeoutMs) {
+        var self = this;
+        if (!self.relays || self.relays.size === 0) return null;
+        var targets = (Array.isArray(relayUrls) && relayUrls.length > 0)
+            ? relayUrls
+            : (self.getReadRelays().length > 0 ? self.getReadRelays() : self.getRelays());
+        var timeout = (typeof timeoutMs === "number" && timeoutMs > 0) ? timeoutMs : 4000;
+        var subId = "wun_hydrate_" + Date.now().toString(36) + "_" + Math.floor(Math.random() * 1e9).toString(36);
+        var sockets = [];
+        var seen = {};
+
+        function closeAll() {
+            for (var i = 0; i < sockets.length; i++) {
+                try {
+                    if (sockets[i].readyState === WebSocket.OPEN) {
+                        sockets[i].send(JSON.stringify(["CLOSE", subId]));
+                    }
+                    sockets[i].close();
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        targets.forEach(function (url) {
+            if (isMixedContentRelay(url)) return;
+            var ws;
+            try {
+                ws = new WebSocket(url);
+            } catch (e) {
+                return;
+            }
+            sockets.push(ws);
+
+            ws.onopen = function () {
+                try {
+                    ws.send(JSON.stringify(["REQ", subId, filter]));
+                } catch (e) { /* ignore */ }
+            };
+
+            ws.onmessage = function (ev) {
+                var raw;
+                try {
+                    raw = JSON.parse(ev.data);
+                } catch (e) {
+                    return;
+                }
+                if (!Array.isArray(raw) || raw.length < 3) return;
+                if (raw[0] === "EVENT" && raw[1] === subId) {
+                    var eventObj = raw[2];
+                    if (eventObj && eventObj.id && !seen[eventObj.id]) {
+                        seen[eventObj.id] = true;
+                        if (typeof onEvent === "function") {
+                            try {
+                                onEvent(eventObj, url);
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                } else if (raw[0] === "EOSE" && raw[1] === subId) {
+                    try {
+                        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(["CLOSE", subId]));
+                    } catch (e) { /* ignore */ }
+                }
+            };
+
+            ws.onclose = function () {
+                var idx = sockets.indexOf(ws);
+                if (idx !== -1) sockets.splice(idx, 1);
+            };
+
+            ws.onerror = function () { /* onclose drives cleanup */ };
+        });
+
+        if (timeout > 0) {
+            setTimeout(closeAll, timeout);
+        }
+        return closeAll;
+    };
+
     RelayPool.prototype.getRelayStatuses = function () {
         var list = [];
         this.relays.forEach(function (r) {

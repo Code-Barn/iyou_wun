@@ -19,8 +19,8 @@ import hashlib
 import json
 import logging
 import re
+import socket
 import ssl
-import threading
 import time
 import urllib.error
 import urllib.parse
@@ -45,7 +45,7 @@ from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import TemplateView
 from django.views import View
-from websocket import WebSocketApp
+from websocket import create_connection
 
 from services.poly_client import PolyClient, PolyConnectionError
 
@@ -2364,14 +2364,14 @@ def get_tag_value(tags, tag_name, index=1, default=""):
 
 
 DEFAULT_RELAYS = [
-    "wss://relay.iyou.me",
+    "wss://relay.damus.io",
+    "wss://nos.lol",
     "wss://relay.primal.net",
     "wss://relay.nostr.band",
+    "ws://127.0.0.1:9003",
+    "wss://relay.iyou.me",
     "wss://purplerelay.com",
     "wss://nostr.mom",
-    "wss://nos.lol",
-"wss://relay.damus.io",
-     "ws://127.0.0.1:9003",
 ]
 
 # Phase 6 — Outbox Gossip Routing (AUDIT-004): author NIP-65 (Kind 10002)
@@ -2399,66 +2399,61 @@ CURATED_AUTHORS = [
 
 
 def _connect_relay(relay_url, sub_id, filter_obj, timeout):
-    """Connect to a single relay and fetch events with defensive error handling."""
+    """Connect to a single relay and fetch events for `sub_id`.
+
+    Strictly bounded by `timeout`: the socket connect clamps to the budget and
+    every recv() runs under the same clock so a wedged remote can never hang
+    the fan-out worker. Unreachable endpoints (e.g. ws://127.0.0.1:9003 while
+    the loopback bridge is down) raise ConnectionRefusedError / socket.timeout
+    immediately and return an empty result — no blocking on a dead socket.
+    """
     events = {}
-    done = threading.Event()
+    try:
+        ws = create_connection(
+            relay_url,
+            timeout=timeout,
+            sslopt={"cert_reqs": ssl.CERT_NONE},
+        )
+    except (ConnectionRefusedError, socket.timeout, TimeoutError, OSError) as e:
+        logger.debug("_connect_relay unreachable %s: %s", relay_url, e)
+        return events
 
-    def on_open(ws):
-        try:
-            ws.send(json.dumps(["REQ", sub_id, filter_obj]))
-        except Exception:
-            done.set()
-
-    def on_message(ws, raw):
-        try:
-            msg = json.loads(raw)
+    deadline = time.time() + max(0.05, timeout)
+    try:
+        ws.send(json.dumps(["REQ", sub_id, filter_obj]))
+        while time.time() < deadline:
+            raw = ws.recv()
+            try:
+                text = raw.decode("utf-8") if isinstance(raw, bytes) else raw
+                msg = json.loads(text)
+            except (ValueError, TypeError, UnicodeDecodeError):
+                continue
+            if not isinstance(msg, list) or len(msg) < 3:
+                continue
             if msg[0] == "EVENT" and msg[1] == sub_id:
                 e = msg[2]
-                if e.get("id") and e["id"] not in events:
+                if e and e.get("id") and e["id"] not in events:
                     e["_relay_url"] = relay_url
                     events[e["id"]] = e
             elif msg[0] == "EOSE":
-                done.set()
-        except Exception:
-            pass
-
-    def on_error(ws, err):
-        done.set()
-
-    def on_close(ws, status, msg):
-        done.set()
-
-    try:
-        ws = WebSocketApp(
-            relay_url,
-            on_open=on_open,
-            on_message=on_message,
-            on_error=on_error,
-            on_close=on_close,
-        )
-
-        t = threading.Thread(
-            target=ws.run_forever,
-            kwargs={"sslopt": {"cert_reqs": ssl.CERT_NONE}},
-            daemon=True,
-        )
-        t.start()
-        done.wait(timeout=timeout)
+                break
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        pass
+    except Exception:
+        pass
+    finally:
         try:
             ws.close()
         except Exception:
             pass
-    except Exception as e:
-        logger.debug("_connect_relay error on %s: %s", relay_url, e)
-
     return events
 
 
-def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=None):
+def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=None):
     """Query multiple relays concurrently with ThreadPoolExecutor, aggregating all events.
 
     Replaces sequential failover with concurrent fan-out across all configured relays.
-    Enforces a strict aggregate deadline (max 2.5s across all relays, or earlier if `deadline`
+    Enforces a strict aggregate deadline (max 1.5s across all relays, or earlier if `deadline`
     is specified). Rather than exiting early on the first responsive relay, events from all
     responsive sockets are aggregated and deduplicated by event id.
     """
@@ -2476,9 +2471,9 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
     if not relay_urls:
         return {}
 
-    # Strict aggregate deadline: max 2.5s across all relays
+    # Strict aggregate deadline: max 1.5s across all relays
     now = time.time()
-    max_aggregate = 2.5
+    max_aggregate = 1.5
     if deadline is not None:
         remaining = deadline - now
         effective_timeout = max(0.0, min(max_aggregate, remaining, timeout))
@@ -2489,7 +2484,7 @@ def relay_req(filter_obj, sub_id=None, timeout=2.5, relay_urls=None, deadline=No
         return {}
 
     aggregated_events = {}
-    max_workers = min(len(relay_urls), 8)
+    max_workers = min(len(relay_urls), 5)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {
@@ -3486,6 +3481,7 @@ class BookmarksView(LoginRequiredMixin, TemplateView):
         )
         context["feed_mode"] = "bookmarks"
         context["bookmarks_count"] = len(event_ids)
+        context["bookmark_ids_json"] = json.dumps(event_ids)
 
         notes = []
         if event_ids:

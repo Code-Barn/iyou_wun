@@ -3710,8 +3710,11 @@ class Phase45SessionAndRelayHardeningTests(TestCase):
 
     def test_default_relays_prioritizes_fast_endpoints(self):
         from apps.core.views import DEFAULT_RELAYS
+        self.assertIn("wss://relay.damus.io", DEFAULT_RELAYS[:2])
+        self.assertIn("wss://nos.lol", DEFAULT_RELAYS[:2])
         self.assertIn("wss://relay.primal.net", DEFAULT_RELAYS[:3])
-        self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:3])
+        self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:4])
+        self.assertIn("ws://127.0.0.1:9003", DEFAULT_RELAYS)
         self.assertIn("wss://purplerelay.com", DEFAULT_RELAYS)
 
 
