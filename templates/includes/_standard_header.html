@@ -96,6 +96,17 @@
         </div>
       {% endif %}
 
+      <!-- Persistent L2 Toggle (Circles & App Toolbar Restore) -->
+      <button id="l2-toggle-header-btn" type="button"
+              onclick="toggleL2Header()"
+              title="Toggle Circles & App Toolbar (L2)"
+              aria-label="Toggle Circles & App Toolbar"
+              class="flex items-center justify-center p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900/80 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition text-xs">
+        <svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewBox="0 0 24 24">
+          <path d="M4 6h16M4 12h16M4 18h7"/>
+        </svg>
+      </button>
+
       <!-- Grey Outline Theme Switcher (Strictly Neutral Slate) -->
       <button id="theme-toggle" type="button" class="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors focus:outline-none" aria-label="Toggle theme">
         <svg id="icon-sun" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">

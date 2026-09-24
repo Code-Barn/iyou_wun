@@ -16,6 +16,36 @@
         }
       })();
     </script>
+    <style>
+      :root {
+        --l1-height: 64px;
+        --l2-height: 64px;
+        --rail-top: calc(var(--l1-height) + var(--l2-height));
+      }
+      html.l2-collapsed, body.l2-collapsed {
+        --l2-height: 0px;
+      }
+      html.l2-collapsed #app-l2-ribbon, body.l2-collapsed #app-l2-ribbon {
+        display: none !important;
+      }
+      #left-rail {
+        top: var(--rail-top, 128px);
+        height: calc(100vh - var(--rail-top, 128px));
+        max-height: calc(100vh - var(--rail-top, 128px));
+        transition: top 0.2s ease;
+      }
+      #right-rail {
+        top: var(--rail-top, 128px);
+        max-height: calc(100vh - var(--rail-top, 128px));
+        transition: top 0.2s ease;
+      }
+    </style>
+    <script>
+      if (localStorage.getItem('wun_l2_collapsed') === 'true') {
+        document.documentElement.classList.add('l2-collapsed');
+        document.body && document.body.classList.add('l2-collapsed');
+      }
+    </script>
     <link rel="stylesheet" href="{% static 'css/output.css' %}">
     <style>
       .notification-item-unread {
@@ -58,13 +88,13 @@
 
     <main class="flex-1 w-full">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:grid lg:items-start lg:gap-6 lg:grid-cols-[48px_minmax(0,1fr)_300px] xl:grid-cols-[184px_minmax(0,1fr)_348px]">
-            <aside id="left-rail" class="hidden lg:flex min-w-0 sticky top-[128px] h-[calc(100vh-128px)] overflow-y-auto no-scrollbar">
+            <aside id="left-rail" class="hidden lg:flex min-w-0 sticky overflow-y-auto no-scrollbar">
                 {% include "includes/_left_rail.html" %}
             </aside>
             <div id="stream-column" class="min-w-0 mx-auto w-full max-w-[640px]">
                 {% block content %}{% endblock %}
             </div>
-            <aside id="right-rail" class="hidden lg:block lg:col-span-1 min-w-0 sticky top-[128px] max-h-[calc(100vh-128px)] overflow-y-auto no-scrollbar">
+            <aside id="right-rail" class="hidden lg:block lg:col-span-1 min-w-0 sticky overflow-y-auto no-scrollbar">
                 {% block right_rail %}{% endblock %}
             </aside>
         </div>

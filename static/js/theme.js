@@ -43,3 +43,31 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 });
+
+window.toggleL2Header = function (forceCollapse) {
+  var isCollapsed = document.body.classList.contains('l2-collapsed');
+  var nextState = (typeof forceCollapse === 'boolean') ? forceCollapse : !isCollapsed;
+
+  document.body.classList.toggle('l2-collapsed', nextState);
+  document.documentElement.classList.toggle('l2-collapsed', nextState);
+  localStorage.setItem('wun_l2_collapsed', nextState ? 'true' : 'false');
+
+  var btn = document.getElementById('l2-toggle-header-btn');
+  if (btn) {
+    btn.classList.toggle('text-violet-600', !nextState);
+    btn.classList.toggle('dark:text-violet-400', !nextState);
+  }
+};
+
+document.addEventListener('DOMContentLoaded', function () {
+  var isCollapsed = localStorage.getItem('wun_l2_collapsed') === 'true';
+  if (isCollapsed) {
+    document.body.classList.add('l2-collapsed');
+    document.documentElement.classList.add('l2-collapsed');
+  }
+  var btn = document.getElementById('l2-toggle-header-btn');
+  if (btn) {
+    btn.classList.toggle('text-violet-600', !isCollapsed);
+    btn.classList.toggle('dark:text-violet-400', !isCollapsed);
+  }
+});
