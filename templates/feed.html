@@ -28,6 +28,67 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto py-4 sm:py-6">
+{% if is_explore %}
+<!-- Explore Hub Header & Search -->
+<div id="explore-hub-header" class="mb-6 space-y-4 font-mono text-xs">
+  <!-- Search Bar -->
+  <div class="relative">
+    <input type="search"
+           id="explore-search-input"
+           placeholder="Search handles, DIDs, notes, #hashtags..."
+           autocomplete="off"
+           class="w-full px-4 py-3 pl-10 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:border-violet-500 focus:ring-1 focus:ring-violet-500 text-slate-900 dark:text-slate-100 placeholder-slate-400 outline-none transition shadow-sm" />
+    <svg class="absolute left-3.5 top-3.5 w-4 h-4 text-slate-400 stroke-current" fill="none" viewBox="0 0 24 24" stroke-width="2">
+      <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+    </svg>
+  </div>
+
+  <!-- Mobile Discovery Deck (Visible on < lg where right rail is hidden) -->
+  <div class="block lg:hidden space-y-4">
+    <!-- Trending Topics Card -->
+    <div class="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+        <span class="font-bold text-[11px] uppercase tracking-wider text-slate-500">Trending Topics (24h)</span>
+      </div>
+      <div class="flex flex-wrap gap-1.5">
+        {% for tag in trending_tags_global %}
+          <button type="button"
+                  onclick="window.circleFeedFilter && window.circleFeedFilter.filterByTag('{{ tag.tag_slug }}')"
+                  class="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-violet-50 dark:hover:bg-violet-950/40 text-violet-600 dark:text-violet-400 text-xs transition">
+            #{{ tag.name }} <span class="text-[10px] text-slate-400">({{ tag.display_count }})</span>
+          </button>
+        {% empty %}
+          <span class="text-slate-400 text-[11px]">No active trending tags in mesh.</span>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Sovereign Creators Card -->
+    <div class="p-4 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-3">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+        <span class="font-bold text-[11px] uppercase tracking-wider text-slate-500">Sovereign Creators</span>
+      </div>
+      <div class="space-y-2.5">
+        {% for creator in suggested_creators|slice:":3" %}
+          <div class="flex items-center justify-between gap-2">
+            <a href="{% if creator.npub %}{% url 'profile' npub=creator.npub %}{% else %}{{ creator.canonical_path }}{% endif %}" class="flex items-center gap-2 min-w-0">
+              <div class="w-7 h-7 rounded-full bg-violet-600 text-white font-bold flex items-center justify-center text-xs shrink-0">
+                {{ creator.handle|truncatechars:1|upper }}
+              </div>
+              <div class="min-w-0">
+                <p class="font-bold text-slate-900 dark:text-slate-100 truncate">@{{ creator.handle }}</p>
+                <p class="text-[10px] text-slate-400 truncate">{{ creator.headline|default:'Sovereign Node' }}</p>
+              </div>
+            </a>
+          </div>
+        {% empty %}
+          <span class="text-slate-400 text-[11px]">No creator recommendations available.</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% if messages %} {% for message in messages %}
     <div id="feed-welcome-banner"
          class="flex items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 font-mono text-xs mb-4">

@@ -884,6 +884,11 @@ class FeedView(TemplateView):
         context["trending_tags_global"] = trending_global
         context["trending_tags"] = trending_iyou or trending_global
 
+        # Explore Discovery Hub (/feed?explore=1): transform the stream column
+        # into a discovery surface with the search bar, in-stream trending, and
+        # creator modules (mobile-critical) without altering feed resolution.
+        context["is_explore"] = bool(self.request.GET.get("explore"))
+
         return context
 
     def get(self, request, *args, **kwargs):

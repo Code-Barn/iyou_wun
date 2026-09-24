@@ -76,6 +76,25 @@ class UserLinkDeck(models.Model):
     def canonical_path(self):
         return f"/{self.display_handle}"
 
+    @property
+    def npub(self):
+        """bech32 npub for profile links; empty when no pubkey is derivable."""
+        pk = self.nostr_pubkey
+        if not pk:
+            username = self.user.username
+            if username.startswith("did:iyou:0x"):
+                pk = username.split("0x", 1)[1]
+            else:
+                return ""
+        if len(pk) != 64:
+            return ""
+        try:
+            from .views import hex_to_npub
+
+            return hex_to_npub(pk)
+        except Exception:
+            return ""
+
     def save(self, *args, **kwargs):
         """Automatically derive NIP-05 address from handle and discriminator."""
         if self.handle:

@@ -969,6 +969,8 @@
 
         const searchInput = document.getElementById("feed-search-input");
         if (searchInput) searchInput.value = rawTag;
+        const exploreInput = document.getElementById("explore-search-input");
+        if (exploreInput) exploreInput.value = rawTag;
         setSearchQuery(rawTag);
         applyFilters();
 
@@ -978,8 +980,46 @@
         }
 
         if (window.history && typeof window.history.replaceState === "function") {
-            window.history.replaceState({}, "", "?q=%23" + cleanSlug);
+            // Preserve existing query params (e.g. ?explore=1) alongside q.
+            const url = new URL(window.location.href);
+            url.searchParams.set("q", rawTag);
+            window.history.replaceState({}, "", url.toString());
         }
+    }
+
+    function initExploreSearch() {
+        const exploreInput = document.getElementById("explore-search-input");
+        if (!exploreInput) return;
+
+        exploreInput.focus({ preventScroll: true });
+
+        // Bounce typing from the nav search box back into the explore field so
+        // the two stay visually in sync regardless of which one is used.
+        const navInput = document.getElementById("feed-search-input");
+        if (navInput) {
+            navInput.addEventListener("input", function () {
+                if (exploreInput.value !== this.value) {
+                    exploreInput.value = this.value;
+                }
+            });
+        }
+
+        let exploreDebounceTimer = null;
+        exploreInput.addEventListener("input", function () {
+            const val = this.value;
+            if (exploreDebounceTimer) clearTimeout(exploreDebounceTimer);
+            exploreDebounceTimer = setTimeout(function () {
+                // Mirror into the canonical L2 search box so live note filtering,
+                // hashtag matching, and progressive handle/DID triage run exactly
+                // as if typed in the nav search input - even when #app-l2-ribbon
+                // is collapsed (body.l2-collapsed hides the native field).
+                if (!navInput) return;
+                if (navInput.value !== val) {
+                    navInput.value = val;
+                    navInput.dispatchEvent(new Event("input", { bubbles: true }));
+                }
+            }, 200);
+        });
     }
 
     function isFeedOrGalleryPage() {
@@ -1252,6 +1292,9 @@
         // 5b. Collapsed-L2 circle pill capsule (feed stream; only meaningful when #app-l2-ribbon is collapsed)
         initCollapsedCirclePills();
 
+        // 5c. Explore Discovery Hub search bridge (/feed?explore=1)
+        initExploreSearch();
+
         updateNsfwShieldStatusUI();
         applyNsfwBlurState();
 
@@ -1279,6 +1322,7 @@
         init: initCircleFeedFilter,
         setCircle: setCircle,
         setSearchQuery: setSearchQuery,
+        filterByTag: filterByTag,
         applyFilters: applyFilters,
         toggleNsfwFilter: toggleNsfwFilter,
         updateNsfwShieldStatusUI: updateNsfwShieldStatusUI,
