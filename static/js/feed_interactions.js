@@ -262,15 +262,29 @@
             bridgeClient.isProcessing = false;
         } else {
 
-            // Optimistic render: surface the signed event in the local feed DOM
-            // immediately, without waiting for relay gossip round-trips.
+            // Immediate optimistic ingestion: surface the locally-authored note
+            // card the moment the signature returns — do NOT wait for external
+            // relay gossip — with a brief green highlight fade, and hide any
+            // empty/welcome banners so the fresh note visibly lands at the top.
             var optimisticEvent = signedEvent || pendingEvent;
             if (optimisticEvent && optimisticEvent.id) {
-                addNoteToFeed(optimisticEvent);
+                var optimisticKind = Number(optimisticEvent.kind);
+                if (optimisticKind === 1 || optimisticKind === 1063 || optimisticKind === 30023) {
+                    if (addNoteToFeed(optimisticEvent)) {
+                        highlightFreshNoteCard(String(optimisticEvent.id));
+                    }
+                    var optimisticEmptyState = document.getElementById("feed-empty-state");
+                    if (optimisticEmptyState) {
+                        optimisticEmptyState.classList.add("hidden");
+                        optimisticEmptyState.style.display = "none";
+                    }
+                    var optimisticWelcome = document.getElementById("feed-welcome-banner");
+                    if (optimisticWelcome) optimisticWelcome.style.display = "none";
+                }
             }
             bridgeClient.broadcastToRelays(pendingEvent, null, function (localOk, anyOk) {
                 if (anyOk) {
-                    showToast("Sovereign Event Broadcasted Successfully.");
+                    showToast("Note published to mesh relays", "success");
                 } else if (!localOk) {
                     showToast("Failed to broadcast to all relays. Event may not be visible.", true);
                 }
@@ -1053,11 +1067,11 @@
 
     function addNoteToFeed(event) {
         var container = document.getElementById("feed-container") || document.getElementById("feedContainer") || document.getElementById("tab-posts");
-        if (!container || !event) return;
+        if (!container || !event) return false;
 
         if (event.id) {
             var existing = document.querySelector('[data-note-card-id="' + event.id + '"]') || document.querySelector('.feed-note-card[data-note-id="' + event.id + '"]');
-            if (existing) return;
+            if (existing) return false;
         }
 
         var isBlocked = event._filter_status && event._filter_status.status === 'BLOCKED';
@@ -1140,6 +1154,23 @@
         if (container.id === "tab-posts") {
             incrementProfilePostCount();
         }
+        return true;
+    }
+
+    function highlightFreshNoteCard(eventId) {
+        var card = document.querySelector('[data-note-card-id="' + eventId + '"]') ||
+                   document.querySelector('.feed-note-card[data-note-id="' + eventId + '"]');
+        if (!card) return;
+        card.style.transition = "background-color 1.6s ease, box-shadow 1.6s ease";
+        card.style.backgroundColor = "rgba(16, 185, 129, 0.12)";
+        card.style.boxShadow = "0 0 0 1px rgba(16, 185, 129, 0.35)";
+        setTimeout(function () {
+            card.style.backgroundColor = "";
+            card.style.boxShadow = "";
+            setTimeout(function () {
+                card.style.transition = "";
+            }, 300);
+        }, 1600);
     }
 
     function incrementProfilePostCount() {
@@ -1275,6 +1306,7 @@
     // ---------- Cursor-Based Infinite Scroll & Load More ----------
 
     var _isLoadingFeedNotes = false;
+    var _hasMoreFeedNotes = true;
 
     // ---------- Phase 34: Progressive Stream Hydration ----------
     // When the server renders the instant HTML shell (empty #feed-container
@@ -1292,12 +1324,13 @@
         _hydratingInitialFeed = true;
 
         var urlParams = new URLSearchParams(window.location.search);
-        var circle = urlParams.get("circle") || "global";
+        // Resolve the circle through the client filter so a cold boot (no
+        // ?circle=, no persisted toggle) joins the Global Mesh, not the
+        // server-rendered iyou default tab.
+        var circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === "function")
+            ? window.circleFeedFilter.getActiveCircle()
+            : (urlParams.get("circle") || "global");
         var mode = urlParams.get("mode") || (circle === "global" ? "global" : "network");
-        var activeCircleBtn = document.querySelector(".circle-tab.active, .circle-tab[data-active='true']");
-        if (activeCircleBtn && activeCircleBtn.dataset && activeCircleBtn.dataset.circle) {
-            circle = activeCircleBtn.dataset.circle;
-        }
         var tag = urlParams.get("tag") || "";
 
         var queryUrl = "/api/feed?limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
@@ -1454,12 +1487,70 @@
 
     var _feedFetchSequence = 0;
 
+    function renderTimelineEndMarker(container) {
+        if (!container) return;
+        if (container.querySelector("#feed-timeline-end-marker")) return;
+        // Only mark the end when the container actually holds notes; an empty
+        // slate (zero cards) is handled by #feed-empty-state instead.
+        if (container.querySelectorAll(".feed-note-card").length === 0) return;
+        var marker = document.createElement("div");
+        marker.id = "feed-timeline-end-marker";
+        marker.className = "py-8 text-center text-slate-400 font-mono text-[11px] select-none";
+        marker.textContent = "✓ Reached beginning of mesh timeline";
+        container.appendChild(marker);
+    }
+
+    function retryOlderNotes() {
+        // User-initiated manual retry: reset the stall triple-strike counter,
+        // re-arm the throttling flag, and resume observing the sentinel.
+        _stallTriggerCount = 0;
+        _lastObservedCardCount = -1;
+        _isObserverThrottled = false;
+        var retryBtn = document.getElementById("feed-stall-retry-btn");
+        if (retryBtn) retryBtn.classList.add("hidden");
+        var container = document.getElementById("feed-container") || document.getElementById("feedContainer");
+        var sentinel = document.getElementById("feed-pagination-sentinel");
+        if (container) {
+            _lastObservedCardCount = container.querySelectorAll(".feed-note-card").length;
+        }
+        if (sentinel && window.feedObserver) {
+            window.feedObserver.observe(sentinel);
+        }
+        loadMoreNotes();
+    }
+
+    function renderStallRetryButton(sentinelEl) {
+        var host = sentinelEl || document.getElementById("feed-pagination-sentinel");
+        if (!host) return;
+        var spinner = document.getElementById("feed-loading-spinner") || document.getElementById("loadMoreSpinner");
+        if (spinner) spinner.classList.add("hidden");
+        var existingBtn = document.getElementById("load-more-btn") || document.getElementById("loadMoreBtn");
+        if (existingBtn) existingBtn.classList.add("hidden");
+        _isLoadingFeedNotes = false;
+
+        var existing = document.getElementById("feed-stall-retry-btn");
+        if (existing) {
+            existing.classList.remove("hidden");
+            return;
+        }
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.id = "feed-stall-retry-btn";
+        btn.setAttribute("onclick", "retryOlderNotes()");
+        btn.className = "px-5 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-violet-600 hover:text-white dark:hover:bg-violet-600 rounded-lg text-xs font-mono text-slate-600 dark:text-slate-300 transition";
+        btn.textContent = "Load More Notes";
+        host.appendChild(btn);
+    }
+
     function loadMoreNotes(isReset = false) {
         if (_isLoadingFeedNotes && !isReset) return;
+        if (!_hasMoreFeedNotes && !isReset) return;
 
         var sentinel = document.getElementById("feed-pagination-sentinel");
         var container = document.getElementById("feed-container") || document.getElementById("feedContainer");
         if (!container) return;
+
+        if (isReset) _hasMoreFeedNotes = true;
 
         var oldestTimestamp = sentinel && sentinel.dataset ? sentinel.dataset.oldestTimestamp : null;
         if (!isReset && (!oldestTimestamp || isNaN(parseInt(oldestTimestamp, 10)))) {
@@ -1497,7 +1588,9 @@
 
         var queryUrl = "/api/feed?limit=25&circle=" + encodeURIComponent(circle) + "&mode=" + encodeURIComponent(mode);
         if (!isReset && oldestTimestamp) {
-            queryUrl += "&until=" + (parseInt(oldestTimestamp, 10) - 1);
+            // Send the raw oldest timestamp; the server decrements it by one
+            // second to form a strict, strictly-monotonic cursor.
+            queryUrl += "&until=" + parseInt(oldestTimestamp, 10);
         }
         if (tag) {
             queryUrl += "&tag=" + encodeURIComponent(tag);
@@ -1550,11 +1643,16 @@
                     }
 
                     if (data.has_more === false) {
+                        // Reached the beginning of the timeline: pin hasMoreOff,
+                        // stop observing the sentinel, and drop the spinner.
+                        _hasMoreFeedNotes = false;
                         if (window.feedObserver && sentinel) {
                             window.feedObserver.unobserve(sentinel);
                         }
                         if (btn) btn.classList.add("hidden");
-                        if (endMsg) endMsg.classList.remove("hidden");
+                        if (spinner) spinner.classList.add("hidden");
+                        if (endMsg) endMsg.classList.add("hidden");
+                        renderTimelineEndMarker(container);
                     } else {
                         if (btn) btn.classList.remove("hidden");
                     }
@@ -1572,10 +1670,12 @@
                         window.CircleFilter.applyFilters();
                     }
                 } else {
+                    _hasMoreFeedNotes = false;
                     if (window.feedObserver && sentinel) {
                         window.feedObserver.unobserve(sentinel);
                     }
                     if (btn) btn.classList.add("hidden");
+                    if (spinner) spinner.classList.add("hidden");
 
                     var visibleCards = container.querySelectorAll(".feed-note-card:not(.hidden)");
                     if (visibleCards.length === 0) {
@@ -1602,7 +1702,8 @@
                             }
                         }
                     } else {
-                        if (endMsg) endMsg.classList.remove("hidden");
+                        if (endMsg) endMsg.classList.add("hidden");
+                        renderTimelineEndMarker(container);
                     }
                 }
             })
@@ -1623,6 +1724,17 @@
         var container = document.getElementById('feed-container');
         var sentinel = document.getElementById('feed-pagination-sentinel');
         if (!container) return;
+
+        _hasMoreFeedNotes = true;
+        _stallTriggerCount = 0;
+        _lastObservedCardCount = -1;
+        _isObserverThrottled = false;
+        var retryBtn = document.getElementById('feed-stall-retry-btn');
+        if (retryBtn) retryBtn.classList.add('hidden');
+        var timelineEnd = document.getElementById('feed-timeline-end-marker');
+        if (timelineEnd) {
+            try { timelineEnd.remove(); } catch (e) { timelineEnd.classList.add('hidden'); }
+        }
 
         // Clear existing cards immediately to prevent switching flash
         container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
@@ -1653,6 +1765,8 @@
     // ---------- Sentinel Observer for Infinite Scroll ----------
 
     var _isObserverThrottled = false;
+    var _stallTriggerCount = 0;
+    var _lastObservedCardCount = -1;
 
     function initFeedPaginationObserver() {
         var sentinel = document.getElementById("feed-pagination-sentinel");
@@ -1661,6 +1775,9 @@
         if (window.feedObserver) {
             try { window.feedObserver.disconnect(); } catch (e) {}
         }
+
+        _stallTriggerCount = 0;
+        _lastObservedCardCount = -1;
 
         window.feedObserver = new IntersectionObserver(function (entries) {
             entries.forEach(function (entry) {
@@ -1673,6 +1790,27 @@
 
                     // If #feed-empty-state is visible or no cards are rendered, do not trigger loadMoreNotes()
                     if ((emptyState && !emptyState.classList.contains("hidden") && emptyState.style.display !== "none") || cards.length === 0) {
+                        return;
+                    }
+
+                    // Triple-strike stall breaker: if the sentinel stays
+                    // intersecting for 3 consecutive pagination triggers while
+                    // #feed-container's note count does not increase, pause the
+                    // observer permanently and swap the spinner for a manual
+                    // "Load More Notes" button so the fetch storm cannot loop.
+                    var currentCardCount = container ? container.querySelectorAll(".feed-note-card").length : 0;
+                    if (currentCardCount > _lastObservedCardCount) {
+                        _stallTriggerCount = 0;
+                    } else if (_lastObservedCardCount !== -1) {
+                        _stallTriggerCount += 1;
+                    }
+                    _lastObservedCardCount = currentCardCount;
+
+                    if (_stallTriggerCount >= 3) {
+                        if (window.feedObserver && entry.target) {
+                            window.feedObserver.unobserve(entry.target);
+                        }
+                        renderStallRetryButton(entry.target);
                         return;
                     }
 
@@ -2750,6 +2888,7 @@
     window.appendNoteToFeed = appendNoteToFeed;
     window.loadMoreNotes = loadMoreNotes;
     window.reloadFeedForCircle = reloadFeedForCircle;
+    window.retryOlderNotes = retryOlderNotes;
     window.getBlossomBaseUrl = getBlossomBaseUrl;
     window.handleMediaSelected = handleMediaSelected;
     window.toggleGear = toggleGear;

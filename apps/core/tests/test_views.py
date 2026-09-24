@@ -2048,15 +2048,30 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             ["m", "image/jpeg"],
         ])
 
-        with patch("apps.core.views.relay_req", return_value={"api_ev_1": event1, "api_ev_2": event2}):
+        seen_filters = []
+
+        def _spy_relay_req(filter_obj, *args, **kwargs):
+            seen_filters.append(filter_obj)
+            return {"api_ev_1": event1, "api_ev_2": event2}
+
+        with patch("apps.core.views.relay_req", side_effect=_spy_relay_req):
             response = self.client.get(reverse("api_feed") + "?until=1700000000&limit=10")
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
         self.assertTrue(data.get("success"))
         self.assertEqual(data.get("oldest_timestamp"), 1699998000)
-        self.assertTrue(data.get("has_more"))
+        self.assertEqual(data.get("count"), 2)
+        # Strict cursor: a partial page (2 < limit 10) means no more content.
+        self.assertFalse(data.get("has_more"))
+        self.assertIn("has_more", data)
         self.assertEqual(len(data.get("notes", [])), 2)
+
+        # The server must translate the requested cursor into a strictly-older
+        # relay filter: until - 1 so duplicate timestamps cannot repeat pages.
+        until_filters = [f for f in seen_filters if f.get("until") is not None]
+        self.assertEqual(len(until_filters), 1)
+        self.assertEqual(until_filters[0]["until"], 1700000000 - 1)
 
         note = data["notes"][0]
         self.assertEqual(note["id"], "api_ev_1")
@@ -2072,6 +2087,25 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(len(note2["media_attachments"]), 1)
         self.assertEqual(note2["media_attachments"][0]["type"], "image")
         self.assertEqual(note2["media_attachments"][0]["url"], "https://cdn.iyou.me/image.jpg")
+
+    def test_api_feed_has_more_tracks_full_pages(self):
+        pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        events = {
+            f"full_page_{i}": make_event(
+                f"full_page_{i}", 1, pubkey=pk, created_at=1700000000 - i, content=f"Page note {i}"
+            )
+            for i in range(2)
+        }
+
+        with patch("apps.core.views.relay_req", return_value=events):
+            response = self.client.get(reverse("api_feed") + "?limit=2")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        # A full page of exactly `limit` notes means more content may exist.
+        self.assertEqual(data.get("count"), 2)
+        self.assertTrue(data.get("has_more"))
+        self.assertEqual(data.get("oldest_timestamp"), 1700000000 - 1)
 
     def test_api_feed_serializes_like_count(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"

@@ -1174,6 +1174,7 @@ def api_feed(request):
         return JsonResponse({
             "success": True,
             "notes": [],
+            "count": 0,
             "replies": {},
             "thread_replies": {},
             "total_replies": 0,
@@ -1216,12 +1217,20 @@ def api_feed(request):
     dev_param = request.GET.get("dev")
     dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
 
-    filter_obj = {"kinds": [1, 1063, 1111, 30023], "limit": limit}
+    # Strict cursor pagination: validate `until` as an integer unix timestamp
+    # and decrement it by one second so relays filter strictly older events,
+    # guaranteeing every page moves monotonically backward even when notes share
+    # duplicate `created_at` timestamps.
+    until_ts = None
     if until:
         try:
-            filter_obj["until"] = int(until)
+            until_ts = int(until)
         except (ValueError, TypeError):
-            pass
+            until_ts = None
+
+    filter_obj = {"kinds": [1, 1063, 1111, 30023], "limit": limit}
+    if until_ts is not None:
+        filter_obj["until"] = until_ts - 1
 
     if tag:
         clean_tag = tag.lstrip("#")
@@ -1424,7 +1433,7 @@ def api_feed(request):
         replies_serialized[pid] = annotated_replies
 
     oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
-    has_more = bool(roots and len(roots) > 0)
+    has_more = bool(roots) and len(roots) >= limit
 
     iyou_pubkeys = set(get_iyou_pubkeys())
     trending_tags_global, trending_tags_iyou = calculate_trending_tags(
@@ -1434,6 +1443,7 @@ def api_feed(request):
     return JsonResponse({
         "success": True,
         "notes": roots,
+        "count": len(roots),
         "replies": replies_serialized,
         "total_replies": feed_data["total_replies"],
         "oldest_timestamp": oldest_timestamp,

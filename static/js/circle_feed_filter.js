@@ -16,7 +16,18 @@
 (function (global) {
     "use strict";
 
-    let activeCircle = "iyou";
+    let activeCircle = (function () {
+        try {
+            const stored = localStorage.getItem("wun_circle_filter") || "";
+            if (["iyou", "global", "following", "inner", "mutual"].indexOf(stored) !== -1) {
+                return stored;
+            }
+        } catch (e) {}
+        // Cold-boot default: no persisted preference (or inaccessible storage)
+        // means Global Mesh, so first-time visitors land on a populated feed
+        // instead of an empty iyou circle with an endless fetch spinner.
+        return "global";
+    })();
     let activeSearchQuery = "";
 
     const CIRCLE_LABELS = {
@@ -611,8 +622,14 @@
             return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes match the active filter and search query.</p>' +
                 '<p class="text-xs text-slate-500">Try refining your search keyword or switching circle scope.</p>';
         } else if (circle === "iyou") {
-            return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes from the iyou ecosystem yet.</p>' +
-                '<p class="text-xs text-slate-500">Notes posted by registered accounts will appear here.</p>';
+            return '<div class="py-12 px-4 text-center font-mono text-xs space-y-3">' +
+                '<div class="text-2xl">⚡</div>' +
+                '<p class="font-bold text-slate-700 dark:text-slate-300">No notes from registered sovereign accounts found.</p>' +
+                '<p class="text-slate-400 max-w-sm mx-auto text-[11px]">Your iyou circle filters strictly for identity-anchored peers. The global mesh has active notes available right now.</p>' +
+                '<div class="pt-2">' +
+                '<button type="button" onclick="window.circleFeedFilter && window.circleFeedFilter.setCircle(\'global\')" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold transition shadow-sm">' +
+                '🌐 Switch to Global Mesh</button>' +
+                '</div></div>';
         } else if (circle === "following") {
             return '<p class="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-1">No notes in Following Circle.</p>' +
                 '<p class="text-xs text-slate-500">Follow more creators on the feed or link deck to populate your network.</p>';
@@ -803,6 +820,15 @@
     function setCircle(circleMode) {
         const previousCircle = activeCircle;
         activeCircle = circleMode || "iyou";
+
+        // Persist the active scope so fresh sessions default to the last
+        // explicit choice (falling back to "global" for first-time visitors).
+        const isCirclePage = window.location.pathname.startsWith("/feed") ||
+                             window.location.pathname.startsWith("/gallery") ||
+                             window.location.pathname === "/";
+        if (isCirclePage) {
+            try { localStorage.setItem("wun_circle_filter", activeCircle); } catch (e) {}
+        }
 
         // Update tabs UI
         const tabGroup = document.getElementById("circle-filter-group");
@@ -1175,15 +1201,16 @@
     }
 
     function initCircleFeedFilter() {
-        // 1. Check URL parameters
+        // 1. Check URL parameters, then the module-level default (last
+        // persisted wun_circle_filter choice, or "global" for fresh visitors)
+        // so the stream never boots into an infinite "Fetching older notes..."
+        // stall in the iyou scope.
         const urlParams = new URLSearchParams(window.location.search);
-        const initialCircle = urlParams.get('circle') || 'iyou';
+        const urlCircle = urlParams.get('circle');
         const urlQuery = urlParams.get("q");
 
-        if (initialCircle && CIRCLE_LABELS[initialCircle]) {
-            activeCircle = initialCircle;
-        } else {
-            activeCircle = 'iyou';
+        if (urlCircle && CIRCLE_LABELS[urlCircle]) {
+            activeCircle = urlCircle;
         }
 
         const depCtx = global.DEPENDENT_CONTEXT || (global.wotGate && typeof global.wotGate.getContext === "function" ? global.wotGate.getContext() : null);
@@ -1311,7 +1338,7 @@
         });
 
         window.addEventListener("storage", function (e) {
-            if (e.key === "wun_stream_lang" || e.key === "wun_lang_pref" || e.key === "wun_nsfw_pref") {
+            if (e.key === "wun_circle_filter" || e.key === "wun_stream_lang" || e.key === "wun_lang_pref" || e.key === "wun_nsfw_pref") {
                 applyFilters();
             }
         });
