@@ -153,6 +153,20 @@
     // ---------- Broadcast Callback ----------
 
     function handleSignedEvent(pendingEvent, signedEvent) {
+        // NIP-51 bookmark-list sync (Kind 10004) resolves its own broadcast
+        // promise inside syncBookmarksToMesh — never route it through the
+        // composer/optimistic-feed default flow below.
+        var signedKind = (signedEvent && typeof signedEvent.kind === "number")
+            ? signedEvent.kind
+            : ((pendingEvent && typeof pendingEvent.kind === "number") ? pendingEvent.kind : null);
+        if (signedKind === 10004) {
+            if (bridgeClient) {
+                bridgeClient.pendingEvent = null;
+                bridgeClient.isProcessing = false;
+            }
+            cancelSignatureWait();
+            return;
+        }
         // A signed event arrived: the approval handshake succeeded, so any
         // pending 15-second wait timer is moot.
         cancelSignatureWait();
@@ -2497,6 +2511,38 @@
         }
     }
 
+    // ---------- NIP-51 Bookmark List Mesh Sync (Kind 10004) ----------
+    // Outbound: publish the user's full bookmark list as a signed Kind 10004
+    // event so other clients can reconcile it from the relay mesh. Fully
+    // graceful: any signing failure, bridge outage, or user cancel just skips
+    // the broadcast — the local DB bookmark stays saved and the UI is untouched.
+
+    function syncBookmarksToMesh(eventIds) {
+        if (!window.CURRENT_SESSION_DID || window.CURRENT_SESSION_DID === "None") return;
+        if (!bridgeClient || typeof bridgeClient.signEvent !== "function") return;
+        if (!window.relayPool || typeof window.relayPool.broadcast !== "function") return;
+        if (bridgeClient.isProcessing) return; // a user-triggered sign flow owns the enclave right now
+        var ids = Array.isArray(eventIds) ? eventIds.filter(function (id) { return !!id; }) : [];
+        if (!ids.length) return;
+        var tags = ids.map(function (id) { return ["e", id]; });
+        var unsignedEvent = {
+            kind: 10004,
+            created_at: Math.floor(Date.now() / 1000),
+            tags: tags,
+            content: ""
+        };
+        bridgeClient.signEvent(unsignedEvent)
+            .then(function (signedEvent) {
+                if (signedEvent && signedEvent.sig) {
+                    window.relayPool.broadcast(signedEvent);
+                    console.log("[Bookmarks] Synced Kind 10004 to mesh relays with", ids.length, "entries");
+                }
+            })
+            .catch(function (err) {
+                console.warn("[Bookmarks] Mesh broadcast skipped or bridge offline:", err);
+            });
+    }
+
     function toggleBookmark(noteId, el, event) {
         if (event && typeof event.stopPropagation === "function") event.stopPropagation();
         if (!noteId) return;
@@ -2523,6 +2569,9 @@
                 if (data.bookmarked) idSet.add(noteId); else idSet.delete(noteId);
                 syncBookmarkButton(btn, !!data.bookmarked);
                 showToast(data.bookmarked ? "Note saved to Bookmarks" : "Bookmark removed", "info", 2200);
+                if (data.event_ids && window.bridgeClient && window.relayPool) {
+                    syncBookmarksToMesh(data.event_ids);
+                }
                 if (!data.bookmarked) {
                     var card = document.querySelector('.feed-note-card[data-note-card-id="' + noteId + '"]');
                     if (card) {

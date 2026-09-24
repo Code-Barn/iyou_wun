@@ -3445,7 +3445,15 @@ def api_toggle_bookmark(request):
         Bookmark.objects.filter(user=request.user, event_id=event_id).delete()
         bookmarked = False
 
-    return JsonResponse({"status": "ok", "bookmarked": bookmarked})
+    return JsonResponse(
+        {
+            "status": "ok",
+            "bookmarked": bookmarked,
+            "event_ids": list(
+                Bookmark.objects.filter(user=request.user).values_list("event_id", flat=True)
+            ),
+        }
+    )
 
 
 def api_bookmark_ids(request):
@@ -3475,6 +3483,53 @@ class BookmarksView(LoginRequiredMixin, TemplateView):
         context["relays_json"] = json.dumps(relays)
         context["relays"] = relays
         context["og_image"] = og_fallback_image(self.request)
+
+        # NIP-51 inbound sync (Kind 10004 bookmark list): reconcile the list the
+        # user last published to the mesh into the local Bookmark table before
+        # hydrating the shell. Purely additive upsert — the local DB remains the
+        # authoritative source for the saved set and the user's own list.
+        user_hex = user_pubkey
+        if not user_hex:
+            user_hex = did_to_pubkey(getattr(self.request.user, "username", "")) or ""
+        if re.fullmatch(r"[0-9a-f]{64}", user_hex):
+            try:
+                k10004_events = relay_req(
+                    {"kinds": [10004], "authors": [user_hex], "limit": 1},
+                    timeout=1.0,
+                    relay_urls=relays,
+                )
+            except Exception:
+                logger.exception("BookmarksView Kind 10004 mesh sync failed")
+                k10004_events = {}
+            if isinstance(k10004_events, dict):
+                for _event in k10004_events.values():
+                    if not isinstance(_event, dict):
+                        continue
+                    remote_ids = [
+                        t[1]
+                        for t in _event.get("tags") or []
+                        if isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] == "e"
+                    ]
+                    remote_ids = [
+                        eid.lower()
+                        for eid in remote_ids
+                        if isinstance(eid, str) and len(eid) == 64
+                    ]
+                    remote_ids = list(dict.fromkeys(remote_ids))
+                    if not remote_ids:
+                        continue
+                    existing_ids = set(
+                        Bookmark.objects.filter(user=self.request.user).values_list(
+                            "event_id", flat=True
+                        )
+                    )
+                    new_bookmarks = [
+                        Bookmark(user=self.request.user, event_id=eid)
+                        for eid in remote_ids
+                        if eid not in existing_ids
+                    ]
+                    if new_bookmarks:
+                        Bookmark.objects.bulk_create(new_bookmarks, ignore_conflicts=True)
 
         event_ids = list(
             Bookmark.objects.filter(user=self.request.user).values_list("event_id", flat=True)[:50]

@@ -972,6 +972,7 @@
                 self.showFallbackModal();
             }
         }, SIGN_TIMEOUT_MS);
+        return promise;
     };
 
     /**

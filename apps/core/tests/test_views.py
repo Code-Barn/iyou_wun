@@ -3056,6 +3056,67 @@ class BookmarkEndpointsTests(TestCase):
         self.assertNotContains(resp, "No bookmarks saved yet.")
         self.assertNotContains(resp, "No notes from the iyou ecosystem yet.")
 
+    def test_toggle_bookmark_returns_current_event_ids(self):
+        resp = self._toggle("a" * 64)
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertIn("event_ids", payload)
+        self.assertEqual(payload["event_ids"], ["a" * 64])
+
+        resp = self._toggle("d" * 64)
+        payload = resp.json()
+        self.assertTrue(payload["bookmarked"])
+        self.assertEqual(sorted(payload["event_ids"]), ["a" * 64, "d" * 64])
+
+        # Deleting drops the id from the returned full list.
+        resp = self._toggle("a" * 64)
+        payload = resp.json()
+        self.assertFalse(payload["bookmarked"])
+        self.assertEqual(payload["event_ids"], ["d" * 64])
+
+    def test_bookmarks_view_ingests_kind10004_mesh_list(self):
+        """Kind 10004 e-tags published to the mesh are upserted into Bookmark."""
+        local_id = "b" * 64
+        remote_id = "c" * 64
+        Bookmark.objects.create(user=self.user, event_id=local_id)
+
+        def fake_relay_req(filter_obj, relay_urls=None, timeout=1.0, deadline=None):
+            if "kinds" in filter_obj and 10004 in filter_obj["kinds"]:
+                return {
+                    "mesh_list_1": {
+                        "id": "mesh_list_1",
+                        "kind": 10004,
+                        "pubkey": VALID_PUBKEY_HEX,
+                        "content": "",
+                        "tags": [["e", local_id], ["e", remote_id], ["e", "short"]],
+                        "created_at": 2000000,
+                    }
+                }
+            if "ids" in filter_obj:
+                return {
+                    local_id: make_event(local_id, 1, content="local note"),
+                    remote_id: make_event(remote_id, 1, content="remote note"),
+                }
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            resp = self.client.get(reverse("bookmarks"))
+
+        self.assertEqual(resp.status_code, 200)
+        # Both the pre-existing local bookmark and the mesh e-tag are persisted.
+        self.assertTrue(Bookmark.objects.filter(user=self.user, event_id=local_id).exists())
+        self.assertTrue(Bookmark.objects.filter(user=self.user, event_id=remote_id).exists())
+        self.assertEqual(
+            set(
+                Bookmark.objects.filter(user=self.user).values_list("event_id", flat=True)
+            ),
+            {local_id, remote_id},
+        )
+        self.assertEqual(resp.context["bookmarks_count"], 2)
+        self.assertContains(resp, "local note")
+        self.assertContains(resp, "remote note")
+
 
 class _FakeNip05Resp:
     """Minimal urllib response-style object supporting read() + context manager."""
