@@ -1604,7 +1604,12 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "action-btn-repost")
         self.assertContains(response, "action-btn-like")
         self.assertContains(response, "action-btn-share")
-        self.assertContains(response, '<span class="action-svg w-3.5 h-3.5 shrink-0"><svg')
+        # Phase 16.3: action row renders crisp 18px stroke SVG icons (no emoji glyphs).
+        self.assertContains(response, '<svg class="w-4 h-4 stroke-current stroke-2')
+        self.assertContains(response, "toggleReplyBox(")
+        self.assertContains(response, "toggleRepostDropdown(")
+        self.assertContains(response, "toggleLike(")
+        self.assertContains(response, "shareNote(")
 
     def test_feed_renders_kebab_menu_with_ecosystem_actions(self):
         relay_events = {

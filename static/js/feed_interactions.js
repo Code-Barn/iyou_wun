@@ -940,9 +940,9 @@
             '<div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">' +
             '<button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="showReplyEditor(\'' + escapeAttr(noteId) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPLY + '</span><span class="action-count reply-count-label">' + repliesCount + '</span></button>' +
             '<button type="button" class="action-btn-repost group/repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="repostNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_REPOST + '</span><span class="action-count repost-count-label">' + repostCount + '</span></button>' +
-            '<button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-600 dark:hover:text-pink-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="heart-icon action-svg w-3.5 h-3.5 shrink-0">' + ICON_HEART + '</span><span class="action-count like-count-label">' + reactionLikeCount + '</span></button>' +
+            '<button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-rose-600 dark:hover:text-rose-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="likeNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(pubkey) + '\')"><span class="heart-icon action-svg w-3.5 h-3.5 shrink-0">' + ICON_HEART + '</span><span class="action-count like-count-label">' + reactionLikeCount + '</span></button>' +
             ((note.kind === 30023 || note.is_proposal || note.lud16) ? '<button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(note.kind) + '\', \'' + escapeAttr(note.lud16 || '') + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ((note.kind === 30023 || note.is_proposal) ? ICON_VOTE : ICON_ZAP) + '</span><span>' + ((note.kind === 30023 || note.is_proposal) ? 'Vote' : 'Tip') + '</span></button>' : '') +
-            '<button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr(authorName || "") + '\', \'' + escapeAttr((displayContent || noteContent || "").slice(0, 140)) + '\')"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_SHARE + '</span><span class="hidden sm:inline">Share</span></button>' +
+            '<button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-sky-600 dark:hover:text-sky-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote(\'' + escapeAttr(noteId) + '\', \'' + escapeAttr((displayContent || noteContent || "").slice(0, 120)) + '\', event)"><span class="action-svg w-3.5 h-3.5 shrink-0">' + ICON_SHARE + '</span><span class="hidden sm:inline">Share</span></button>' +
             '</div>' +
             replyDrawerHtml +
             '</div></div>';
@@ -1990,11 +1990,11 @@
         var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-like, [data-note-id="' + noteId + '"] .action-btn-like');
         var countLabel = btn ? btn.querySelector(".like-count-label") : null;
         if (btn) {
-            btn.classList.add("text-pink-600", "dark:text-pink-400", "font-bold", "liked");
+            btn.classList.add("text-rose-600", "dark:text-rose-400", "font-bold", "liked");
             var heartSvg = btn.querySelector(".heart-icon svg");
             if (heartSvg) {
-                heartSvg.setAttribute("fill", "#ec4899");
-                heartSvg.setAttribute("stroke", "#ec4899");
+                heartSvg.setAttribute("fill", "#e11d48");
+                heartSvg.setAttribute("stroke", "#e11d48");
             }
         }
         if (countLabel) {
@@ -2041,6 +2041,25 @@
         pendingRepost = { noteId: noteId };
         bridgeClient.isProcessing = true;
         bridgeClient.signEvent(event);
+    }
+
+    function toggleReplyBox(noteId, event) {
+        if (event && typeof event.stopPropagation === "function") {
+            event.stopPropagation();
+        }
+        showReplyEditor(noteId);
+    }
+
+    function toggleLike(noteId, event) {
+        if (event && typeof event.stopPropagation === "function") {
+            event.stopPropagation();
+        }
+        var pubkey = "";
+        var card = document.querySelector('[data-note-card-id="' + noteId + '"]');
+        if (card && card.getAttribute("data-author-pubkey")) {
+            pubkey = card.getAttribute("data-author-pubkey");
+        }
+        likeNote(noteId, pubkey);
     }
 
     function toggleRepostDropdown(noteId) {
@@ -2327,21 +2346,25 @@
         }
     }
 
-    function shareNote(noteId, authorName, snippet) {
-        var permalink = window.location.origin + "/feed?thread=" + encodeURIComponent(noteId);
-        if (navigator.share) {
+    function shareNote(noteId, textExcerpt, event) {
+        if (event && typeof event.stopPropagation === "function") {
+            event.stopPropagation();
+        }
+        var shareUrl = window.location.origin + "/feed?thread=" + encodeURIComponent(noteId);
+        var canNativeShare = typeof navigator.share === "function" && typeof navigator.canShare === "function";
+        if (canNativeShare) {
             navigator.share({
-                title: (authorName || "Author") + " on iyou_wun",
-                text: snippet || "Shared from iyou_wun",
-                url: permalink
+                title: "iyou_wun Note",
+                text: textExcerpt || "Check out this note on iyou_wun",
+                url: shareUrl
             }).catch(function (err) {
                 if (err && err.name === "AbortError") {
                     return;
                 }
-                copyNotePermalink(noteId);
+                window.copyNotePermalink(noteId);
             });
         } else {
-            copyNotePermalink(noteId);
+            window.copyNotePermalink(noteId);
         }
     }
 
@@ -2519,6 +2542,8 @@
     window.toggleGear = toggleGear;
     window.toggleKebabMenu = toggleKebabMenu;
     window.likeNote = likeNote;
+    window.toggleLike = toggleLike;
+    window.toggleReplyBox = toggleReplyBox;
     window.repostNote = repostNote;
     window.toggleRepostDropdown = toggleRepostDropdown;
     window.openQuoteComposer = openQuoteComposer;

@@ -306,64 +306,104 @@
     </div>
     {% endif %}
 
-    <!-- 5-Button Action Bar -->
-    <div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/80 text-xs font-mono text-slate-500 dark:text-slate-400 select-none">
-      <!-- 1. Reply Drawer Toggle -->
-      <button type="button" class="action-btn-reply flex items-center gap-1.5 hover:text-violet-600 dark:hover:text-violet-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="toggleReplyDrawer('{{ note.id }}')">
-        <span class="action-svg w-3.5 h-3.5 shrink-0"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg></span>
-        <span class="action-count reply-count-label">
-          {% if note.reply_count and note.reply_count > 0 %}
+    <!-- Note Action Row (Phase 16.3: themed SVG reaction icons / 16.4: native Web Share) -->
+    <div class="flex items-center justify-between gap-1 sm:gap-4 mt-3 pt-2.5 border-t border-slate-100 dark:border-slate-800/60 text-xs font-mono text-slate-500 dark:text-slate-400 select-none max-w-[440px]">
+      <!-- 1. Reply Action -->
+      <button type="button"
+              class="action-btn-reply group flex items-center gap-1.5 transition-colors hover:text-violet-600 dark:hover:text-violet-400"
+              onclick="toggleReplyBox('{{ note.id }}', event)"
+              title="Reply"
+              aria-label="Reply to note">
+        <span class="p-1.5 rounded-full group-hover:bg-violet-50 dark:group-hover:bg-violet-950/50 transition">
+          <svg class="w-4 h-4 stroke-current stroke-2 shrink-0" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 0012 20.25z" />
+          </svg>
+        </span>
+        <span class="reply-count-span reply-count-label">
+          {% if note.reply_count %}
             {{ note.reply_count }}
-          {% else %}
-            {% trans "Reply" %}
           {% endif %}
         </span>
       </button>
 
-      <!-- 2. Repost / Quote Toggle -->
-      <div class="relative inline-block repost-menu-container">
+      <!-- 2. Repost / Quote Action -->
+      <div class="relative inline-block repost-menu-container group/repost">
         <button type="button"
-                class="action-btn-repost flex items-center gap-1.5 hover:text-emerald-600 dark:hover:text-emerald-400 transition px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50"
-                onclick="toggleRepostDropdown('{{ note.id }}')">
-          <span>🔁</span>
-          <span class="action-count repost-count-label">{% if note.repost_count %}{{ note.repost_count }}{% else %}{% trans "Repost" %}{% endif %}</span>
+                class="action-btn-repost group flex items-center gap-1.5 transition-colors hover:text-emerald-600 dark:hover:text-emerald-400"
+                onclick="toggleRepostDropdown('{{ note.id }}', event)"
+                title="Repost or Quote"
+                aria-label="Repost note">
+          <span class="p-1.5 rounded-full group-hover:bg-emerald-50 dark:group-hover:bg-emerald-950/50 transition">
+            <svg class="w-4 h-4 stroke-current stroke-2 shrink-0 transition-transform duration-500 group-hover/repost:rotate-180" fill="none" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017.22.032.441.046.662M4.5 12l3 3m-3-3l-3 3" />
+            </svg>
+          </span>
+          <span class="repost-count-span repost-count-label">
+            {% if note.repost_count %}
+              {{ note.repost_count }}
+            {% endif %}
+          </span>
         </button>
         <div id="repost-menu-{{ note.id }}" class="hidden absolute left-0 bottom-8 z-30 w-36 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-xl p-1 text-xs font-mono">
           <button type="button" class="w-full text-left px-2.5 py-1.5 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg flex items-center gap-2" onclick="repostNote('{{ note.id }}', '{{ note.pubkey }}')">
-            <span>🔁</span> <span>{% trans "Repost" %}</span>
+            <svg class="w-4 h-4 stroke-current stroke-2 shrink-0 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 00-3.7-3.7 48.678 48.678 0 00-7.324 0 4.006 4.006 0 00-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3l-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 003.7 3.7 48.656 48.656 0 007.324 0 4.006 4.006 0 003.7-3.7c.017.22.032.441.046.662M4.5 12l3 3m-3-3l-3 3" /></svg> <span>{% trans "Repost" %}</span>
           </button>
           <button type="button" class="w-full text-left px-2.5 py-1.5 hover:bg-violet-50 dark:hover:bg-violet-950/60 text-violet-600 dark:text-violet-400 rounded-lg flex items-center gap-2" onclick="openQuoteComposer('{{ note.id }}', '{{ note.pubkey }}', '{{ note.author_name|default:note.npub|escapejs }}', '{{ note.display_content|default:note.content|truncatechars:120|escapejs }}', '{{ note.media_url|default:''|escapejs }}')">
-            <span>💬</span> <span>{% trans "Quote Note" %}</span>
+            <svg class="w-4 h-4 stroke-current stroke-2 shrink-0" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20.25c4.97 0 9-3.694 9-8.25s-4.03-8.25-9-8.25S3 7.444 3 12c0 2.104.859 4.023 2.273 5.48.432.447.74 1.04.586 1.641a4.483 4.483 0 01-.923 1.785A5.969 5.969 0 0012 20.25z" /></svg> <span>{% trans "Quote Note" %}</span>
           </button>
         </div>
       </div>
 
-      <!-- 3. Like / Heart -->
-      <button type="button" class="action-btn-like flex items-center gap-1.5 hover:text-pink-500 transition-colors px-2 py-1 rounded hover:bg-pink-50 dark:hover:bg-pink-950/40" onclick="likeNote('{{ note.id }}', '{{ note.pubkey }}')">
-        <span class="heart-icon action-svg w-3.5 h-3.5 shrink-0"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg></span>
-        <span class="action-count like-count-label">
-          {% if note.like_count and note.like_count > 0 %}{{ note.like_count }}{% endif %}
+      <!-- 3. Like / Reaction Action -->
+      <button type="button"
+              class="like-btn action-btn-like group flex items-center gap-1.5 transition-colors hover:text-rose-600 dark:hover:text-rose-400"
+              onclick="toggleLike('{{ note.id }}', event)"
+              data-note-id="{{ note.id }}"
+              title="Like"
+              aria-label="Like note">
+        <span class="p-1.5 rounded-full group-hover:bg-rose-50 dark:group-hover:bg-rose-950/50 transition">
+          <svg class="w-4 h-4 stroke-current stroke-2 shrink-0 heart-icon like-icon fill-none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 8.25c0-2.485-2.099-4.5-4.688-4.5-1.935 0-3.597 1.126-4.312 2.733-.715-1.607-2.377-2.733-4.313-2.733C5.1 3.75 3 5.765 3 8.25c0 7.22 9 12 9 12s9-4.78 9-12z" />
+          </svg>
+        </span>
+        <span class="like-count-span like-count-label">
+          {% if note.like_count %}
+            {{ note.like_count }}
+          {% endif %}
         </span>
       </button>
 
-      <!-- 4. Contextual Vote / Fund -->
+      <!-- 4. Contextual Vote / Fund (preserved) -->
       {% if note.kind == 30023 or note.is_proposal or note.lud16 %}
-      <button type="button" class="action-btn-contextual flex items-center gap-1.5 text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/40 px-2 py-1 rounded transition-colors font-semibold" onclick="handleContextualAction('{{ note.id }}', '{{ note.kind }}', '{{ note.lud16|default:'' }}')">
-        <span class="action-svg w-3.5 h-3.5 shrink-0">
-          {% if note.kind == 30023 or note.is_proposal %}
-          <svg class="w-3.5 h-3.5 fill-none" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m18 9-1-1-1-1h-8l-1 1-1 1v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9z"></path><path d="M6 5V3h12v2"></path></svg>
-          {% else %}
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path></svg>
-          {% endif %}
+      <button type="button"
+              class="action-btn-contextual group flex items-center gap-1.5 text-amber-600 dark:text-amber-400 transition-colors font-semibold"
+              onclick="handleContextualAction('{{ note.id }}', '{{ note.kind }}', '{{ note.lud16|default:'' }}')"
+              title="{% if note.kind == 30023 or note.is_proposal %}Cast vote{% else %}Send tip{% endif %}"
+              aria-label="{% if note.kind == 30023 or note.is_proposal %}Vote on note{% else %}Tip author{% endif %}">
+        <span class="p-1.5 rounded-full group-hover:bg-amber-50 dark:group-hover:bg-amber-950/40 transition">
+          <svg class="w-4 h-4 stroke-current stroke-2 shrink-0" fill="none" viewBox="0 0 24 24">
+            {% if note.kind == 30023 or note.is_proposal %}
+            <path stroke-linecap="round" stroke-linejoin="round" d="m18 9-1-1-1-1h-8l-1 1-1 1v5a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V9z"></path><path d="M6 5V3h12v2"></path>
+            {% else %}
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"></path>
+            {% endif %}
+          </svg>
         </span>
         <span>{% if note.kind == 30023 or note.is_proposal %}Vote{% else %}{% trans "Tip" %}{% endif %}</span>
       </button>
       {% endif %}
 
-      <!-- 5. Share Permalink -->
-      <button type="button" class="action-btn-share flex items-center gap-1.5 hover:text-blue-600 dark:hover:text-blue-400 transition-colors px-2 py-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800/50" onclick="shareNote('{{ note.id }}', '{{ note.author_name|default:note.npub|escapejs }}', '{{ note.display_content|default:note.content|truncatechars:140|escapejs }}')">
-        <span class="action-svg w-3.5 h-3.5 shrink-0"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"></path><path d="m16 6-4-4-4 4"></path><path d="M12 2v13"></path></svg></span>
-        <span class="hidden sm:inline">{% trans "Share" %}</span>
+      <!-- 5. Share Action (Phase 16.4: native Web Share with desktop clipboard fallback) -->
+      <button type="button"
+              class="action-btn-share group flex items-center gap-1.5 transition-colors hover:text-sky-600 dark:hover:text-sky-400"
+              onclick="shareNote('{{ note.id }}', '{{ note.display_content|default:note.content|truncatechars:120|escapejs }}', event)"
+              title="Share"
+              aria-label="Share note">
+        <span class="p-1.5 rounded-full group-hover:bg-sky-50 dark:group-hover:bg-sky-950/50 transition">
+          <svg class="w-4 h-4 stroke-current stroke-2 shrink-0" fill="none" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+          </svg>
+        </span>
       </button>
     </div>
 
