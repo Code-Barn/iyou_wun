@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block head_title %}403 Access Restricted — iyou_wun{% endblock %}
+
+{% block content %}
+<div class="py-16 px-4 text-center font-mono">
+  <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-rose-500/10 text-rose-500 border border-rose-500/20 mb-6 shadow-lg shadow-rose-500/5">
+    <svg class="w-8 h-8 stroke-current stroke-2" fill="none" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+    </svg>
+  </div>
+
+  <div class="text-[11px] font-bold tracking-widest text-rose-500 uppercase mb-2">Error Code: ACCESS_RESTRICTED_403</div>
+  <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-3">Enclave Access Prohibited</h1>
+  <p class="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8 leading-relaxed">
+    Sovereign verification failed or this cryptographic enclave requires elevated capabilities. Verify your active persona session or sign in with an authorized key.
+  </p>
+
+  <div class="flex items-center justify-center gap-3">
+    {% if not user.is_authenticated %}
+      <a href="{% url 'oidc_authentication_init' %}"
+         class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md shadow-violet-600/20 transition">
+        <span>🔑</span> Authenticate Key
+      </a>
+    {% endif %}
+    <a href="{% url 'feed' %}"
+       class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 font-bold text-xs transition">
+      <span>←</span> Return to Mesh Stream
+    </a>
+  </div>
+</div>
+{% endblock %}

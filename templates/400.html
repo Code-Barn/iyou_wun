@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block head_title %}400 Malformed Ingress — iyou_wun{% endblock %}
+
+{% block content %}
+<div class="py-16 px-4 text-center font-mono">
+  <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-500/10 text-amber-500 border border-amber-500/20 mb-6 shadow-lg shadow-amber-500/5">
+    <svg class="w-8 h-8 stroke-current stroke-2" fill="none" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+    </svg>
+  </div>
+
+  <div class="text-[11px] font-bold tracking-widest text-amber-500 uppercase mb-2">Error Code: MALFORMED_INGRESS_400</div>
+  <h1 class="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-slate-100 mb-3">Invalid Protocol Envelope</h1>
+  <p class="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto mb-8 leading-relaxed">
+    The server was unable to parse the incoming request payload. The transmission parameters, signatures, or query headers failed schema validation.
+  </p>
+
+  <div class="flex items-center justify-center gap-3">
+    <a href="{% url 'feed' %}"
+       class="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white font-bold text-xs shadow-md shadow-violet-600/20 transition">
+      <span>←</span> Return to Mesh Stream
+    </a>
+  </div>
+</div>
+{% endblock %}

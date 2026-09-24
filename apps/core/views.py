@@ -4692,6 +4692,16 @@ def handler404(request, exception=None):
     return render(request, "404.html", _error_page_context(request), status=404)
 
 
+def handler400(request, exception=None):
+    """Branded cyber-grit 400: malformed ingress envelope."""
+    return render(request, "400.html", _error_page_context(request), status=400)
+
+
+def handler403(request, exception=None):
+    """Branded cyber-grit 403: enclave access restricted."""
+    return render(request, "403.html", _error_page_context(request), status=403)
+
+
 def handler500(request):
     """Branded cyber-grit 500: internal node fault, identity intact."""
     return render(request, "500.html", _error_page_context(request), status=500)

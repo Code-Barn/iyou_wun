@@ -2656,6 +2656,43 @@ class CyberGritErrorViewTests(TestCase):
         self.assertContains(response, 'id="sovereign-ecosystem-topbar"', status_code=500)
         self.assertContains(response, 'id="app-l2-ribbon"', status_code=500)
 
+    def test_handler400_renders_custom_template_and_code(self):
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        from apps.core.views import handler400
+
+        request = RequestFactory().get("/malformed-ingress")
+        request.user = AnonymousUser()
+        response = handler400(request)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertContains(response, "<title>400 Malformed Ingress — iyou_wun</title>", status_code=400)
+        self.assertContains(response, "Error Code: MALFORMED_INGRESS_400", status_code=400)
+        self.assertContains(response, "Invalid Protocol Envelope", status_code=400)
+        self.assertContains(response, "Return to Mesh Stream", status_code=400)
+        # 400.html extends the canonical chrome shell and renders via RequestContext.
+        self.assertContains(response, 'id="sovereign-ecosystem-topbar"', status_code=400)
+        self.assertContains(response, 'id="app-l2-ribbon"', status_code=400)
+
+    def test_handler403_renders_custom_template_and_code(self):
+        from django.test import RequestFactory
+        from django.contrib.auth.models import AnonymousUser
+        from apps.core.views import handler403
+
+        request = RequestFactory().get("/restricted-enclave")
+        request.user = AnonymousUser()
+        response = handler403(request)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertContains(response, "<title>403 Access Restricted — iyou_wun</title>", status_code=403)
+        self.assertContains(response, "Error Code: ACCESS_RESTRICTED_403", status_code=403)
+        self.assertContains(response, "Enclave Access Prohibited", status_code=403)
+        self.assertContains(response, "Return to Mesh Stream", status_code=403)
+        # Anonymous users see the Authenticate Key ingress on the branded 403.
+        self.assertContains(response, "Authenticate Key", status_code=403)
+        self.assertContains(response, 'id="sovereign-ecosystem-topbar"', status_code=403)
+        self.assertContains(response, 'id="app-l2-ribbon"', status_code=403)
+
 
 class SearchAPITests(TestCase):
     def setUp(self):
