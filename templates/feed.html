@@ -245,7 +245,7 @@
 
 {% block right_rail %}
 {% if request.resolver_match.url_name == 'feed' and feed_mode != 'thread' %}
-<div class="sticky top-[128px] max-h-[calc(100vh-128px)] overflow-y-auto no-scrollbar space-y-4">
+<div class="space-y-4">
   {% include "includes/_feed_right_rail.html" %}
 </div>
 {% endif %}

@@ -64,7 +64,7 @@
             <div id="stream-column" class="min-w-0 mx-auto w-full max-w-[640px]">
                 {% block content %}{% endblock %}
             </div>
-            <aside id="right-rail" class="hidden lg:block min-w-0">
+            <aside id="right-rail" class="hidden lg:block lg:col-span-1 min-w-0 sticky top-[128px] max-h-[calc(100vh-128px)] overflow-y-auto no-scrollbar">
                 {% block right_rail %}{% endblock %}
             </aside>
         </div>
