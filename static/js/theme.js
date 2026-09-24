@@ -60,13 +60,21 @@ window.toggleL2Header = function (forceCollapse) {
 };
 
 document.addEventListener('DOMContentLoaded', function () {
+  var ribbon = document.getElementById('app-l2-ribbon');
+  var btn = document.getElementById('l2-toggle-header-btn');
+
+  // Satellites / standalone views that lack an L2 ribbon: the collapser would
+  // appear broken, so auto-hide it even when SHOW_L2_TOGGLE is enabled.
+  if (btn && !ribbon) {
+    btn.style.display = 'none';
+  }
+
   var isCollapsed = localStorage.getItem('wun_l2_collapsed') === 'true';
   if (isCollapsed) {
     document.body.classList.add('l2-collapsed');
     document.documentElement.classList.add('l2-collapsed');
   }
-  var btn = document.getElementById('l2-toggle-header-btn');
-  if (btn) {
+  if (ribbon && btn) {
     btn.classList.toggle('text-violet-600', !isCollapsed);
     btn.classList.toggle('dark:text-violet-400', !isCollapsed);
   }

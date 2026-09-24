@@ -25,7 +25,9 @@ def satellite_urls(request):
 
 
 def user_identity(request):
-    context = {}
+    context = {
+        "SHOW_L2_TOGGLE": getattr(settings, "SHOW_L2_TOGGLE", True),
+    }
     if not request.user.is_authenticated:
         context["user_display_label"] = ""
         context["current_session_did"] = ""

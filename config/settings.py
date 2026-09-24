@@ -46,6 +46,10 @@ DEBUG = env.bool("WUN_DEBUG", default=False)
 
 ALLOWED_HOSTS = env.list("WUN_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
 
+# Layer 2 (in-page app toolbar ribbon) visibility feature flag. Satellites that
+# have not yet shipped an #app-l2-ribbon render #l2-toggle-header-btn hidden.
+SHOW_L2_TOGGLE = env.bool("SHOW_L2_TOGGLE", default=True)
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 

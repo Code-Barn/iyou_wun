@@ -28,14 +28,38 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto py-4 sm:py-6">
-    {% if messages %} {% for message in messages %}
-    <div class="mb-6 bg-green-50 border-l-4 border-green-400 p-4">
-        <div class="flex">
-            <div class="flex-shrink-0"><svg class="h-5 w-5 text-green-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg></div>
-            <div class="ml-3"><p class="text-sm text-green-700">{{ message }}</p></div>
-        </div>
+{% if messages %} {% for message in messages %}
+    <div id="feed-welcome-banner"
+         class="flex items-center justify-between gap-3 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300 font-mono text-xs mb-4">
+      <div class="flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>
+        <span>{{ message }}</span>
+      </div>
+      <button id="dismiss-welcome-banner-btn" type="button"
+              onclick="dismissWelcomeBanner()"
+              aria-label="Dismiss welcome message"
+              title="Dismiss"
+              class="text-emerald-600 dark:text-emerald-400 hover:text-emerald-900 dark:hover:text-emerald-200 p-1 rounded-md hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition shrink-0">
+        <svg class="w-4 h-4 stroke-current stroke-2" fill="none" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
     </div>
     {% endfor %} {% endif %}
+    <script>
+      (function () {
+        if (localStorage.getItem("wun_dismiss_welcome_banner") === "true") {
+          var banner = document.getElementById("feed-welcome-banner");
+          if (banner) banner.style.display = "none";
+        }
+      })();
+
+      window.dismissWelcomeBanner = function () {
+        var banner = document.getElementById("feed-welcome-banner");
+        if (banner) banner.style.display = "none";
+        localStorage.setItem("wun_dismiss_welcome_banner", "true");
+      };
+    </script>
 
       <!-- Main Feed Column (shell cell B provides width/centering; thread stays centered) -->
       <div class="{% if feed_mode != 'thread' %}min-w-0{% else %}max-w-2xl mx-auto w-full min-w-0{% endif %} space-y-4 pb-28 lg:pb-0">
