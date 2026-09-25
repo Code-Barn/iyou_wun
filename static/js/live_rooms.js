@@ -122,6 +122,16 @@
 
     var ids = order.filter(function (id) { return rooms[id]; }).slice(0, CARD_LIMIT);
 
+    // No live-rooms observed: keep the card visible (server owns visibility)
+    // and restore the clean "no live audio spaces" fallback state so the
+    // real-time refresh never leaves a blank rail module.
+    if (ids.length === 0) {
+      listEl.innerHTML = '<div class="py-3 text-center text-slate-400 text-[11px]">No live audio spaces active on mesh.</div>';
+      if (countEl) countEl.textContent = "0 online";
+      if (cardEl) cardEl.classList.remove("hidden");
+      return;
+    }
+
     listEl.innerHTML = ids.map(function (id) {
       var room = rooms[id];
       var cover = room.cover
@@ -151,7 +161,8 @@
     }).join("");
 
     if (countEl) countEl.textContent = ids.length + " online";
-    cardEl.classList.toggle("hidden", ids.length === 0);
+    // The server-rendered card shell owns module visibility; never re-hide it.
+    if (cardEl) cardEl.classList.remove("hidden");
   }
 
   function attach(room) {

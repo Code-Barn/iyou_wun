@@ -716,7 +716,6 @@ class FeedView(TemplateView):
         context["user_credentials"] = {}
         context["og_image"] = og_fallback_image(self.request)
 
-
         thread_id = self.request.GET.get("thread") or self.request.GET.get("note") or self.request.GET.get("e")
         context["thread_id"] = thread_id
 
@@ -737,6 +736,22 @@ class FeedView(TemplateView):
 
         if thread_id and self.request.GET.get("async") != "1":
             instant_shell = False
+
+        # NIP-53 Kind 30311 — Live Audio Rooms discovery for the right rail.
+        # Best-effort relay probe, scoped to synchronous rendering so the
+        # default instant-shell path never performs blocking relay I/O; any
+        # failure resolves to an empty list so the rail always renders its
+        # "no live spaces" fallback state.
+        if not instant_shell:
+            try:
+                from apps.core.nip53 import filter_active_live_rooms
+                raw_rooms = relay_req({"kinds": [30311], "limit": 10}, timeout=1.0)
+                room_events = list(raw_rooms.values()) if isinstance(raw_rooms, dict) else (raw_rooms or [])
+                context["live_rooms"] = filter_active_live_rooms(room_events)[:3]
+            except Exception:
+                context["live_rooms"] = []
+        else:
+            context["live_rooms"] = []
 
         if thread_id:
             if instant_shell:

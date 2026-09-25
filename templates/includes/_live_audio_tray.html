@@ -1,271 +1,69 @@
 <!--
-  _live_audio_tray.html — Docked live-audio player tray (AUDIT-005 §5.2).
+  _live_audio_tray.html — Persistent Floating Audio Tray (NIP-53 Kind 30311).
 
-  Pattern: Nostrich NIP-53 Kind-30311 live-room reader (ATT-002, MIT 8965e31)
-  footprint "Listen In" — no SFU, no WebRTC phase-1:
-    - Transport day-one: room.streaming_url first; .mp3/.ogg/.aac/.m4a via native
-      <audio>; .m3u8 via hls.js (MIT) when window.Hls is present; Replay uses
-      .recording_url when status:ended (AUDIT-003 §7 1.2–1.3).
-    - Collapsed pill: 28px cover thumb + LIVE · title + watcher count + play/pause
-      + Leave. Expanded panel: title, host line, watcher row, Replay on ended.
-    - Mounted INSIDE #floating-chat-root (base.html companion #11 of AUDIT-005
-      §8) so it survives route changes — no new chrome layer.
-    - Vertical stacking: on <768 sits above the mobile bottom dock (parent flips
-      via max-md mb offset, AUDIT-005 §4.2/§5.2); ≥768 it sits left of the docked
-      chat windows inside the flex root.
-    - Empty/absence contract (AUDIT-003 §5.1): the whole tray carries `hidden`
-      until a live room is advertised; viewer removes it when stream ends.
+  Mounted directly in base.html (above the floating chat root) so it survives
+  route changes. Hidden until a Live Room is "tuned in" from the right-rail
+  discovery widget (or via window.LiveAudioTray.attach for compat callers).
 
-  DOM contract consumed by live_rooms.js / feed relay subscription:
-    window.LiveAudioTray.attach(room)  room = {
-      title, host_name, host_avatar, cover, status ('live'|'scheduled'|'ended'),
-      participants, current_participants, started_at, recording_url, streaming_url }
-    window.LiveAudioTray.hide()
-    #live-audio-tray            root (hidden until attach)
-    #live-tray-pill             collapsed pill (toggle panel on click)
-    #live-tray-panel            expanded panel (absolute, bottom-full)
-    #live-tray-audio            native <audio> transport
-    #live-tray-toggle           play/pause button (updates glyph)
-    #live-tray-leave            leave button -> hide + stop
+  DOM contract consumed by static/js/live_audio_player.js:
+    window.liveAudioPlayer.tuneIn(roomOrButton)
+    window.liveAudioPlayer.togglePlay() / setVolume(v) / toggleMinimize()
+    window.liveAudioPlayer.disconnect()
+    #live-audio-tray     root (hidden until attach)
+    #live-audio-element  native <audio> transport
+    #audio-tray-*        title / host / listeners / play / pause / volume controls
 -->
 {% load static %}
-<div id="live-audio-tray" class="hidden relative pointer-events-auto select-none font-mono text-xs">
-  {# ---- Collapsed pill (AUDIT-003 §5.1 / AUDIT-005 §5.2) ---- #}
-  <button id="live-tray-pill" type="button"
-          class="flex items-center gap-2 px-3 py-2 rounded-full bg-slate-900/90 dark:bg-black/80
-                 text-slate-100 backdrop-blur-md border border-slate-700/60 shadow-xl
-                 hover:border-violet-500/60 transition max-w-[260px]">
-    <img id="live-tray-thumb" src="" alt=""
-         class="w-7 h-7 rounded-full object-cover bg-slate-700 shrink-0 hidden"
-         referrerpolicy="no-referrer" />
-    <span id="live-tray-live-dot" class="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse shrink-0" aria-hidden="true"></span>
-    <span id="live-tray-title" class="truncate">LIVE · Untitled Room</span>
-    <span id="live-tray-count" class="shrink-0 px-1.5 py-0.5 rounded-full text-[10px]
-          bg-slate-800/90 text-slate-300 truncate max-w-[64px]"></span>
-    <span id="live-tray-toggle" class="shrink-0 w-6 h-6 rounded-full bg-violet-600 text-white
-          flex items-center justify-center text-[10px] leading-none" aria-hidden="true">▶</span>
-    <span id="live-tray-leave" class="shrink-0 text-slate-400 hover:text-rose-400 text-[11px] px-1" role="button" aria-label="Leave live room">✕</span>
-  </button>
-
-  {# ---- Expanded panel (title / host / watchers / replay) ---- #}
-  <div id="live-tray-panel" class="hidden absolute bottom-full mb-3 left-0 w-80 max-w-[85vw]
-       rounded-xl bg-white dark:bg-[#0B0F19] border border-slate-200 dark:border-slate-800
-       shadow-2xl p-3 space-y-2">
-    <div class="flex items-start justify-between gap-2">
-      <div class="min-w-0">
-        <p id="live-tray-panel-title" class="font-semibold text-slate-900 dark:text-slate-100 leading-snug line-clamp-2 break-words"></p>
-        <p id="live-tray-panel-status" class="mt-0.5 text-[10px] text-slate-400 flex items-center gap-1"></p>
-      </div>
-      <button id="live-tray-panel-close" type="button" class="shrink-0 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs" aria-label="Collapse">−</button>
+<div id="live-audio-tray"
+     class="hidden fixed bottom-4 right-4 z-40 w-80 sm:w-96 rounded-2xl bg-white/95 dark:bg-[#0B0F19]/95 backdrop-blur-md border border-slate-200 dark:border-slate-800 shadow-2xl p-3 font-mono text-xs transition-all duration-300">
+  <div class="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0"></span>
+      <span id="audio-tray-title" class="font-bold text-slate-900 dark:text-slate-100 truncate text-xs">Audio Space</span>
     </div>
-    <div class="flex items-center gap-2 pt-1 border-t border-slate-100 dark:border-slate-800/70">
-      <img id="live-tray-host-avatar" src="" alt=""
-           class="w-6 h-6 rounded-full object-cover bg-slate-200 dark:bg-slate-800 hidden"
-           referrerpolicy="no-referrer" />
-      <span id="live-tray-host-name" class="truncate text-slate-600 dark:text-slate-300"></span>
-    </div>
-    <div id="live-tray-replay" class="hidden pt-1">
-      <button id="live-tray-replay-btn" type="button"
-              class="w-full px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800
-                     hover:bg-violet-50 dark:hover:bg-violet-950/40 text-violet-600 dark:text-violet-400
-                     text-[11px] transition">↻ Replay Recording</button>
+    <div class="flex items-center gap-1 shrink-0">
+      <button type="button"
+              id="audio-tray-minimize-btn"
+              onclick="window.liveAudioPlayer && window.liveAudioPlayer.toggleMinimize()"
+              class="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded"
+              title="Minimize">
+        <svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12h-15"/></svg>
+      </button>
+      <button type="button"
+              onclick="window.liveAudioPlayer && window.liveAudioPlayer.disconnect()"
+              class="p-1 text-slate-400 hover:text-rose-500 rounded"
+              title="Leave Space">
+        <svg class="w-3.5 h-3.5 stroke-current stroke-2" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
   </div>
 
-  {# ---- Native audio transport (hidden; hls.js attaches here for .m3u8) ---- #}
-  <audio id="live-tray-audio" class="hidden" preload="none" playsinline></audio>
+  <!-- Active Stream Controls -->
+  <div id="audio-tray-body" class="pt-2 space-y-2">
+    <div class="flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
+      <span id="audio-tray-host" class="truncate">Connecting to stream...</span>
+      <span id="audio-tray-listeners" class="shrink-0 text-violet-500"></span>
+    </div>
+
+    <div class="flex items-center justify-between gap-3 pt-1">
+      <button type="button"
+              id="audio-tray-play-btn"
+              onclick="window.liveAudioPlayer && window.liveAudioPlayer.togglePlay()"
+              class="flex items-center justify-center w-8 h-8 rounded-full bg-violet-600 hover:bg-violet-700 text-white transition shrink-0 shadow-sm">
+        <svg id="audio-tray-play-icon" class="w-4 h-4 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+        <svg id="audio-tray-pause-icon" class="w-4 h-4 fill-current hidden" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+      </button>
+
+      <!-- Volume Slider -->
+      <div class="flex items-center gap-1.5 flex-1">
+        <svg class="w-3.5 h-3.5 text-slate-400 shrink-0" fill="currentColor" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></svg>
+        <input type="range"
+               id="audio-tray-volume"
+               min="0" max="1" step="0.05" value="1"
+               oninput="window.liveAudioPlayer && window.liveAudioPlayer.setVolume(this.value)"
+               class="w-full h-1 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-violet-600" />
+      </div>
+    </div>
+    <audio id="live-audio-element" preload="none" class="hidden"></audio>
+  </div>
 </div>
-
-<script>
-  // NIP-53 Kind-30311 docked live-audio tray controller (ATT-002).
-  // Phase-1 transport: native <audio> for streaming/recording URLs; hls.js
-  // (MIT) for .m3u8 when present. No WebRTC/SFU (AUDIT-003 §7 gating).
-  (function (global) {
-    "use strict";
-    if (global.__wunLiveTrayBound) return;
-    global.__wunLiveTrayBound = true;
-
-    var tray, pill, panel, audio, toggleBtn, leaveBtn, thumb, titleEl, countEl, dotEl;
-    var hostAvatar, hostName, panelTitle, panelStatus, replayRow, replayBtn;
-
-    function $(id) { return document.getElementById(id); }
-
-    function initRefs() {
-      tray = $("live-audio-tray"); pill = $("live-tray-pill"); panel = $("live-tray-panel");
-      audio = $("live-tray-audio"); toggleBtn = $("live-tray-toggle"); leaveBtn = $("live-tray-leave");
-      thumb = $("live-tray-thumb"); titleEl = $("live-tray-title"); countEl = $("live-tray-count");
-      dotEl = $("live-tray-live-dot");
-      hostAvatar = $("live-tray-host-avatar"); hostName = $("live-tray-host-name");
-      panelTitle = $("live-tray-panel-title"); panelStatus = $("live-tray-panel-status");
-      replayRow = $("live-tray-replay"); replayBtn = $("live-tray-replay-btn");
-    }
-
-    var STATE = { playing: false, room: null, hls: null };
-
-    function compactCount(n) {
-      n = parseInt(n, 10) || 0;
-      if (n >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, "") + "M";
-      if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, "") + "k";
-      return String(n);
-    }
-
-    function relativeStart(startedAt) {
-      if (!startedAt) return "";
-      var diff = Math.max(0, Math.floor(Date.now() / 1000) - startedAt);
-      if (diff < 60) return "Started just now";
-      if (diff < 3600) return "Started " + Math.floor(diff / 60) + "m ago";
-      if (diff < 86400) return "Started " + Math.floor(diff / 3600) + "h ago";
-      return "Scheduled";
-    }
-
-    function rawText(color) {
-      // fallback used when cover/avatar are missing: colored initial glyph.
-      return '<span class="w-7 h-7 rounded-full ' + (color || "bg-slate-700") +
-        ' flex items-center justify-center text-[10px] text-slate-300 shrink-0">LIVE</span>';
-    }
-
-    function ensureThumb(src) {
-      if (!src) { thumb.classList.add("hidden"); return; }
-      thumb.src = src;
-      thumb.classList.remove("hidden");
-    }
-
-    function ensureHost(room) {
-      if (room.host_avatar) {
-        hostAvatar.src = room.host_avatar;
-        hostAvatar.classList.remove("hidden");
-      } else {
-        hostAvatar.classList.add("hidden");
-      }
-      hostName.textContent = room.host_name || "Unknown host";
-    }
-
-    function setDurationText() {
-      // status line per AUDIT-003 §5.1 contract.
-      var s = STATE.room || {};
-      var line = "";
-      if (s.status === "ended") line = "Stream ended" + (s.started_at ? " · " + relativeStart(s.started_at).replace("  ago", "") : "");
-      else if (s.status === "live") line = relativeStart(s.started_at);
-      else line = "Scheduled";
-      if (panelStatus) panelStatus.textContent = line;
-    }
-
-    function render(room) {
-      STATE.room = room || {};
-      var w = STATE.room.current_participants !== undefined
-        ? STATE.room.current_participants : STATE.room.participants;
-      if ((w || 0) > 0) countEl.textContent = compactCount(w);
-      else countEl.textContent = "";
-      titleEl.textContent = "LIVE · " + (STATE.room.title || "Untitled Room");
-      panelTitle.textContent = STATE.room.title || "Untitled Room";
-      ensureThumb(STATE.room.cover);
-      ensureHost(STATE.room);
-      setDurationText();
-      replayRow.classList.toggle("hidden", !(STATE.room.status === "ended" && STATE.room.recording_url));
-    }
-
-    function teardownHls() {
-      if (STATE.hls) { try { STATE.hls.destroy(); } catch (e) { /* ignore */ } STATE.hls = null; }
-      if (audio) audio.removeAttribute("src");
-    }
-
-    function resolveUrl(room) {
-      var u = "";
-      if (room.status === "ended" && room.recording_url) u = room.recording_url.trim();
-      else if (room.streaming_url) u = room.streaming_url.trim();
-      return u;
-    }
-
-    function start() {
-      var room = STATE.room || {};
-      var url = resolveUrl(room);
-      if (!url || !audio) { STATE.playing = false; updateGlyph(); return false; }
-      teardownHls();
-      var isHls = /\.m3u8([?#].*)?$/i.test(url);
-      var willHls = isHls && global.Hls && global.Hls.isSupported();
-      audio.src = url;
-      if (willHls) {
-        STATE.hls = new global.Hls();
-        STATE.hls.loadSource(url);
-        STATE.hls.attachMedia(audio);
-      }
-      var p = audio.play();
-      if (p && p.catch) p.catch(function () { STATE.playing = false; updateGlyph(); });
-      STATE.playing = true;
-      updateGlyph();
-      return true;
-    }
-
-    function stop() {
-      STATE.playing = false;
-      teardownHls();
-      if (audio) { audio.pause(); audio.currentTime = 0; }
-      updateGlyph();
-    }
-
-    function updateGlyph() {
-      if (toggleBtn) toggleBtn.textContent = STATE.playing ? "❚❚" : "▶";
-    }
-
-    function attach(room) {
-      initRefs();
-      if (!tray) return;
-      render(room || {});
-      tray.classList.remove("hidden");
-      if (room && room.autoplay) start();
-      updateGlyph();
-      if (pill && !pill._wunHooked) {
-        pill._wunHooked = true;
-        pill.addEventListener("click", function (e) {
-          if (e.target === leaveBtn) return;
-          if (replayRow && replayRow.classList.contains("hidden")) {
-            if (panel) panel.classList.toggle("hidden");
-          } else {
-            start(); // replay recording from panel
-            if (panel) panel.classList.add("hidden");
-          }
-        });
-      }
-      if (toggleBtn && !toggleBtn._wunHooked) {
-        toggleBtn._wunHooked = true;
-        toggleBtn.addEventListener("click", function (e) {
-          e.stopPropagation();
-          if (STATE.playing) stop();
-          else start();
-        });
-      }
-      if (leaveBtn && !leaveBtn._wunHooked) {
-        leaveBtn._wunHooked = true;
-        leaveBtn.addEventListener("click", function (e) {
-          e.stopPropagation();
-          stop(); hide();
-        });
-      }
-      var close = $("live-tray-panel-close");
-      if (close && !close._wunHooked) { close._wunHooked = true; close.addEventListener("click", function () { if (panel) panel.classList.add("hidden"); }); }
-      if (replayBtn && !replayBtn._wunHooked) { replayBtn._wunHooked = true; replayBtn.addEventListener("click", function () { start(); if (panel) panel.classList.add("hidden"); }); }
-      if (audio && !audio._wunHooked) {
-        audio._wunHooked = true;
-        audio.addEventListener("ended", function () { STATE.playing = false; updateGlyph(); });
-      }
-    }
-
-    function hide() {
-      if (tray) tray.classList.add("hidden");
-      if (panel) panel.classList.add("hidden");
-      // AUDIT-003 §5.1: reader hides itself when stream ends ("nothing rather
-      // than a broken card").
-    }
-
-    global.LiveAudioTray = { attach: attach, hide: hide, stop: stop };
-
-    document.addEventListener("DOMContentLoaded", function () {
-      initRefs();
-      // Hydrate a server-rendered room if present, else stay hidden (empty state).
-      if (tray && typeof global.__LIVE_ROOM__ === "object" && global.__LIVE_ROOM__) attach(global.__LIVE_ROOM__);
-      // Interactive autoplay is intentionally deferred to user gesture; a
-      // relay-driven live_rooms.js may call attach() directly.
-    });
-
-  })(typeof window !== "undefined" ? window : globalThis);
-</script>

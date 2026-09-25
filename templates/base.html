@@ -172,6 +172,10 @@
     {% if user.is_authenticated %}
       {% include "includes/_notification_drawer.html" %}
     {% endif %}
+    <!-- Persistent Floating Live-Audio Tray (NIP-53 Kind 30311) -->
+    {% include "includes/_live_audio_tray.html" %}
+    <script src="{% static 'js/live_audio_player.js' %}"></script>
+
     <!-- Floating Chat Messenger System (Omitted on dedicated /chat page) -->
     {% if user.is_authenticated and request.resolver_match.url_name != 'chat' %}
       {% include "includes/_floating_chat_dock.html" %}

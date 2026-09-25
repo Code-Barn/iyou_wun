@@ -50,20 +50,56 @@
     </div>
   </div>
 
-  <!-- 0. Live Rooms (NIP-53 Kind 30311) — feeds the docked LiveAudioTray (AUDIT-005 §5.2) -->
-  <div id="live-rooms-card" class="hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 shadow-sm space-y-3">
-    <div class="flex items-center justify-between pb-2 mb-1 border-b border-slate-100 dark:border-slate-800">
-      <span class="text-[11px] font-bold text-slate-800 dark:text-slate-200 tracking-wider flex items-center gap-1.5">
-        <span class="relative flex w-2 h-2">
-          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-violet-500 opacity-75"></span>
-          <span class="relative inline-flex rounded-full h-2 w-2 bg-violet-500"></span>
-        </span>
-        LIVE ROOMS
-      </span>
-      <span class="text-[9px] text-slate-400 font-mono" id="live-rooms-count">0 online</span>
+  <!-- 0. Live Rooms (NIP-53 Kind 30311) — server-rendered discovery feeding the docked LiveAudioTray -->
+  <div id="live-rooms-card" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-3 shadow-sm space-y-3 font-mono text-xs">
+    <div class="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+      <div class="flex items-center gap-1.5">
+        <span class="text-rose-500 animate-pulse">●</span>
+        <span class="text-[11px] font-bold tracking-wider text-slate-500 uppercase">Live Rooms</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <span id="live-rooms-count" class="text-[10px] text-slate-400"></span>
+        <span class="text-[10px] text-slate-400">NIP-53</span>
+      </div>
     </div>
-    <!-- Dynamic stream cards rendered by static/js/live_rooms.js -->
-    <div id="live-rooms-list" class="space-y-2"></div>
+
+    <div class="space-y-2.5" id="live-rooms-list">
+      {% for room in live_rooms %}
+      <div class="p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-200/60 dark:border-slate-700/60 space-y-1.5">
+        <div class="flex items-center justify-between gap-1">
+          <span class="font-bold text-slate-800 dark:text-slate-100 truncate text-[11px]">{{ room.title }}</span>
+          {% if room.status == "live" %}
+            <span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/10 text-rose-500 border border-rose-500/20 shrink-0">LIVE</span>
+          {% else %}
+            <span class="px-1.5 py-0.5 rounded text-[9px] text-slate-400 bg-slate-200 dark:bg-slate-700 shrink-0">{{ room.status|upper }}</span>
+          {% endif %}
+        </div>
+        <div class="flex items-center justify-between text-[10px] text-slate-400">
+          <span class="truncate">Host: {{ room.host_pubkey|truncatechars:12 }}</span>
+          {% if room.current_participants %}
+            <span class="flex items-center gap-1">👥 {{ room.current_participants }}</span>
+          {% endif %}
+        </div>
+        {% if room.streaming_url %}
+          <button type="button"
+                  onclick="window.liveAudioPlayer && window.liveAudioPlayer.tuneIn(this)"
+                  data-stream-url="{{ room.streaming_url }}"
+                  data-room-title="{{ room.title }}"
+                  data-room-host="{{ room.host_pubkey }}"
+                  data-room-participants="{{ room.current_participants }}"
+                  data-room-status="{{ room.status }}"
+                  class="tune-in-btn w-full mt-1 flex items-center justify-center gap-1.5 py-1 px-2 rounded-md bg-violet-600 hover:bg-violet-700 text-white font-bold text-[10px] transition shadow-xs">
+            <svg class="w-3 h-3 fill-current" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+            <span>Tune In</span>
+          </button>
+        {% endif %}
+      </div>
+      {% empty %}
+      <div class="py-3 text-center text-slate-400 text-[11px]">
+        No live audio spaces active on mesh.
+      </div>
+      {% endfor %}
+    </div>
   </div>
 
   <!-- 1. Trending Topics & Velocity Tags -->

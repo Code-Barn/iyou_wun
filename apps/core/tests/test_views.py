@@ -2544,6 +2544,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
         with patch("apps.core.views.relay_req") as mock_relay:
             mock_relay.side_effect = [
+                {},  # NIP-53 live-rooms probe (Kind 30311) => no rooms
                 {},  # Phase 6 outbox probe (Kind 10002 relay-list aggregation)
                 {"root": root_event},
                 {},
