@@ -768,7 +768,10 @@
         var noteId = note.id || "";
         var pubkey = note.pubkey || note.pubkey_hex || "";
         var npub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "You");
-        var authorName = note.author_name || npub;
+        var authorName = note.author_display_name || note.author_name || npub;
+        var authorHandle = note.author_handle || note.handle || "";
+        var authorSubLabel = authorHandle || note.author_name || "";
+        var authorUrl = note.author_url || (authorHandle ? "/@" + authorHandle + "/" : "/profile/" + npub + "/");
         var authorAvatar = note.author_avatar || "";
         var authorDid = note.author_did || "";
         var nip05 = note.nip05 || "";
@@ -949,11 +952,12 @@
         }
 
         return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '" data-lang="' + escapeAttr(note.lang || 'en') + '">' +
-            '<div class="flex-shrink-0"><a href="/profile/' + npub + '/">' + avatarHtml + '</a></div>' +
+            '<div class="flex-shrink-0"><a href="' + escapeAttr(authorUrl) + '">' + avatarHtml + '</a></div>' +
             '<div class="flex-1 min-w-0">' +
             '<div class="flex items-center justify-between gap-2 mb-1.5">' +
             '<div class="flex items-center gap-2 flex-wrap min-w-0">' +
-            '<a href="/profile/' + npub + '/" class="font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 truncate">' + escapeHtml(authorName) + '</a>' +
+            '<a href="' + escapeAttr(authorUrl) + '" class="font-semibold text-sm text-slate-900 dark:text-slate-100 hover:text-violet-600 dark:hover:text-violet-400 truncate">' + escapeHtml(authorName) + '</a>' +
+            (authorSubLabel ? '<span class="text-xs text-slate-400 font-mono truncate hidden sm:inline">@' + escapeHtml(authorSubLabel.substring(0, 12)) + '</span>' : '') +
             nip05Badge +
             '<span class="author-badge-slot" data-author-slot="' + escapeAttr(pubkey) + '"></span>' +
             sovereignBadge +

@@ -113,21 +113,24 @@ def invalidate_author_identity(pubkey_hex) -> None:
 
 
 def _deck_for_pubkey(pk):
-    """Resolve the UserLinkDeck backing a pubkey via DID/hex/nostr_pubkey."""
+    """Resolve the UserLinkDeck backing a pubkey via DID/hex/nostr_pubkey.
+
+    A single account can sign with more than one key: the enclave-synced
+    ``deck.nostr_pubkey`` and the DID-derived key implied by ``deck.user.username``.
+    Both are treated as aliases for the same deck so a note signed by either key
+    renders the registered identity instead of a raw npub.
+    """
     candidates = [pk, f"did:iyou:0x{pk}"]
     deck = UserLinkDeck.objects.filter(user__username__in=candidates).first()
-    if deck is None:
-        deck = UserLinkDeck.objects.filter(nostr_pubkey=pk).first()
-    if deck is None:
-        for d in (
-            UserLinkDeck.objects.filter(nostr_pubkey="")
-            .select_related("user")
-            .iterator()
-        ):
-            if did_to_pubkey_hex(d.user.username) == pk:
-                deck = d
-                break
-    return deck
+    if deck is not None:
+        return deck
+    deck = UserLinkDeck.objects.filter(nostr_pubkey=pk).first()
+    if deck is not None:
+        return deck
+    for d in UserLinkDeck.objects.select_related("user").iterator():
+        if did_to_pubkey_hex(d.user.username) == pk:
+            return d
+    return None
 
 
 def resolve_author_identity(pubkey_hex) -> dict:
@@ -155,9 +158,10 @@ def resolve_author_identity(pubkey_hex) -> dict:
     }
     deck = _deck_for_pubkey(pk)
     if deck is not None:
+        handle = deck.handle or ""
         identity.update({
-            "display_name": deck.display_name or "",
-            "handle": deck.handle or "",
+            "display_name": deck.display_name or handle or "",
+            "handle": handle,
             "avatar_url": deck.avatar_url or "",
             "did": deck.user.username or "",
         })

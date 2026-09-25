@@ -369,8 +369,19 @@ def api_sync_keys(request):
                 user=request.user, handle=base[:32]
             )
 
+    previous_pubkey = (deck.nostr_pubkey or "").strip().lower()
     deck.nostr_pubkey = raw_pubkey
     deck.save(update_fields=["nostr_pubkey", "updated_at"])
+
+    # A new alias changes which deck a pubkey resolves to, so retire the
+    # identity entry for both the superseded and the new key rather than
+    # waiting out the 300s TTL, and refresh ecosystem membership (this key
+    # may newly join or leave the [ ⚡ iyou ] circle).
+    if previous_pubkey and previous_pubkey != raw_pubkey:
+        invalidate_author_identity(previous_pubkey)
+    invalidate_author_identity(raw_pubkey)
+    invalidate_ecosystem_cache()
+    _reset_find_user_by_pubkey_cache()
 
     request.session["nostr_pubkey_hex"] = raw_pubkey
     if request.session.get("active_persona_level") is None:
@@ -478,6 +489,15 @@ def _find_user_by_pubkey(hex_pubkey):
 
     lookup_cache[hex_pubkey] = None
     return None
+
+
+def _reset_find_user_by_pubkey_cache():
+    """Drop the _find_user_by_pubkey memo.
+
+    Key/deck mutations change which local User a pubkey resolves to, so stale
+    memo entries would keep routing profile links at the previous account.
+    """
+    _find_user_by_pubkey._cache = {}
 
 
 def _resolve_profile_candidates(identifier):
