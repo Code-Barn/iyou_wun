@@ -55,6 +55,21 @@ class ApiChatSessionTest(TestCase):
         self.assertEqual(payload.get("jid"), f"{resolved_hex}@{domain}")
         self.assertTrue(payload.get("jid").startswith(f"{FULL_HEX}@"))
 
+    def test_api_chat_session_secure_request_returns_wss_endpoint(self):
+        user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
+        self.client.force_login(user)
+
+        response = self.client.get(reverse("api_chat_session"), HTTP_X_FORWARDED_PROTO="https")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        # The session bootstrap feeds Converse its websocket_url; over HTTPS it
+        # must ship an encrypted non-loopback endpoint or the browser blocks it.
+        ws_url = payload.get("ws_url", "")
+        self.assertTrue(ws_url.startswith("wss://"), ws_url)
+        self.assertNotIn("127.0.0.1", ws_url)
+        self.assertIn(":5281/xmpp-websocket", ws_url)
+
     def test_api_chat_session_persists_xmpp_token(self):
         user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
         self.client.force_login(user)

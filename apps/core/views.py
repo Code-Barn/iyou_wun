@@ -962,6 +962,43 @@ class FeedView(TemplateView):
         return super().get(request, *args, **kwargs)
 
 
+def resolve_xmpp_endpoints(request=None):
+    """Resolve a mixed-content-safe Converse WebSocket endpoint for a request.
+
+    Browsers block unencrypted ``ws://`` sockets inside HTTPS origins, and
+    ``127.0.0.1`` embedded in a production URL resolves on the visitor's own
+    machine rather than the Prosody host. Over HTTPS, loopback-configured
+    ``XMPP_WS_URL`` values are therefore remapped to the ``chat`` subdomain of
+    ``BASE_DOMAIN`` (falling back to the request host), non-loopback endpoints
+    are upgraded from ``ws://`` to ``wss://``, and the loopback default is only
+    kept for plain-HTTP requests.
+
+    Returns ``(is_secure, ws_url, domain)`` so ChatView and the session
+    bootstrap API agree on a single endpoint.
+    """
+    is_secure = bool(request) and (
+        request.is_secure() or request.headers.get("X-Forwarded-Proto") == "https"
+    )
+    host = request.get_host().split(":")[0] if request else ""
+    env_ws_url = getattr(settings, "XMPP_WS_URL", "")
+
+    if is_secure:
+        if "127.0.0.1" in env_ws_url or "localhost" in env_ws_url:
+            base_domain = getattr(settings, "BASE_DOMAIN", "") or (
+                host
+                if host and host not in ("127.0.0.1", "localhost") and "." in host
+                else "iyou.me"
+            )
+            xmpp_ws_url = f"wss://chat.{base_domain}:5281/xmpp-websocket"
+        else:
+            xmpp_ws_url = env_ws_url.replace("ws://", "wss://")
+    else:
+        xmpp_ws_url = env_ws_url or "ws://127.0.0.1:5222/xmpp-websocket"
+
+    xmpp_domain = getattr(settings, "XMPP_DOMAIN", "iyou.me" if is_secure else "127.0.0.1")
+    return is_secure, xmpp_ws_url, xmpp_domain
+
+
 @method_decorator(ensure_csrf_cookie, name='dispatch')
 class ChatView(LoginRequiredMixin, TemplateView):
     template_name = "chat.html"
@@ -975,13 +1012,11 @@ class ChatView(LoginRequiredMixin, TemplateView):
 
         level = getattr(settings, "WUN_USER_LEVEL", "2")
         context["user_level"] = level
-        if level == "1":
-            xmpp_domain = "iyou.me"
-            xmpp_ws_url = "wss://xmpp.iyou.me:5222/xmpp-websocket"
-        else:
-            xmpp_domain = "127.0.0.1"
-            xmpp_ws_url = "wss://home.iyou.me:5222/xmpp-websocket"
 
+        # RFC 7622 nodeprep-compliant localpart: lowercase hex, no colons.
+        context["user_pubkey_hex"] = user_pubkey
+
+        _, xmpp_ws_url, xmpp_domain = resolve_xmpp_endpoints(self.request)
         context["xmpp_domain"] = xmpp_domain
         context["xmpp_ws_url"] = xmpp_ws_url
         context["xmpp_bosh_url"] = getattr(settings, "XMPP_BOSH_URL", "")
@@ -1013,17 +1048,7 @@ def api_chat_session(request):
 
     pubkey_hex = get_effective_user_pubkey(request)
 
-    level = getattr(settings, "WUN_USER_LEVEL", "2")
-    if level == "1":
-        xmpp_domain = "iyou.me"
-        xmpp_ws_url = "wss://xmpp.iyou.me:5281/xmpp-websocket"
-    else:
-        xmpp_domain = getattr(settings, "XMPP_DOMAIN", "127.0.0.1")
-        xmpp_ws_url = getattr(
-            settings,
-            "XMPP_WS_URL",
-            "wss://home.iyou.me:5281/xmpp-websocket",
-        )
+    _, xmpp_ws_url, xmpp_domain = resolve_xmpp_endpoints(request)
 
     jid = f"{pubkey_hex}@{xmpp_domain}" if pubkey_hex else ""
 

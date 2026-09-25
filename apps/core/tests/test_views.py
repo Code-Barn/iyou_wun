@@ -200,7 +200,34 @@ class ChatViewTest(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("chat"))
         self.assertContains(response, "converse.initialize")
-        self.assertContains(response, "home.iyou.me:5222")
+        # Plain-HTTP requests keep the loopback dev endpoint (schema-matched).
+        self.assertContains(response, "127.0.0.1:5222/xmpp-websocket")
+
+    def test_chat_secure_request_injects_wss_endpoint(self):
+        user = User.objects.create_user(username="did:key:z6Mkwsschat")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"), HTTP_X_FORWARDED_PROTO="https")
+        self.assertEqual(response.status_code, 200)
+        ws_url = response.context["xmpp_ws_url"]
+        # HTTPS origins must never receive a mixed-content `ws://` loopback URL.
+        self.assertTrue(ws_url.startswith("wss://"))
+        self.assertIn("chat.", ws_url)
+        self.assertIn(":5281/xmpp-websocket", ws_url)
+        self.assertNotIn("ws://127.0.0.1", ws_url)
+        content = response.content.decode()
+        self.assertIn(ws_url, content)
+        self.assertNotIn("ws://127.0.0.1:5222", content)
+
+    def test_chat_pubkey_hex_is_rfc7622_compliant(self):
+        user = User.objects.create_user(username="did:key:z6Mkhexlocal")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        pubkey_hex = response.context["user_pubkey_hex"]
+        # Converse localparts must be lowercase hex with no RFC 7622 separators.
+        self.assertRegex(pubkey_hex, r"^[0-9a-f]{64}$")
+        self.assertNotIn(":", pubkey_hex)
+        self.assertNotIn("did:key:", pubkey_hex)
 
     def test_chat_shows_nav(self):
         user = User.objects.create_user(username="did:key:z6Mknav")
@@ -259,6 +286,23 @@ class ChatViewTest(TestCase):
         self.assertContains(response, "converse.plugins.add('iyou-lifecycle'")
         self.assertContains(response, "_converse.api.listen.on('connected', dismissLoadingSpinner)")
         self.assertContains(response, "_converse.api.listen.on('statusInitialized', dismissLoadingSpinner)")
+
+    def test_chat_renders_connection_alert_banner_with_fallback_actions(self):
+        user = User.objects.create_user(username="did:key:z6Mkalert99")
+        self.client.force_login(user)
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        # The No-Blank-Screen diagnostic banner must ship with retry + stream
+        # fallback actions wired to the same ids the watchdog/error paths toggle.
+        self.assertIn('id="chat-connection-alert"', content)
+        self.assertIn("unreachable or blocked by browser security", content)
+        self.assertIn("Retry Connection", content)
+        self.assertIn("Return to Stream", content)
+        self.assertIn(reverse("feed"), content)
+        # Watchdog + error handlers must know how to reveal the banner.
+        self.assertIn("showConnectionAlert", content)
+        self.assertIn("document.getElementById('chat-connection-alert')", content)
 
     def test_chat_retains_l1_and_l2_headers(self):
         user = User.objects.create_user(username="did:key:z6Mklayers123")

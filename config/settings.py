@@ -296,9 +296,14 @@ BRIDGE_WS_URL = env.str("BRIDGE_WS_URL", default=IDP_HOME_WS_URL)
 BLOSSOM_SERVER_URL = env.str("BLOSSOM_SERVER_URL", default="http://127.0.0.1:9002")
 BLOSSOM_CDN_URL = env.str("BLOSSOM_CDN_URL", default="https://cdn.iyou.me")
 
-# XMPP Chat Server — defaults used by context processor; overridden per-level in ChatView
+# iyou Base Domain — apex used to derive the public `chat.`/`xmpp.` subdomains
+# served to HS/tls visitors so browsers never receive mixed-content loopback URLs.
+BASE_DOMAIN = env.str("BASE_DOMAIN", default="iyou.me")
+
+# XMPP Chat Server — defaults used by context processor; ChatView resolves the
+# actual endpoint per request scheme (loopback ws:// is only safe over HTTP).
 XMPP_DOMAIN = env.str("XMPP_DOMAIN", default="127.0.0.1")
-XMPP_WS_URL = env.str("XMPP_WS_URL", default="ws://127.0.0.1:5222")
+XMPP_WS_URL = env.str("XMPP_WS_URL", default="ws://127.0.0.1:5222/xmpp-websocket")
 XMPP_PASSWORD = env.str("XMPP_PASSWORD", default="")
 
 # User infrastructure level: "1" = Managed (cluster), "2" = Sovereign (local enclave)

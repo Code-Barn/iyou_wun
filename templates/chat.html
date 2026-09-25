@@ -25,6 +25,26 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-2 sm:px-4 py-2">
+  <!-- Mixed-Content / Connection-Failure Alert (hidden until a watchdog or
+       Converse error fires). Gives the user actionable options instead of the
+       silent blank screen that a blocked ws:// socket used to produce. -->
+  <div id="chat-connection-alert" class="hidden m-4 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 font-mono text-xs text-amber-700 dark:text-amber-300">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <span class="text-base">⚠️</span>
+        <span>XMPP sovereign mesh is currently unreachable or blocked by browser security.</span>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="window.location.reload()" class="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 font-bold transition">
+          ↻ Retry Connection
+        </button>
+        <a href="{% url 'feed' %}" class="px-2.5 py-1 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold transition">
+          ← Return to Stream
+        </a>
+      </div>
+    </div>
+  </div>
+
   <!-- Loading Spinner Overlay -->
   <div id="chat-loading-overlay" class="flex flex-col items-center justify-center h-[calc(100vh-180px)] bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm rounded-xl border border-slate-200 dark:border-slate-800">
     <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-violet-600 dark:border-violet-400"></div>
@@ -55,19 +75,36 @@
     const xmppDomainFallback = "{{ xmpp_domain|default:'iyou.me' }}";
     const templateJid = "{{ user_jid|default:'' }}";
     const templateToken = "{{ xmpp_token|default:'' }}";
+    const templatePubkeyHex = "{{ user_pubkey_hex|default:'' }}";
 
     function dismissLoadingSpinner() {
+      clearTimeout(lockupTimer);
       const loader = document.getElementById('chat-loading-overlay');
       const wrap = document.getElementById('conversejs-wrap');
       if (loader) loader.classList.add('hidden');
       if (wrap) wrap.classList.remove('hidden');
+      // A session that eventually connects clears any earlier diagnostic alert.
+      const alertBox = document.getElementById('chat-connection-alert');
+      if (alertBox) alertBox.classList.add('hidden');
     }
 
-    // 6-second safety net: never leave the spinner stuck.
+    // Reveal the amber diagnostic banner (leaving the Nostr-DM fallback roster
+    // intact below it) whenever XMPP is unreachable or browser security blocks
+    // the socket — the fix for the previously silent blank `#conversejs`.
+    function showConnectionAlert() {
+      const alertBox = document.getElementById('chat-connection-alert');
+      if (alertBox) alertBox.classList.remove('hidden');
+      const loader = document.getElementById('chat-loading-overlay');
+      if (loader) loader.classList.add('hidden');
+    }
+
+    // 7-second watchdog: if Converse never fires `connected`/`statusInitialized`,
+    // reveal the diagnostic alert and the Nostr-DM fallback roster instead of
+    // leaving the loading spinner or a blank container behind.
     const lockupTimer = setTimeout(function () {
-      dismissLoadingSpinner();
+      showConnectionAlert();
       showOfflineRoster();
-    }, 6000);
+    }, 7000);
 
     function showOfflineRoster() {
       const wrap = document.getElementById('conversejs-wrap');
@@ -89,9 +126,9 @@
     function bindChat(session) {
       clearTimeout(lockupTimer);
       const wsUrl = (session && session.ws_url) || wsFallback;
-      const jid = (session && session.jid) || templateJid;
-      const password = (session && session.token) || templateToken;
       const xmppDomain = (session && session.domain) || xmppDomainFallback;
+      const jid = (session && session.jid) || templateJid || (templatePubkeyHex ? templatePubkeyHex + '@' + xmppDomain : '');
+      const password = (session && session.token) || templateToken || templatePubkeyHex;
 
       const urlParams = new URLSearchParams(window.location.search);
       const peerParam = window.peerTarget || urlParams.get('peer');
@@ -143,13 +180,13 @@
         }).then(function() {
           setTimeout(dismissLoadingSpinner, 1000);
         }).catch(function(err) {
-          console.error("Converse initialize error:", err);
-          dismissLoadingSpinner();
+          console.warn('[XMPP] Connection error:', err);
+          showConnectionAlert();
           showOfflineRoster();
         });
       } catch (err) {
-        console.error("Converse bootstrap error:", err);
-        dismissLoadingSpinner();
+        console.warn("[XMPP] Bootstrap error:", err);
+        showConnectionAlert();
         showOfflineRoster();
       }
     }
