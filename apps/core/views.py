@@ -50,6 +50,11 @@ from websocket import create_connection
 from services.poly_client import PolyClient, PolyConnectionError
 
 from .did_kit import b58decode, get_node_signing_key, get_public_key_hex, issue_vc
+from .identity import (
+    get_ecosystem_pubkeys,
+    invalidate_author_identity,
+    invalidate_ecosystem_cache,
+)
 from .moderation import (
     annotate_progressive_friction,
     filter_shielded_events,
@@ -834,17 +839,13 @@ class FeedView(TemplateView):
                 notes = []
                 feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
             elif circle == "iyou":
-                iyou_pks = get_iyou_pubkeys()
-                # Phase 6 (AUDIT-004): prioritize author NIP-65 (Kind 10002)
-                # outbox hints so queries land on relays the iyou ecosystem
-                # actually publishes to, while staying above the bootstrap floor.
-                query_relays = aggregate_author_outbox_relays(iyou_pks, relays)
-                # Inclusive iyou circle: authors query (when ecosystem keys exist)
-                # merged with the #t iyou tag query so tag-only companion frames
-                # still surface server-side.
+                ecosystem_pks = list(get_ecosystem_pubkeys())
+                # Strict cryptographic membership: the iyou circle only ever
+                # queries the node's registered ecosystem authors. No #t tag
+                # merge, so external notes tagged #iyou can never leak in.
+                query_relays = aggregate_author_outbox_relays(ecosystem_pks, relays)
                 feed_data = fetch_unified_feed(
-                    authors=iyou_pks or None,
-                    tags={"t": ["iyou"]},
+                    authors=ecosystem_pks or None,
                     relay_urls=query_relays,
                     deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT,
                     dev_mode=dev_mode,
@@ -875,6 +876,9 @@ class FeedView(TemplateView):
                 )
 
             notes = feed_data["roots"]
+            if circle == "iyou" and not dev_mode:
+                ecosystem_keys = get_ecosystem_pubkeys()
+                notes = [n for n in notes if (n.get("pubkey") or "").lower() in ecosystem_keys]
             if dep_ctx.get("is_dependent"):
                 notes = filter_feed_for_dependent(
                     notes,
@@ -1279,14 +1283,13 @@ def api_feed(request):
     feed_deadline = time.time() + 4.0
 
     if circle == "iyou":
-        iyou_pks = get_iyou_pubkeys()
-        # Inclusive iyou circle: query the author set (ecosystem keys) AND a
-        # #t iyou tag query, merged server-side by event id. Companion/digest
-        # frames that only carry the ecosystem client tag surface even when
-        # their author key is not in the ecosystem set.
-        tag_query = {"#t": ["iyou"]}
-        if iyou_pks:
-            filter_obj["authors"] = iyou_pks
+        # Strict cryptographic membership: only registered ecosystem authors
+        # participate in the iyou circle. No #t tag merge — external notes
+        # tagged #iyou can never surface in the sovereign stream.
+        ecosystem_pks = list(get_ecosystem_pubkeys())
+        tag_query = None
+        if ecosystem_pks:
+            filter_obj["authors"] = ecosystem_pks
     else:
         tag_query = None
         if circle in ("following", "network") and user_pubkey:
@@ -1371,6 +1374,17 @@ def api_feed(request):
     except TypeError:
         feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays)
 
+    if circle == "iyou" and not dev_mode:
+        ecosystem_keys = get_ecosystem_pubkeys()
+        feed_data["roots"] = [
+            n for n in feed_data["roots"] if (n.get("pubkey") or "").lower() in ecosystem_keys
+        ]
+        if isinstance(feed_data.get("replies"), dict):
+            feed_data["replies"] = {
+                pid: [r for r in rs if (r.get("pubkey") or "").lower() in ecosystem_keys]
+                for pid, rs in feed_data.get("replies", {}).items()
+            }
+
 
     def _serialize(note):
         result = dict(note)
@@ -1426,8 +1440,11 @@ def api_feed(request):
                 "pubkey": quoted_note.get("pubkey") or "",
                 "npub": quoted_note.get("npub") or "",
                 "author_name": quoted_note.get("author_name") or "",
-                "author_avatar": quoted_note.get("author_avatar") or "",
+                "author_display_name": quoted_note.get("author_display_name") or "",
                 "author_handle": quoted_note.get("author_handle") or "",
+                "author_url": quoted_note.get("author_url") or "",
+                "is_ecosystem_member": bool(quoted_note.get("is_ecosystem_member", False)),
+                "author_avatar": quoted_note.get("author_avatar") or "",
                 "content": quoted_note.get("content") or "",
                 "display_content": quoted_note.get("display_content") or quoted_note.get("content") or "",
                 "media_url": quoted_note.get("media_url") or (quoted_note.get("media_attachments") or [{}])[0].get("url") or "",
@@ -1475,7 +1492,7 @@ def api_feed(request):
     oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
     has_more = bool(roots) and len(roots) >= limit
 
-    iyou_pubkeys = set(get_iyou_pubkeys())
+    iyou_pubkeys = set(get_ecosystem_pubkeys())
     trending_tags_global, trending_tags_iyou = calculate_trending_tags(
         feed_data["roots"], iyou_pubkeys=iyou_pubkeys
     )
@@ -1788,6 +1805,11 @@ def api_save_profile(request):
         # The save() method will automatically set the nip05 field
         if re.fullmatch(r"[0-9a-f]{64}", nostr_pubkey):
             request.session["nostr_pubkey_hex"] = nostr_pubkey
+
+    # Profile/deck changes can alter the canonical identity translation and the
+    # ecosystem membership cache, so drop the affected entries eagerly.
+    invalidate_author_identity(nostr_pubkey)
+    invalidate_ecosystem_cache()
 
     profile_data = {
         "name": deck.display_name or deck.handle or name,

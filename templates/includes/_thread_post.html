@@ -60,11 +60,11 @@
     <!-- Note Header / Meta -->
     <div class="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
       <div class="flex items-center gap-2 min-w-0 flex-wrap">
-        <a href="{% url 'profile' npub=note.npub %}" class="font-bold text-slate-900 dark:text-slate-100 hover:underline text-sm truncate font-mono">
+        <a href="{% if note.author_url %}{{ note.author_url }}{% else %}{% url 'profile' npub=note.npub %}{% endif %}" class="font-bold text-slate-900 dark:text-slate-100 hover:underline text-sm truncate font-mono">
           {% if note.author_display_name %}{{ note.author_display_name }}{% else %}{{ note.author_name|default:note.npub|truncatechars:14 }}{% endif %}
         </a>
         <span class="text-xs text-slate-400 font-mono truncate hidden sm:inline">
-          @{{ note.author_name|default:note.npub|truncatechars:12 }}
+          @{{ note.author_handle|default:note.author_name|default:note.npub|truncatechars:12 }}
         </span>
         <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
         {% if note.is_iyou_native %}

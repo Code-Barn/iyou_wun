@@ -773,6 +773,7 @@ def build_thread_tree(raw_events, profiles=None):
         profiles = {}
 
     from .views import get_iyou_pubkeys, hex_to_npub, resolve_author_did
+    from .identity import decorate_author_identity
     iyou_native_set = set(get_iyou_pubkeys())
 
     def _ts_to_datetime(ts):
@@ -837,7 +838,7 @@ def build_thread_tree(raw_events, profiles=None):
         note["filter_status"] = note["_filter_status"]
         note["is_iyou_native"] = bool(e.get("is_iyou_native") or (pk in iyou_native_set))
         note["is_iyou_circle"] = bool(note["is_iyou_native"] or has_iyou_tag(tags))
-        return extract_media_from_note(note)
+        return decorate_author_identity(extract_media_from_note(note))
 
 
     if isinstance(raw_events, list):
@@ -936,6 +937,7 @@ def build_thread_tree(raw_events, profiles=None):
 def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pubkey=""):
     """Enrich a root event (Kind 1, 1063, 30023) with author profile."""
     from .views import get_iyou_pubkeys, hex_to_npub, get_tag_value, resolve_author_did
+    from .identity import decorate_author_identity
     pk = e.get("pubkey", "")
     prof = profiles.get(pk, {})
     tags = e.get("tags", [])
@@ -1016,7 +1018,7 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         note["poll_scope_org"] = get_tag_value(tags, "org")
         note["poll_closes_at"] = get_tag_value(tags, "expires")
 
-    return extract_media_from_note(note)
+    return decorate_author_identity(extract_media_from_note(note))
 
 
 

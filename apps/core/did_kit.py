@@ -216,3 +216,8 @@ def did_to_pubkey(did: str) -> str | None:
     except Exception:
         return None
 
+
+# Backwards-compatible alias for the canonical DID->pubkey resolver used by the
+# Identity Translation Service (apps/core/identity.py).
+did_to_pubkey_hex = did_to_pubkey
+

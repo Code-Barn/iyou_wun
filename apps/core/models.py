@@ -106,6 +106,20 @@ class UserLinkDeck(models.Model):
         if "update_fields" in kwargs and kwargs["update_fields"] is not None:
             kwargs["update_fields"] = list(set(kwargs["update_fields"]) | {"nip05"})
         super().save(*args, **kwargs)
+        try:
+            from .identity import invalidate_author_identity
+            from .did_kit import did_to_pubkey_hex
+
+            pk_candidates = []
+            if self.nostr_pubkey:
+                pk_candidates.append(self.nostr_pubkey)
+            derived = did_to_pubkey_hex(self.user.username)
+            if derived:
+                pk_candidates.append(derived)
+            for pk in pk_candidates:
+                invalidate_author_identity(pk)
+        except Exception:
+            pass
 
 
 class Bookmark(models.Model):

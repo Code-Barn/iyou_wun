@@ -1369,7 +1369,7 @@ class FeedPhase24Test(TestCase):
         self.assertNotContains(response, "🌐 Mesh")
 
     def test_default_landing_circle_is_iyou(self):
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=["3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"]) as mock_get_iyou:
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value={"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"}) as mock_get_iyou:
             with patch("apps.core.views.relay_req", return_value={}):
                 response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
@@ -1609,10 +1609,10 @@ class LanguageDetectionCalibrationTest(TestCase):
 
 class ApiFeedIyouCircleTests(TestCase):
     def test_api_feed_iyou_returns_empty_and_no_more_without_ecosystem_keys(self):
-        # Phase 7: the iyou circle is inclusive — even with no registered
-        # ecosystem keys, the #t: iyou tag query is still issued server-side so
-        # client-tagged companion frames surface.
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req", return_value={}) as mock_relay:
+        # Strict membership: with no registered ecosystem keys the iyou circle
+        # issues no authors scope and no inclusive #t: iyou tag query, so
+        # external tag-only frames never surface.
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value=set()), patch("apps.core.views.relay_req", return_value={}) as mock_relay:
             response = self.client.get("/api/feed?circle=iyou")
             self.assertEqual(response.status_code, 200)
             data = response.json()
@@ -1620,12 +1620,95 @@ class ApiFeedIyouCircleTests(TestCase):
             self.assertEqual(data.get("notes"), [])
             self.assertFalse(data.get("has_more"))
             self.assertTrue(mock_relay.called)
-            tag_filters = [
-                c[0][0] for c in mock_relay.call_args_list
-                if isinstance(c[0][0], dict) and c[0][0].get("#t") == ["iyou"]
-            ]
-            self.assertEqual(len(tag_filters), 1)
-            self.assertNotIn("authors", tag_filters[0])
+            self.assertEqual(len(mock_relay.call_args_list), 1)
+            main_filter = mock_relay.call_args_list[0][0][0]
+            self.assertNotIn("#t", main_filter)
+
+
+class StrictIyouCircleMembershipTests(TestCase):
+    """Identity Translation Service: strict ecosystem membership + card decoration."""
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        from apps.core.views import did_to_pubkey
+
+        cache.clear()
+        self.member_user = get_user_model().objects.create_user(
+            username="did:key:z6Mkstrictmember"
+        )
+        self.member_pk = did_to_pubkey(self.member_user.username)
+
+    def test_iyou_circle_excludes_external_notes_with_iyou_tag(self):
+        from apps.core.models import UserLinkDeck
+
+        UserLinkDeck.objects.create(
+            user=self.member_user, handle="strictmember", display_name="Strict Member"
+        )
+        external_pk = "c" * 64  # never registered: not part of the ecosystem
+        relay_events = {
+            "native_note": make_event(
+                "native_note", 1, pubkey=self.member_pk,
+                content="hello from the ecosystem",
+                tags=[["t", "sovereign"]],
+            ),
+            "external_tag_iyou": make_event(
+                "external_tag_iyou", 1, pubkey=external_pk,
+                content="external #iyou leak attempt",
+                tags=[["t", "iyou"]],
+            ),
+        }
+
+        # api_feed JSON: strict crypto membership drops the external #iyou note.
+        with patch("apps.core.views.relay_req", return_value=relay_events) as mock_relay:
+            response = self.client.get(reverse("api_feed") + "?circle=iyou")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        note_ids = [n["id"] for n in data.get("notes", [])]
+        self.assertIn("native_note", note_ids)
+        self.assertNotIn("external_tag_iyou", note_ids)
+        # The authors scope no longer merges any #t iyou tag query.
+        main_filter = mock_relay.call_args_list[0][0][0]
+        self.assertEqual(main_filter.get("authors"), [self.member_pk])
+        self.assertNotIn("#t", main_filter)
+
+        # FeedView SSR: the external #iyou note never renders in the iyou circle.
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "hello from the ecosystem")
+        self.assertNotContains(response, "external #iyou leak attempt")
+
+    def test_note_decorates_link_deck_identity(self):
+        from apps.core.models import UserLinkDeck
+
+        UserLinkDeck.objects.create(
+            user=self.member_user,
+            handle="deckhero",
+            display_name="Deck Hero",
+            avatar_url="https://cdn.iyou.me/deckhero.png",
+        )
+        relay_events = {
+            "id_note": make_event("id_note", 1, pubkey=self.member_pk, content="signed by deck hero"),
+        }
+
+        # api_feed JSON exposes the canonical deck-backed identity keys.
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("api_feed"))
+        self.assertEqual(response.status_code, 200)
+        note = response.json()["notes"][0]
+        self.assertEqual(note["author_display_name"], "Deck Hero")
+        self.assertEqual(note["author_handle"], "deckhero")
+        self.assertTrue(note["is_ecosystem_member"])
+        self.assertEqual(note["author_url"], "/@deckhero/")
+
+        # FeedView SSR renders the real name and handle on the note card.
+        with patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Deck Hero")
+        self.assertContains(response, "@deckhero")
+        self.assertContains(response, 'href="/@deckhero/"')
 
 
 class Phase45RelayDeadlineTests(TestCase):

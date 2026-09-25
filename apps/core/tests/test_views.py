@@ -836,18 +836,17 @@ class DashboardProfileTest(TestCase):
             self.assertNotIn("authors", filter_obj)
 
     def test_api_feed_iyou_maintains_scoped_authors_requirement(self):
-        # Phase 7: the iyou circle keeps the ecosystem author-scope AND issues
-        # the inclusive #t: iyou tag query, then merges/dedupes by event id.
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=["pk1", "pk2"]), patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
+        # Phase 7 + strict membership: the iyou circle keeps the ecosystem
+        # author-scope and NO longer issues an inclusive #t: iyou tag query, so
+        # external notes can never leak into the sovereign stream.
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value={"pk1", "pk2"}), patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
             response = self.client.get(reverse("api_feed") + "?circle=iyou")
             self.assertEqual(response.status_code, 200)
             self.assertTrue(mock_relay_req.called)
-            self.assertEqual(len(mock_relay_req.call_args_list), 2)
-            authors_filter = mock_relay_req.call_args_list[0][0][0]
-            tag_filter = mock_relay_req.call_args_list[1][0][0]
-            self.assertEqual(tag_filter.get("#t"), ["iyou"])
-            self.assertNotIn("authors", tag_filter)
-            self.assertEqual(authors_filter.get("authors"), ["pk1", "pk2"])
+            self.assertEqual(len(mock_relay_req.call_args_list), 1)
+            main_filter = mock_relay_req.call_args_list[0][0][0]
+            self.assertEqual(set(main_filter.get("authors")), {"pk1", "pk2"})
+            self.assertNotIn("#t", main_filter)
 
 
 
@@ -1859,6 +1858,12 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
     def test_open_graph_uses_large_image_card_when_thread_has_media(self):
         pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        og_owner = User.objects.get(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(
+            user=og_owner,
+            handle="ogkeeper",
+            display_name="OG Media Keeper",
+        )
         hero_event = make_event("og_media_1", 1063, pubkey=pk, created_at=1700000100, content="OG media note", tags=[
             ["url", "https://cdn.iyou.me/og_media.png"],
             ["m", "image/png"],
@@ -1868,7 +1873,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, '<meta name="twitter:card" content="summary_large_image"')
         self.assertContains(response, '<meta property="og:image" content="https://cdn.iyou.me/og_media.png"')
-        self.assertEqual(response.context.get("meta_title"), "Note on iyou_wun")
+        self.assertEqual(response.context.get("meta_title"), "OG Media Keeper on iyou_wun")
         self.assertTrue(response.context.get("meta_description").startswith("OG media note"))
 
     def test_open_graph_tags_rendered_on_link_deck_page(self):
@@ -1964,7 +1969,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         }
 
         with patch("apps.core.views.relay_req", return_value=relay_events):
-            response = self.client.get(reverse("feed"))
+            response = self.client.get(reverse("feed") + "?circle=global")
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "↳ Replying to")
@@ -1998,7 +2003,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         )
 
         with patch("apps.core.views.relay_req", return_value={"dedup_child_1": reply_event, "k0_dedup_root": k0_event}):
-            response = self.client.get(reverse("feed"))
+            response = self.client.get(reverse("feed") + "?circle=global")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
@@ -2286,7 +2291,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             ),
         }
         with patch("apps.core.views.relay_req", return_value=relay_events):
-            response = self.client.get(reverse("feed"))
+            response = self.client.get(reverse("feed") + "?circle=global")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
@@ -2347,7 +2352,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             ),
         }
         with patch("apps.core.views.relay_req", return_value=relay_events):
-            response = self.client.get(reverse("feed"))
+            response = self.client.get(reverse("feed") + "?circle=global")
 
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
@@ -2370,7 +2375,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
         self.assertContains(response, "Shield:")
 
     def test_nav_renders_iyou_circle_pill(self):
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=["3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"]) as mock_get_iyou:
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value={"3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"}) as mock_get_iyou:
             with patch("apps.core.views.relay_req", return_value={}):
                 response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
@@ -3462,11 +3467,10 @@ class Phase24ViewsTest(TestCase):
         self.assertIn("error", data)
 
     def test_iyou_feed_zero_bleed_when_empty(self):
-        # Phase 7: with zero registered ecosystem keys the authors scope is an
-        # empty query, but the inclusive #t: iyou tag query is still issued so
-        # client-tagged companion frames can surface. Zero notes either way.
+        # Strict membership: with zero registered ecosystem keys the iyou circle
+        # issues no authors scope and no inclusive #t tag query. Zero notes.
         url = reverse("api_feed") + "?circle=iyou"
-        with patch("apps.core.views.get_iyou_pubkeys", return_value=[]), patch("apps.core.views.relay_req", return_value={}) as mock_relay:
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value=set()), patch("apps.core.views.relay_req", return_value={}) as mock_relay:
             response = self.client.get(url)
             self.assertEqual(response.status_code, 200)
             data = response.json()
@@ -3475,12 +3479,9 @@ class Phase24ViewsTest(TestCase):
             self.assertEqual(data["replies"], {})
             self.assertFalse(data["has_more"])
             self.assertTrue(mock_relay.called)
-            tag_filters = [
-                c[0][0] for c in mock_relay.call_args_list
-                if isinstance(c[0][0], dict) and c[0][0].get("#t") == ["iyou"]
-            ]
-            self.assertEqual(len(tag_filters), 1)
-            self.assertNotIn("authors", tag_filters[0])
+            self.assertEqual(len(mock_relay.call_args_list), 1)
+            main_filter = mock_relay.call_args_list[0][0][0]
+            self.assertNotIn("#t", main_filter)
 
     def test_api_translate_endpoint_post(self):
         """Asserts POST /api/translate/ returns 200 with JSON payload."""
