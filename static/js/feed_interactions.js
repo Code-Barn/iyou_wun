@@ -347,6 +347,7 @@
         }
         
         // Filter to only enabled/active relay URLs
+        var EXCLUDED_CLIENT_RELAYS = new Set(["wss://purplerelay.com", "wss://nos.lol"]);
         var enabledRelays = [];
         if (Array.isArray(customRelays)) {
             enabledRelays = customRelays.filter(function(relay) {
@@ -359,6 +360,10 @@
                 return false;
             }).map(function(relay) {
                 return typeof relay === "string" ? relay.trim() : relay.url.trim();
+            }).filter(function(relayUrl) {
+                // Mirror the server-side EXCLUDED_RELAYS fleet: keep the payload
+                // aligned with the relays the server will actually query.
+                return !EXCLUDED_CLIENT_RELAYS.has(relayUrl);
             });
         }
         
@@ -1093,6 +1098,22 @@
             if (existing) return false;
         }
 
+        // Attribute the card to the ACTUAL incoming event author, never the
+        // logged-in viewer. Metadata may be attached by the server bridge, or
+        // we fall back to a short label derived from the event's own pubkey.
+        var eventPubkey = event.pubkey_hex || event.pubkey || "";
+        var eventNpub = event.npub || (eventPubkey ? eventPubkey.substring(0, 12) + "..." : "");
+        var eventAuthorName = event.author_display_name || event.author_name || eventNpub || "";
+        var eventAuthorAvatar = event.author_avatar || "";
+        // Sovereign only when the event itself carries verified iyou metadata or
+        // the author pubkey is a known ecosystem member — never blanket-true.
+        var isSovereign = !!(
+            event.is_sovereign ||
+            event.is_iyou_native ||
+            event.author_did ||
+            (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(eventPubkey))
+        );
+
         var isBlocked = event._filter_status && event._filter_status.status === 'BLOCKED';
         var borderClasses = isBlocked
             ? "border-2 border-dashed border-rose-400/80 dark:border-rose-500/60 bg-rose-50/10"
@@ -1102,8 +1123,8 @@
         wrapper.setAttribute("data-note-card-id", event.id);
         wrapper.setAttribute("data-kind", event.kind);
         wrapper.setAttribute("data-note-id", event.id);
-        wrapper.setAttribute("data-pubkey", event.pubkey_hex || event.pubkey || "");
-        wrapper.setAttribute("data-author-pubkey", event.pubkey_hex || event.pubkey || "");
+        wrapper.setAttribute("data-pubkey", eventPubkey);
+        wrapper.setAttribute("data-author-pubkey", eventPubkey);
         wrapper.setAttribute("data-author-did", event.author_did || "");
         wrapper.setAttribute("data-note-tags", JSON.stringify(event.tags || []));
         if (event.has_content_warning || (event.tags && event.tags.some(function (t) { return t[0] === "content-warning"; }))) {
@@ -1113,7 +1134,7 @@
             wrapper.setAttribute("data-lang", event.lang);
         }
         wrapper.setAttribute("data-created-at", Math.floor(event.created_at || (Date.now() / 1000)));
-        wrapper.setAttribute("data-is-iyou", "true");
+        wrapper.setAttribute("data-is-iyou", isSovereign ? "true" : "false");
         if (isBlocked) {
             wrapper.setAttribute("data-is-blocked", "true");
         }
@@ -1121,7 +1142,6 @@
             window.circleFeedFilter.indexCardTags(wrapper, event.tags);
         }
 
-        var npub = window.userNpub || (window.userPubkey ? window.userPubkey.substring(0, 12) + "..." : "You");
         var mediaUrl = (event.tags && event.tags.find(function (t) { return t[0] === "url"; })) ? event.tags.find(function (t) { return t[0] === "url"; })[1] : "";
         var mimeType = (event.tags && event.tags.find(function (t) { return t[0] === "m"; })) ? event.tags.find(function (t) { return t[0] === "m"; })[1] : "";
 
@@ -1137,11 +1157,12 @@
         var noteObj = {
             id: event.id,
             kind: event.kind,
-            pubkey: event.pubkey,
-            pubkey_hex: event.pubkey,
-            author_did: event.author_did || window.userDid || "",
-            npub: npub,
-            author_name: npub,
+            pubkey: eventPubkey,
+            pubkey_hex: eventPubkey,
+            author_did: event.author_did || "",
+            npub: eventNpub,
+            author_name: eventAuthorName,
+            author_avatar: eventAuthorAvatar,
             content: event.content,
             display_content: event.display_content,
             created_at: event.created_at,
@@ -1149,7 +1170,8 @@
             media_attachments: mediaAttachments,
             media_url: mediaUrl,
             mime_type: mimeType,
-            is_sovereign: true,
+            is_sovereign: isSovereign,
+            is_iyou_native: !!event.is_iyou_native,
             reactions: [],
             reply_count: 0
         };
@@ -1326,6 +1348,7 @@
 
     var _isLoadingFeedNotes = false;
     var _hasMoreFeedNotes = true;
+    var _feedAbortController = null;
 
     // ---------- Phase 34: Progressive Stream Hydration ----------
     // When the server renders the instant HTML shell (empty #feed-container
@@ -1422,6 +1445,9 @@
                         emptyState.classList.remove("hidden");
                         emptyState.style.display = "";
                     }
+                    // The batch has settled with zero cards: release the
+                    // hydration guard so the relay-pool fallback may fill the shell.
+                    _hydratingInitialFeed = false;
                     hydrateFromRelayPool();
                 }
 
@@ -1441,6 +1467,9 @@
                 var skeleton = document.getElementById("feed-skeleton-container");
                 if (skeleton) skeleton.remove();
                 container.removeAttribute("data-hydrate");
+                // Batch failed: release the hydration guard so the relay-pool
+                // fallback is allowed to try recovering the shell.
+                _hydratingInitialFeed = false;
                 hydrateFromRelayPool();
             })
             .finally(function () {
@@ -1458,6 +1487,11 @@
 
     function hydrateFromRelayPool() {
         if (_relayHydrating) return;
+        // If a server batch fetch is actively in flight (initial hydration,
+        // pagination, or a circle-switch reset), do NOT fire pool subscriptions
+        // into #feed-container — let the /api/feed batch be the single owner of
+        // the visible scroll view. Re-check once the batch settles.
+        if (_isLoadingFeedNotes || _hydratingInitialFeed || _feedAbortController) return;
         var container = document.getElementById("feed-container");
         if (!container) return;
         if (container.querySelectorAll(".feed-note-card").length > 0) return;
@@ -1579,6 +1613,14 @@
         if (_isLoadingFeedNotes && !isReset) return;
         if (!_hasMoreFeedNotes && !isReset) return;
 
+        // A reset (circle switch / reconnect reload) supersedes any in-flight
+        // /api/feed request. Abort it first so two batches never race, then
+        // dispatch the fresh reset request below.
+        if (isReset && _isLoadingFeedNotes && _feedAbortController) {
+            try { _feedAbortController.abort(); } catch (e) { /* ignore */ }
+            _feedAbortController = null;
+        }
+
         var sentinel = document.getElementById("feed-pagination-sentinel");
         var container = document.getElementById("feed-container") || document.getElementById("feedContainer");
         if (!container) return;
@@ -1635,7 +1677,10 @@
             queryUrl += "&relays=" + encodeURIComponent(JSON.stringify(activeRelays));
         }
 
-        fetch(queryUrl)
+        _feedAbortController = new AbortController();
+        const currentSignal = _feedAbortController.signal;
+
+        fetch(queryUrl, { signal: currentSignal })
             .then(function (r) { return r.json(); })
             .then(function (data) {
                 if (thisRequestId !== _feedFetchSequence) {
@@ -1750,6 +1795,9 @@
             })
             .catch(function (err) {
                 if (thisRequestId !== _feedFetchSequence) return;
+                if (err && (err.name === "AbortError" || (currentSignal && currentSignal.aborted))) {
+                    return; // Superseded by a reset reload or deliberate abort
+                }
                 console.error("Failed to load more feed notes:", err);
                 if (btn) btn.classList.remove("hidden");
             })
@@ -1757,6 +1805,9 @@
                 if (thisRequestId === _feedFetchSequence) {
                     _isLoadingFeedNotes = false;
                     if (spinner) spinner.classList.add("hidden");
+                    if (_feedAbortController) {
+                        _feedAbortController = null;
+                    }
                 }
             });
     }

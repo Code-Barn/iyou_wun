@@ -1107,16 +1107,20 @@ class AttachSocialCountsTests(TestCase):
         }
         ts = lambda x: x  # noqa: E731
 
+        # iyou-native debt is decided by the ecosystem envelope (origin/tags),
+        # matching how relay_req stamps feed events, not by DB registration.
         native_note = _enrich_root(
-            {"pubkey": native_pk, "id": "a1", "content": "hi", "tags": [], "created_at": 0},
+            {"pubkey": native_pk, "id": "a1", "content": "hi", "tags": [], "created_at": 0,
+             "_relay_sources": ["ws://127.0.0.1:9003"], "_primary_relay": "ws://127.0.0.1:9003"},
             1, profiles, ts,
         )
         mesh_note = _enrich_root(
-            {"pubkey": mesh_pk, "id": "a2", "content": "yo", "tags": [], "created_at": 0},
+            {"pubkey": mesh_pk, "id": "a2", "content": "yo", "tags": [], "created_at": 0,
+             "_relay_sources": ["wss://relay.nostr.band"], "_primary_relay": "wss://relay.nostr.band"},
             1, profiles, ts,
         )
 
-        # Registered UserLinkDeck creator -> [ ⚡ iyou ] native badge
+        # Platform-sourced note -> [ ⚡ iyou ] native badge
         self.assertTrue(native_note["is_iyou_native"])
         self.assertFalse(native_note["has_nip05"])
         # External mesh peer with a verified NIP-05 -> [ 🏷️ ] badge, not native
@@ -1133,7 +1137,7 @@ class AttachSocialCountsTests(TestCase):
 
         captured_relays = []
 
-        def mock_relay_req(filter_obj, relay_urls=None, timeout=10, deadline=None):
+        def mock_relay_req(filter_obj, relay_urls=None, timeout=10, deadline=None, settle_timeout=None):
             if "ids" in filter_obj and "target_reply" in filter_obj["ids"]:
                 return {"target_reply": target}
             if "ids" in filter_obj and "missing_parent_id" in filter_obj["ids"]:
@@ -1639,45 +1643,56 @@ class StrictIyouCircleMembershipTests(TestCase):
         )
         self.member_pk = did_to_pubkey(self.member_user.username)
 
-    def test_iyou_circle_excludes_external_notes_with_iyou_tag(self):
+    def test_iyou_circle_includes_envelope_notes_and_excludes_bare_external(self):
         from apps.core.models import UserLinkDeck
 
         UserLinkDeck.objects.create(
             user=self.member_user, handle="strictmember", display_name="Strict Member"
         )
-        external_pk = "c" * 64  # never registered: not part of the ecosystem
+        # Not registered on this node: qualifies only via the envelope filter.
+        external_pk = "c" * 64
+        external_relay = ["wss://relay.nostr.band"]
         relay_events = {
             "native_note": make_event(
                 "native_note", 1, pubkey=self.member_pk,
                 content="hello from the ecosystem",
                 tags=[["t", "sovereign"]],
             ),
-            "external_tag_iyou": make_event(
-                "external_tag_iyou", 1, pubkey=external_pk,
-                content="external #iyou leak attempt",
+            "external_iyou_tag": make_event(
+                "external_iyou_tag", 1, pubkey=external_pk,
+                content="external #iyou envelope note",
                 tags=[["t", "iyou"]],
+                relay_sources=external_relay,
+            ),
+            "external_bare": make_event(
+                "external_bare", 1, pubkey=external_pk,
+                content="bare external note with no envelope",
+                tags=[],
+                relay_sources=external_relay,
             ),
         }
 
-        # api_feed JSON: strict crypto membership drops the external #iyou note.
+        # api_feed JSON: envelope membership keeps native + #iyou-tagged notes,
+        # and drops the bare external note. No authors scope at query time.
         with patch("apps.core.views.relay_req", return_value=relay_events) as mock_relay:
             response = self.client.get(reverse("api_feed") + "?circle=iyou")
         self.assertEqual(response.status_code, 200)
         data = response.json()
         note_ids = [n["id"] for n in data.get("notes", [])]
         self.assertIn("native_note", note_ids)
-        self.assertNotIn("external_tag_iyou", note_ids)
-        # The authors scope no longer merges any #t iyou tag query.
+        self.assertIn("external_iyou_tag", note_ids)
+        self.assertNotIn("external_bare", note_ids)
         main_filter = mock_relay.call_args_list[0][0][0]
-        self.assertEqual(main_filter.get("authors"), [self.member_pk])
+        self.assertNotIn("authors", main_filter)
         self.assertNotIn("#t", main_filter)
 
-        # FeedView SSR: the external #iyou note never renders in the iyou circle.
+        # FeedView SSR: the bare external note never renders in the iyou circle.
         with patch("apps.core.views.relay_req", return_value=relay_events):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "hello from the ecosystem")
-        self.assertNotContains(response, "external #iyou leak attempt")
+        self.assertContains(response, "external #iyou envelope note")
+        self.assertNotContains(response, "bare external note with no envelope")
 
     def test_note_decorates_link_deck_identity(self):
         from apps.core.models import UserLinkDeck
@@ -1709,6 +1724,51 @@ class StrictIyouCircleMembershipTests(TestCase):
         self.assertContains(response, "Deck Hero")
         self.assertContains(response, "@deckhero")
         self.assertContains(response, 'href="/@deckhero/"')
+
+
+class EcosystemEnvelopeTests(TestCase):
+    """is_ecosystem_envelope: notes qualify for the iyou circle via tags or
+    platform-relay origin — not via DB registration."""
+
+    def setUp(self):
+        from apps.core.nip10 import is_ecosystem_envelope
+
+        self.is_ecosystem_envelope = is_ecosystem_envelope
+
+    def test_envelope_accepted_via_iyou_hashtag(self):
+        self.assertTrue(self.is_ecosystem_envelope({"tags": [["t", "iyou"]]}))
+        self.assertTrue(self.is_ecosystem_envelope({"tags": [["t", "IYOU"]]}))
+        self.assertFalse(self.is_ecosystem_envelope({"tags": [["t", "other"]]}))
+
+    def test_envelope_accepted_via_client_tags(self):
+        self.assertTrue(self.is_ecosystem_envelope({"tags": [["client", "iyou"]]}))
+        self.assertTrue(self.is_ecosystem_envelope({"tags": [["client", "iyou_wun"]]}))
+        self.assertTrue(self.is_ecosystem_envelope({"tags": [["client", "omni_social", "1.2.0"]]}))
+        self.assertFalse(self.is_ecosystem_envelope({"tags": [["client", "damus"]]}))
+
+    def test_envelope_accepted_via_platform_relay_origin(self):
+        from apps.core.tests.helpers import PLATFORM_LOCAL_RELAY
+
+        local = make_event("origin_local", 1, content="from local relay")
+        self.assertEqual(local["_primary_relay"], PLATFORM_LOCAL_RELAY)
+        self.assertTrue(self.is_ecosystem_envelope(local))
+
+        remote = make_event(
+            "origin_remote", 1, content="from remote relay",
+            relay_sources=["wss://relay.nostr.band"],
+        )
+        self.assertFalse(self.is_ecosystem_envelope(remote))
+
+        # A remote-sourced event that arrived on the platform edge still counts.
+        edge = make_event(
+            "origin_edge", 1, content="via relay.iyou.me",
+            relay_sources=["wss://relay.nostr.band", "wss://relay.iyou.me"],
+        )
+        self.assertTrue(self.is_ecosystem_envelope(edge))
+
+    def test_envelope_rejected_for_bare_external_event(self):
+        self.assertFalse(self.is_ecosystem_envelope({"tags": []}))
+        self.assertFalse(self.is_ecosystem_envelope({"tags": [["t", "bitcoin"], ["client", "damus"]]}))
 
 
 class Phase45RelayDeadlineTests(TestCase):

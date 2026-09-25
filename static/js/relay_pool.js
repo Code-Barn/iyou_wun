@@ -775,7 +775,16 @@
             try {
                 var ws = new WebSocket(record.url);
                 var timeout = setTimeout(function () {
-                    try { ws.close(); } catch (e) {}
+                    if (ws.readyState === WebSocket.OPEN) {
+                        try { ws.close(); } catch (e) {}
+                    } else if (ws.readyState === WebSocket.CONNECTING) {
+                        // Prevent the "WebSocket is closed before the connection
+                        // is established" abortion error: detach handlers so a
+                        // still-connecting probe cleanly discards when it opens.
+                        ws.onopen = function () { try { ws.close(); } catch (e) {} };
+                        ws.onerror = null;
+                        ws.onmessage = null;
+                    }
                     finish("offline", null);
                 }, PROBE_TIMEOUT_MS);
 
@@ -1472,13 +1481,27 @@
     // Auto re-subscribe any active feed filters when a managed pool socket
     // recovers (no full page refresh needed). Safe to no-op when the feed
     // controller has not been loaded yet.
+    //
+    // Multiple relays completing their handshake in the same tick must settle
+    // into exactly ONE feed reload: coalesce with a 300ms trailing debounce
+    // keyed to the active circle so the storm collapses to a single request.
+    var _reconnectReloadTimer = null;
+    var _reconnectReloadCircle = null;
     poolInstance.onReconnect(function () {
-        if (typeof window !== "undefined" && typeof window.reloadFeedForCircle === "function") {
-            var circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === "function")
-                ? window.circleFeedFilter.getActiveCircle()
-                : "iyou";
-            try { window.reloadFeedForCircle(circle); } catch (e) { /* ignore */ }
+        if (typeof window === "undefined" || typeof window.reloadFeedForCircle !== "function") return;
+        var circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === "function")
+            ? window.circleFeedFilter.getActiveCircle()
+            : "iyou";
+        _reconnectReloadCircle = circle;
+        if (_reconnectReloadTimer) {
+            clearTimeout(_reconnectReloadTimer);
         }
+        _reconnectReloadTimer = setTimeout(function () {
+            _reconnectReloadTimer = null;
+            var reloadCircle = _reconnectReloadCircle;
+            _reconnectReloadCircle = null;
+            try { window.reloadFeedForCircle(reloadCircle); } catch (e) { /* ignore */ }
+        }, 300);
     });
 
     if (typeof module !== "undefined" && module.exports) {

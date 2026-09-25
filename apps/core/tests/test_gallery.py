@@ -157,6 +157,8 @@ class GalleryViewContextTest(TestCase):
         self.assertEqual(resp.context["images"], [])
         self.assertEqual(resp.context["videos"], [])
         self.assertEqual(resp.context["audio_items"], [])
+        self.assertEqual(resp.context["media_items"], [])
+        self.assertEqual(resp.context["selected_type"], "all")
 
     def test_categorized_context(self):
         notes = [
@@ -196,16 +198,31 @@ class GalleryViewContextTest(TestCase):
         self.assertEqual(ctx["videos"][0]["id"], "2")
         self.assertEqual(ctx["audio_items"][0]["id"], "3")
         self.assertEqual(ctx["other_items"][0]["id"], "4")
+        # Category slices + normalized identity keys feed the 3-pane chassis.
+        self.assertEqual(len(ctx["media_items"]), 4)
+        self.assertEqual(len(ctx["image_items"]), 1)
+        self.assertEqual(len(ctx["video_items"]), 1)
+        self.assertEqual(len(ctx["audio_items"]), 1)
+        for item in ctx["media_items"]:
+            self.assertEqual(item["category"], item["media_type"])
+            self.assertIn("author_display_name", item)
+            self.assertIn("author_handle", item)
+            self.assertIn("is_ecosystem_member", item)
+            self.assertEqual(item["author_npub"], item["npub"])
+            self.assertTrue(item["url"])
+            self.assertTrue("caption" in item)
 
     def test_active_type_default(self):
         with patch("apps.core.views.fetch_media_assets", return_value=[]):
             resp = self.client.get(reverse("gallery"))
         self.assertEqual(resp.context["active_type"], "all")
+        self.assertEqual(resp.context["selected_type"], "all")
 
     def test_active_type_images(self):
         with patch("apps.core.views.fetch_media_assets", return_value=[]):
             resp = self.client.get(reverse("gallery") + "?type=images")
         self.assertEqual(resp.context["active_type"], "images")
+        self.assertEqual(resp.context["selected_type"], "images")
 
 
 class GalleryViewAuthTest(TestCase):
@@ -221,12 +238,12 @@ class GalleryViewAuthTest(TestCase):
 
 
 class GalleryCircleFilteringAndTagSearchTest(TestCase):
-    """Verifies gallery media decoration, circle filtering markup, empty states, and scripts."""
+    """Verifies gallery 3-pane rendering, category slices, scripts, and rails."""
 
     def setUp(self):
         self.client = Client()
 
-    def test_gallery_media_cards_have_circle_and_tag_attributes(self):
+    def test_gallery_stream_renders_category_slices_and_scripts(self):
         notes = [
             {
                 "id": "img1",
@@ -308,36 +325,61 @@ class GalleryCircleFilteringAndTagSearchTest(TestCase):
             resp = self.client.get(reverse("gallery"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "gallery-media-card")
-        self.assertContains(resp, f'data-author-pubkey="{"aa" * 32}"')
-        self.assertContains(resp, 'data-author-did="did:key:z6Mkgallerytest"')
-        self.assertContains(resp, 'data-media-type="image"')
-        self.assertContains(resp, 'data-media-type="video"')
-        self.assertContains(resp, 'data-media-type="audio"')
-        self.assertContains(resp, 'id="tab-count-all"')
-        self.assertContains(resp, 'id="tab-count-images"')
-        self.assertContains(resp, 'id="tab-count-videos"')
-        self.assertContains(resp, 'id="tab-count-audio"')
-        self.assertContains(resp, 'id="empty-all"')
-        self.assertContains(resp, 'id="empty-images"')
-        self.assertContains(resp, 'id="empty-videos"')
-        self.assertContains(resp, 'id="empty-audio"')
-        self.assertContains(resp, "contact_manager.js")
+        # 3-pane chassis: sticky lightbox modal + category slices in the stream.
+        self.assertContains(resp, 'id="lightbox-modal"')
+        self.assertContains(resp, 'id="gallery-container"')
+        self.assertContains(resp, 'id="gallery-image-grid"')
+        self.assertContains(resp, 'id="gallery-video-deck"')
+        self.assertContains(resp, 'id="gallery-audio-deck"')
+        self.assertContains(resp, "https://example.com/photo.png")
+        self.assertContains(resp, "https://example.com/movie.mp4")
+        self.assertContains(resp, "https://example.com/podcast.mp3")
+        # MIME filter tabs route through ?type= selectors.
+        self.assertContains(resp, "?type=image")
+        self.assertContains(resp, "?type=video")
+        self.assertContains(resp, "?type=audio")
+        # Lightbox triggers from the image masonry.
+        self.assertContains(resp, "openLightbox(")
+        # Required global + page scripts mounted.
+        self.assertContains(resp, "gallery_player.js")
         self.assertContains(resp, "trust_lens.js")
+        self.assertContains(resp, "contact_manager.js")
         self.assertContains(resp, "circle_feed_filter.js")
 
-
-    def test_gallery_renders_layer2_bottom_track_circle_filters(self):
+    def test_gallery_right_rail_renders_discovery_hub(self):
         with patch("apps.core.views.fetch_media_assets", return_value=[]):
             resp = self.client.get(reverse("gallery"))
 
         self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, 'id="circle-filter-group"')
-        self.assertContains(resp, 'data-circle="global"')
-        self.assertContains(resp, 'data-circle="following"')
-        self.assertContains(resp, 'data-circle="inner"')
-        self.assertContains(resp, 'data-circle="mutual"')
-        self.assertContains(resp, 'id="active-circle-label"')
+        # Standard right discovery rail (same hub as /feed).
+        self.assertContains(resp, 'id="relay-health-widget"')
+        self.assertContains(resp, 'id="live-rooms-card"')
+        self.assertContains(resp, 'id="trending-global-list"')
+        self.assertContains(resp, 'id="sovereign-creators-list"')
+        # The left navigation rail and stream column mount from base.html.
+        self.assertContains(resp, 'id="left-rail"')
+        self.assertContains(resp, 'id="stream-column"')
+
+
+class GalleryThreePaneSmokeTest(TestCase):
+    """Smoke-level assertions guarding the canonical 3-pane gallery mount."""
+
+    def test_gallery_empty_state_is_contained_in_stream_column(self):
+        with patch("apps.core.views.fetch_media_assets", return_value=[]):
+            resp = self.client.get(reverse("gallery"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "No media discovered in this stream.")
+
+    def test_gallery_lightbox_include_renders_lb_controls(self):
+        with patch("apps.core.views.fetch_media_assets", return_value=[]):
+            resp = self.client.get(reverse("gallery"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'id="lbMediaPane"')
+        self.assertContains(resp, 'id="lbAuthor"')
+        self.assertContains(resp, 'id="lbCaption"')
+        self.assertContains(resp, 'id="lbMeta"')
+        self.assertContains(resp, 'id="lbPrev"')
+        self.assertContains(resp, 'id="lbNext"')
 
 
 class GalleryCardModernizationAndAttributionTest(TestCase):
@@ -447,16 +489,27 @@ class GalleryCardModernizationAndAttributionTest(TestCase):
         self.assertNotContains(resp, ">Verified<")
         self.assertNotContains(resp, "bg-green-900/50 text-green-300")
 
-    def test_author_name_nip05_and_trust_lens_slot_render_in_card_footer(self):
+    def test_link_deck_identity_renders_name_and_handle_on_cards(self):
+        from django.contrib.auth import get_user_model
+        from apps.core.models import UserLinkDeck
+
+        pk = "44" * 32
+        deck_user = get_user_model().objects.create_user(username=f"did:iyou:0x{pk}")
+        UserLinkDeck.objects.create(
+            user=deck_user,
+            handle="creatorprime",
+            display_name="CreatorPrime",
+            avatar_url="https://example.com/avatar.jpg",
+        )
         notes = [
             {
                 "id": "note_attributed",
                 "media_type": "image",
                 "file_url": "https://example.com/art.png",
                 "mime_type": "image/png",
-                "pubkey": "44" * 32,
-                "pubkey_hex": "44" * 32,
-                "author_did": "did:key:z6Mkcustomkey",
+                "pubkey": pk,
+                "pubkey_hex": pk,
+                "author_did": f"did:iyou:0x{pk}",
                 "tags_json": '[]',
                 "kind": 1063,
                 "content": "Digital Sovereign Art",
@@ -481,9 +534,9 @@ class GalleryCardModernizationAndAttributionTest(TestCase):
             resp = self.client.get(reverse("gallery"))
 
         self.assertEqual(resp.status_code, 200)
+        # Canonical Identity Translation Service keys surface on the card.
         self.assertContains(resp, "CreatorPrime")
-        self.assertContains(resp, "creator@iyou.me")
-        self.assertContains(resp, 'class="author-badge-slot"')
-        self.assertContains(resp, f'data-author-slot="{"44" * 32}"')
+        self.assertContains(resp, "@creatorprime")
+        self.assertContains(resp, 'href="/@creatorprime"')
 
 

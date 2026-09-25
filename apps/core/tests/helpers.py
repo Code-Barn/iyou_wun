@@ -34,7 +34,19 @@ def make_claims(sub=None):
     return {"sub": sub or SAMPLE_DID}
 
 
-def make_event(eid, kind, pubkey=None, content="", tags=None, created_at=None):
+PLATFORM_LOCAL_RELAY = "ws://127.0.0.1:9003"
+
+
+def make_event(eid, kind, pubkey=None, content="", tags=None, created_at=None, relay_sources=None):
+    """Build a relay_req-style raw event dict.
+
+    relay_req stamps every event it returns with _relay_sources/_primary_relay,
+    so make_event models that metadata by default. `relay_sources=None` means
+    "came from the platform local relay" (the production default for feed
+    events); pass an explicit list such as ["wss://relay.nostr.band"] — or an
+    empty list for no relay origin — to model genuinely external events.
+    """
+    sources = [PLATFORM_LOCAL_RELAY] if relay_sources is None else relay_sources
     return {
         "id": eid,
         "kind": kind,
@@ -42,4 +54,6 @@ def make_event(eid, kind, pubkey=None, content="", tags=None, created_at=None):
         "content": content,
         "tags": tags or [],
         "created_at": created_at or 1000000,
+        "_relay_sources": list(sources),
+        "_primary_relay": sources[0] if sources else "",
     }

@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import ssl
+import time
 import urllib.request
 import urllib.error
 from unittest.mock import patch, MagicMock
@@ -836,18 +837,121 @@ class DashboardProfileTest(TestCase):
             filter_obj = mock_relay_req.call_args[0][0]
             self.assertNotIn("authors", filter_obj)
 
-    def test_api_feed_iyou_maintains_scoped_authors_requirement(self):
-        # Phase 7 + strict membership: the iyou circle keeps the ecosystem
-        # author-scope and NO longer issues an inclusive #t: iyou tag query, so
-        # external notes can never leak into the sovereign stream.
+    def test_api_feed_iyou_issues_no_authors_scope_and_filters_by_envelope(self):
+        # Ecosystem envelope membership: the iyou circle no longer restricts the
+        # relay query to registered ecosystem authors. Membership is enforced by
+        # the post-query envelope filter (origin/tags), so non-local ecosystem
+        # peers can surface. No inclusive #t iyou tag query is ever issued.
         with patch("apps.core.views.get_ecosystem_pubkeys", return_value={"pk1", "pk2"}), patch("apps.core.views.relay_req", return_value={}) as mock_relay_req:
             response = self.client.get(reverse("api_feed") + "?circle=iyou")
             self.assertEqual(response.status_code, 200)
             self.assertTrue(mock_relay_req.called)
             self.assertEqual(len(mock_relay_req.call_args_list), 1)
             main_filter = mock_relay_req.call_args_list[0][0][0]
-            self.assertEqual(set(main_filter.get("authors")), {"pk1", "pk2"})
+            self.assertNotIn("authors", main_filter)
             self.assertNotIn("#t", main_filter)
+
+    def test_api_feed_iyou_retains_envelope_notes_from_non_db_authors(self):
+        # A peer never registered on this node qualifies for the iyou circle via
+        # the ecosystem envelope (client tag / platform origin), proving the
+        # post-query filter no longer depends on the local ecosystem DB.
+        external_pk = "a" * 64
+        relay_events = {
+            "peer_client_iyou_wun": make_event(
+                "peer_client_iyou_wun", 1, pubkey=external_pk,
+                content="peer via iyou_wun client",
+                tags=[["client", "iyou_wun"]],
+                relay_sources=["wss://relay.nostr.band"],
+            ),
+            "peer_platform_origin": make_event(
+                "peer_platform_origin", 1, pubkey=external_pk,
+                content="peer via platform relay",
+                relay_sources=["wss://relay.iyou.me"],
+            ),
+            "peer_bare": make_event(
+                "peer_bare", 1, pubkey=external_pk,
+                content="peer bare external",
+                relay_sources=["wss://relay.nostr.band"],
+            ),
+        }
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value=set()), patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("api_feed") + "?circle=iyou")
+        self.assertEqual(response.status_code, 200)
+        note_ids = [n["id"] for n in response.json().get("notes", [])]
+        self.assertIn("peer_client_iyou_wun", note_ids)
+        self.assertIn("peer_platform_origin", note_ids)
+        self.assertNotIn("peer_bare", note_ids)
+
+    def test_feed_view_iyou_retains_envelope_notes_from_non_db_authors(self):
+        external_pk = "b" * 64
+        relay_events = {
+            "ssr_client_iyou_wun": make_event(
+                "ssr_client_iyou_wun", 1, pubkey=external_pk,
+                content="SSR peer via iyou_wun client",
+                tags=[["client", "iyou_wun"]],
+                relay_sources=["wss://relay.nostr.band"],
+            ),
+            "ssr_bare": make_event(
+                "ssr_bare", 1, pubkey=external_pk,
+                content="SSR bare external",
+                relay_sources=["wss://relay.nostr.band"],
+            ),
+        }
+        with patch("apps.core.views.get_ecosystem_pubkeys", return_value=set()), patch("apps.core.views.relay_req", return_value=relay_events):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "SSR peer via iyou_wun client")
+        self.assertNotContains(response, "SSR bare external")
+
+    def test_relay_req_global_settle_captures_wan_delay(self):
+        # Mode-aware settle: with GLOBAL_SETTLE_TIMEOUT the 200ms WAN arrival
+        # must be captured even though the pinned local relay answers at ~2ms
+        # (previously the hardcoded 50ms settle would cancel it).
+        from apps.core import views as core_views
+
+        def fake_connect(relay_url, sub_id, filter_obj, timeout):
+            if relay_url == core_views.LOCAL_RELAY:
+                time.sleep(0.002)
+                return {"ev_local_1": {"id": "ev_local_1", "pubkey": "a" * 64}}
+            time.sleep(0.2)
+            return {"ev_wan_1": {"id": "ev_wan_1", "pubkey": "b" * 64}}
+
+        with patch("apps.core.views._connect_relay", side_effect=fake_connect):
+            start = time.time()
+            events = core_views.relay_req(
+                {"kinds": [1], "limit": 5},
+                relay_urls=[core_views.LOCAL_RELAY, "wss://relay.wan-test.example"],
+                timeout=2.5,
+                settle_timeout=core_views.GLOBAL_SETTLE_TIMEOUT,
+            )
+            elapsed = time.time() - start
+
+        self.assertIn("ev_local_1", events)
+        self.assertIn("ev_wan_1", events)
+        self.assertLess(elapsed, 1.0 + 0.5)
+
+    def test_relay_req_total_does_not_exceed_ceiling(self):
+        # Anti-starvation: even with the long Global settle requested and all
+        # relays wedged, the total wall-clock run never exceeds the ceiling.
+        from apps.core import views as core_views
+
+        def fake_slow(relay_url, sub_id, filter_obj, timeout):
+            # Respect the worker-level self-bound the real _connect_relay uses.
+            time.sleep(timeout)
+            return {}
+
+        with patch("apps.core.views._connect_relay", side_effect=fake_slow):
+            start = time.time()
+            events = core_views.relay_req(
+                {"kinds": [1], "limit": 5},
+                relay_urls=[core_views.LOCAL_RELAY, "wss://relay.a-test.example", "wss://relay.b-test.example"],
+                timeout=2.5,
+                settle_timeout=core_views.GLOBAL_SETTLE_TIMEOUT,
+            )
+            elapsed = time.time() - start
+
+        self.assertEqual(events, {})
+        self.assertLessEqual(elapsed, core_views.TOTAL_RELAY_CEILING + 0.5)
 
 
 
@@ -2289,6 +2393,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
             "bound_global_note": make_event(
                 "bound_global_note", 1, pubkey=bob_pk,
                 content="bob #bob_global tag", tags=[["t", "bob_global"]],
+                relay_sources=["wss://relay.nostr.band"],
             ),
         }
         with patch("apps.core.views.relay_req", return_value=relay_events):
@@ -2398,7 +2503,7 @@ class FeedModernizationAndExternalAttributionTest(TestCase):
 
         captured_filter = {}
 
-        def mock_relay_req(filter_obj, relay_urls=None, timeout=10, deadline=None):
+        def mock_relay_req(filter_obj, relay_urls=None, timeout=10, deadline=None, settle_timeout=None):
             captured_filter.update(filter_obj)
             return {
                 "note_iyou": make_event("note_iyou", 1, pubkey="3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d", content="Local ecosystem note"),
@@ -3166,7 +3271,7 @@ class BookmarkEndpointsTests(TestCase):
         remote_id = "c" * 64
         Bookmark.objects.create(user=self.user, event_id=local_id)
 
-        def fake_relay_req(filter_obj, relay_urls=None, timeout=1.0, deadline=None):
+        def fake_relay_req(filter_obj, relay_urls=None, timeout=1.0, deadline=None, settle_timeout=None):
             if "kinds" in filter_obj and 10004 in filter_obj["kinds"]:
                 return {
                     "mesh_list_1": {

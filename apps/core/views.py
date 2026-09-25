@@ -650,25 +650,31 @@ def get_iyou_pubkeys():
     return list(pubkeys)
 
 
-def calculate_trending_tags(events: list[dict], iyou_pubkeys: set[str] | None = None) -> tuple[list[dict], list[dict]]:
+def calculate_trending_tags(events: list[dict], iyou_pubkeys: set[str] | None = None, iyou_event_ids: set[str] | None = None) -> tuple[list[dict], list[dict]]:
     """Aggregate real #t tag frequencies from a deduplicated renderable event batch.
 
     Returns a (global_tags, iyou_tags) tuple of formatted tag metadata ordered by
     descending frequency. No mock or hardcoded fallback numbers — an empty event
     batch (or a batch with no #t tags) produces empty tag lists.
+
+    iyou classification is envelope-based: pass `iyou_event_ids` (events matching
+    is_ecosystem_envelope) as the authoritative membership signal; `iyou_pubkeys`
+    remains accepted for legacy callers.
     """
     global_counts = Counter()
     iyou_counts = Counter()
     iyou_keys = iyou_pubkeys or set()
+    iyou_ids = iyou_event_ids or set()
 
     for ev in events:
         pk = ev.get("pubkey", "")
         tags = ev.get("tags", [])
+        in_iyou_envelope = bool(ev.get("id") in iyou_ids or pk in iyou_keys)
         for t in tags:
             if isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] == "t" and t[1].strip():
                 tag_name = t[1].strip().lower().lstrip("#")
                 global_counts[tag_name] += 1
-                if pk in iyou_keys:
+                if in_iyou_envelope:
                     iyou_counts[tag_name] += 1
 
     def format_tags(counter: Counter, limit: int = 6) -> list[dict]:
@@ -835,21 +841,27 @@ class FeedView(TemplateView):
             dev_param = self.request.GET.get("dev")
             dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
 
+            # Mode-aware settle: Global reserves the long WAN settle window so
+            # late-arriving relay events are captured; iyou/sovereign stay fast.
+            settle_budget = GLOBAL_SETTLE_TIMEOUT if circle == "global" else DEFAULT_SETTLE_TIMEOUT
+
             if instant_shell:
                 query_relays = relays
                 notes = []
                 feed_data = {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
             elif circle == "iyou":
                 ecosystem_pks = list(get_ecosystem_pubkeys())
-                # Strict cryptographic membership: the iyou circle only ever
-                # queries the node's registered ecosystem authors. No #t tag
-                # merge, so external notes tagged #iyou can never leak in.
+                # Ecosystem envelope membership: events qualify via their #iyou /
+                # iyou_* client tags or platform-relay origin, so non-local peers
+                # can surface without being registered on this node's DB. No
+                # authors= filter at query time — the post-filter below applies
+                # the envelope invariants.
                 query_relays = aggregate_author_outbox_relays(ecosystem_pks, relays)
                 feed_data = fetch_unified_feed(
-                    authors=ecosystem_pks or None,
                     relay_urls=query_relays,
                     deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT,
                     dev_mode=dev_mode,
+                    settle_timeout=settle_budget,
                 )
             elif circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(
@@ -858,28 +870,28 @@ class FeedView(TemplateView):
                 if contacts:
                     query_relays = aggregate_author_outbox_relays(contacts, relays)
                     feed_data = fetch_unified_feed(
-                        authors=contacts, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                        authors=contacts, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
                     )
                 else:
                     query_relays = aggregate_author_outbox_relays(CURATED_AUTHORS, relays)
                     feed_data = fetch_unified_feed(
-                        authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                        authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
                     )
             elif circle in ("following", "network") and not user_pubkey:
                 query_relays = aggregate_author_outbox_relays(CURATED_AUTHORS, relays)
                 feed_data = fetch_unified_feed(
-                    authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                    authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
                 )
             else:
                 query_relays = relays
                 feed_data = fetch_unified_feed(
-                    relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode
+                    relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
                 )
 
             notes = feed_data["roots"]
             if circle == "iyou" and not dev_mode:
-                ecosystem_keys = get_ecosystem_pubkeys()
-                notes = [n for n in notes if (n.get("pubkey") or "").lower() in ecosystem_keys]
+                from .nip10 import is_ecosystem_envelope
+                notes = [n for n in notes if is_ecosystem_envelope(n)]
             if dep_ctx.get("is_dependent"):
                 notes = filter_feed_for_dependent(
                     notes,
@@ -925,9 +937,10 @@ class FeedView(TemplateView):
         context["suggested_creators"] = list(creators_qs[:4])
 
         notes_for_trending = context.get("notes") or []
-        iyou_pubkeys = set(get_iyou_pubkeys())
+        from .nip10 import is_ecosystem_envelope
+        iyou_event_ids = {e.get("id") for e in notes_for_trending if is_ecosystem_envelope(e)}
         trending_global, trending_iyou = calculate_trending_tags(
-            notes_for_trending, iyou_pubkeys=iyou_pubkeys
+            notes_for_trending, iyou_event_ids=iyou_event_ids
         )
 
         context["trending_tags_iyou"] = trending_iyou
@@ -1282,15 +1295,17 @@ def api_feed(request):
         filter_obj["#t"] = [clean_tag]
 
     feed_deadline = time.time() + 4.0
+    # Mode-aware settle: the Global feed reserves the long WAN settle window so
+    # primal/nostr.band arrivals aren't cut off by the local relay's ~2ms reply;
+    # sovereign/iyou circles keep the fast 50ms return.
+    settle_budget = GLOBAL_SETTLE_TIMEOUT if circle == "global" else DEFAULT_SETTLE_TIMEOUT
 
     if circle == "iyou":
-        # Strict cryptographic membership: only registered ecosystem authors
-        # participate in the iyou circle. No #t tag merge — external notes
-        # tagged #iyou can never surface in the sovereign stream.
-        ecosystem_pks = list(get_ecosystem_pubkeys())
+        # Ecosystem envelope membership: events qualify via #iyou / iyou_* client
+        # tags or their platform-relay origin (post-filter below), so non-local
+        # ecosystem peers surface without being registered on this node's DB. No
+        # authors= restriction at query time.
         tag_query = None
-        if ecosystem_pks:
-            filter_obj["authors"] = ecosystem_pks
     else:
         tag_query = None
         if circle in ("following", "network") and user_pubkey:
@@ -1307,6 +1322,7 @@ def api_feed(request):
         relay_urls=relays,
         timeout=2.5,
         deadline=feed_deadline,
+        settle_timeout=settle_budget,
     )
 
     if tag_query:
@@ -1315,6 +1331,7 @@ def api_feed(request):
             relay_urls=relays,
             timeout=2.5,
             deadline=feed_deadline,
+            settle_timeout=settle_budget,
         )
         raw_events = _merge_events_by_id(raw_events, tagged_events)
 
@@ -1356,6 +1373,7 @@ def api_feed(request):
             relay_urls=relays,
             timeout=1.5,
             deadline=feed_deadline,
+            settle_timeout=settle_budget,
         )
         for e in profile_events.values():
             pk = e.get("pubkey", "")
@@ -1366,23 +1384,21 @@ def api_feed(request):
 
     feed_data = process_into_feed(raw_events, profiles, max_items=limit, dev_mode=dev_mode)
     try:
-        feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline)
+        feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline, settle_timeout=settle_budget)
     except TypeError:
         feed_data["roots"] = attach_quoted_notes(feed_data["roots"], relay_urls=relays)
 
     try:
-        feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline)
+        feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays, timeout=1.5, deadline=feed_deadline, settle_timeout=settle_budget)
     except TypeError:
         feed_data["roots"] = attach_social_counts(feed_data["roots"], relay_urls=relays)
 
     if circle == "iyou" and not dev_mode:
-        ecosystem_keys = get_ecosystem_pubkeys()
-        feed_data["roots"] = [
-            n for n in feed_data["roots"] if (n.get("pubkey") or "").lower() in ecosystem_keys
-        ]
+        from .nip10 import is_ecosystem_envelope
+        feed_data["roots"] = [n for n in feed_data["roots"] if is_ecosystem_envelope(n)]
         if isinstance(feed_data.get("replies"), dict):
             feed_data["replies"] = {
-                pid: [r for r in rs if (r.get("pubkey") or "").lower() in ecosystem_keys]
+                pid: [r for r in rs if is_ecosystem_envelope(r)]
                 for pid, rs in feed_data.get("replies", {}).items()
             }
 
@@ -1493,9 +1509,10 @@ def api_feed(request):
     oldest_timestamp = min((n["created_at_epoch"] for n in roots if n.get("created_at_epoch")), default=None)
     has_more = bool(roots) and len(roots) >= limit
 
-    iyou_pubkeys = set(get_ecosystem_pubkeys())
+    from .nip10 import is_ecosystem_envelope
+    iyou_event_ids = {e.get("id") for e in feed_data["roots"] if is_ecosystem_envelope(e)}
     trending_tags_global, trending_tags_iyou = calculate_trending_tags(
-        feed_data["roots"], iyou_pubkeys=iyou_pubkeys
+        feed_data["roots"], iyou_event_ids=iyou_event_ids
     )
 
     return JsonResponse({
@@ -2473,6 +2490,17 @@ FEED_OUTBOX_TIMEOUT = 0.8
 # via /api/feed/ (the dedicated asynchronous batch payload supplier).
 INITIAL_FEED_SHELL_TIMEOUT = 1.2
 
+# Mode-aware relay settle windows: the first-competed relay (the pinned local
+# loopback) answers in a few ms, so sovereign/iyou queries hand back in ~50ms.
+# The Global feed instead spends up to GLOBAL_SETTLE_TIMEOUT in the settle
+# window so WAN relays (primal, nostr.band) get time to actually deliver.
+DEFAULT_SETTLE_TIMEOUT = 0.05  # 50ms for iyou / sovereign / local queries
+GLOBAL_SETTLE_TIMEOUT = 0.75   # 750ms for Global feed to allow WAN relay arrival
+TOTAL_RELAY_CEILING = 1.0      # Hard upper limit across all waits
+# Max relays fanned out per query: matching worker count means every task starts
+# at t=0, so the executor drain (wedged relays) can never extend past the ceiling.
+MAX_RELAY_FANOUT = 8
+
 
 
 CURATED_AUTHORS = [
@@ -2556,14 +2584,17 @@ def order_relays(relay_urls):
     return ordered
 
 
-def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=None):
+def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=None, settle_timeout=None):
     """Query multiple relays concurrently with ThreadPoolExecutor, aggregating all events.
 
     Replaces sequential failover with concurrent fan-out across all configured relays.
     Enforces a strict aggregate deadline (max 1.5s across all relays, or earlier if `deadline`
-    is specified). Returns as soon as the first responsive relay answers; a brief settle
-    window collects any relay that finishes just after the winner, then all stragglers are
-    cancelled and deduplicated events are returned immediately.
+    is specified), hard-capped by TOTAL_RELAY_CEILING across every wait. Returns as soon as
+    the first responsive relay answers, then spends a `settle_timeout` window (default 50ms;
+    GLOBAL_SETTLE_TIMEOUT for the Global feed) collecting any relay that finishes just after
+    the winner; all remaining stragglers are cancelled and deduplicated events are returned
+    immediately. The settle window shrinks dynamically so the first wait + settle never
+    exceeds TOTAL_RELAY_CEILING.
     """
     if sub_id is None:
         sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
@@ -2583,31 +2614,64 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
     if not relay_urls:
         return {}
 
-    # Strict aggregate deadline: max 1.5s across all relays
+    # Resolve the requested settle budget: callers pass GLOBAL_SETTLE_TIMEOUT
+    # for WAN-heavy queries, everything else falls back to the fast 50ms window.
+    settle_budget = DEFAULT_SETTLE_TIMEOUT if settle_timeout is None else max(0.0, settle_timeout)
+
+    # Strict aggregate deadline: max 1.5s across all relays, hard-capped by
+    # TOTAL_RELAY_CEILING so a settle-heavy query can never starve a worker.
     now = time.time()
-    max_aggregate = 1.5
     if deadline is not None:
-        remaining = deadline - now
-        effective_timeout = max(0.0, min(max_aggregate, remaining, timeout))
+        remaining_deadline = max(0.0, deadline - now)
+        effective_timeout = min(1.5, timeout, remaining_deadline, TOTAL_RELAY_CEILING)
     else:
-        effective_timeout = min(max_aggregate, timeout)
+        effective_timeout = min(1.5, timeout, TOTAL_RELAY_CEILING)
 
     if effective_timeout <= 0.05:
         return {}
 
+    # Bound the fan-out: with worker count == relay count every task starts
+    # immediately, so a wedged relay drains inside its own self-bound rather
+    # than queueing a task that only starts after a worker frees (which would
+    # push the total past TOTAL_RELAY_CEILING).
+    relay_urls = relay_urls[:MAX_RELAY_FANOUT]
     aggregated_events = {}
-    max_workers = min(len(relay_urls), 5)
+    max_workers = len(relay_urls)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {
             executor.submit(_connect_relay, url, sub_id, filter_obj, min(effective_timeout, 1.0)): url
             for url in relay_urls
         }
+        start_time = time.time()
         done, not_done = concurrent.futures.wait(
             future_to_url.keys(),
             timeout=effective_timeout,
             return_when=concurrent.futures.FIRST_COMPLETED,
         )
+        done = set(done)
+
+        # Dynamic settle window: only the time still available inside the hard
+        # ceiling is spent on stragglers, so a GLOBAL_SETTLE_TIMEOUT request
+        # captures late-arriving WAN relays without exceeding the cap.
+        elapsed = time.time() - start_time
+        remaining_ceiling = max(0.0, TOTAL_RELAY_CEILING - elapsed)
+        actual_settle = min(settle_budget, remaining_ceiling)
+
+        if not_done and actual_settle > 0.01:
+            more_done, not_done = concurrent.futures.wait(
+                not_done,
+                timeout=actual_settle,
+                return_when=concurrent.futures.ALL_COMPLETED,
+            )
+            done.update(more_done)
+
+        # Cancel any futures still pending; already-running workers self-bound
+        # to their own `timeout` (<= 1.0s) so the executor drain stays inside
+        # the ceiling.
+        for future in future_to_url:
+            if future not in done:
+                future.cancel()
 
         for future in done:
             url = future_to_url[future]
@@ -2633,42 +2697,6 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
                             sources.append(url)
             except Exception as e:
                 logger.debug("relay_req concurrent task failed on %s: %s", url, e)
-
-        if not_done:
-            # Brief settle window: collect any relay that finished just after the
-            # first responder before cancelling the stragglers.
-            more_done, _ = concurrent.futures.wait(
-                not_done,
-                timeout=0.05,
-                return_when=concurrent.futures.ALL_COMPLETED,
-            )
-            for future in more_done:
-                url = future_to_url[future]
-                try:
-                    events = future.result()
-                    if isinstance(events, dict):
-                        items = events.items()
-                    elif isinstance(events, list):
-                        items = [(ev.get("id"), ev) for ev in events if isinstance(ev, dict) and ev.get("id")]
-                    else:
-                        items = []
-
-                    for eid, ev in items:
-                        if not eid or not isinstance(ev, dict):
-                            continue
-                        if eid not in aggregated_events:
-                            ev["_relay_sources"] = [url]
-                            ev["_primary_relay"] = url
-                            aggregated_events[eid] = ev
-                        else:
-                            sources = aggregated_events[eid].setdefault("_relay_sources", [])
-                            if url not in sources:
-                                sources.append(url)
-                except Exception as e:
-                    logger.debug("relay_req settle task failed on %s: %s", url, e)
-
-        for future in not_done:
-            future.cancel()
 
     return aggregated_events
 
@@ -2915,7 +2943,7 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
     }
 
 
-def attach_social_counts(notes, relay_urls=None, timeout=10, deadline=None):
+def attach_social_counts(notes, relay_urls=None, timeout=10, deadline=None, settle_timeout=None):
     """
     Unified batch social-counts query.
 
@@ -2937,7 +2965,7 @@ def attach_social_counts(notes, relay_urls=None, timeout=10, deadline=None):
         "limit": 800,
     }
 
-    raw_events = relay_req(filter_obj, relay_urls=relays, timeout=timeout, deadline=deadline)
+    raw_events = relay_req(filter_obj, relay_urls=relays, timeout=timeout, deadline=deadline, settle_timeout=settle_timeout)
     events = list(raw_events.values()) if isinstance(raw_events, dict) else (raw_events if isinstance(raw_events, list) else [])
     reply_counts = {rid: 0 for rid in root_ids}
     repost_counts = {rid: 0 for rid in root_ids}
@@ -3006,7 +3034,7 @@ def attach_reaction_counts(notes, relay_urls=None):
     return attach_social_counts(notes, relay_urls=relay_urls)
 
 
-def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None):
+def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None, settle_timeout=None):
     """Batch-fetch NIP-18/NIP-27 quoted events and attach enriched `quoted_note` to each root.
 
     Notes with a `quoted_id` get their referenced event fetched (and profile
@@ -3033,7 +3061,7 @@ def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None):
         return roots
 
     try:
-        raw_quoted = relay_req({"ids": list(quoted_ids), "limit": len(quoted_ids)}, relay_urls=relay_urls, timeout=timeout, deadline=deadline) or {}
+        raw_quoted = relay_req({"ids": list(quoted_ids), "limit": len(quoted_ids)}, relay_urls=relay_urls, timeout=timeout, deadline=deadline, settle_timeout=settle_timeout) or {}
     except Exception:
         raw_quoted = {}
 
@@ -3049,7 +3077,7 @@ def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None):
     profiles = {}
     if authors:
         try:
-            profile_events = relay_req({"kinds": [0], "authors": list(authors)[:100]}, relay_urls=relay_urls, timeout=timeout, deadline=deadline) or {}
+            profile_events = relay_req({"kinds": [0], "authors": list(authors)[:100]}, relay_urls=relay_urls, timeout=timeout, deadline=deadline, settle_timeout=settle_timeout) or {}
         except Exception:
             profile_events = {}
         for e in profile_events.values():
@@ -3110,7 +3138,7 @@ def _merge_events_by_id(*event_batches):
     return merged
 
 
-def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None, dev_mode=False):
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None, dev_mode=False, settle_timeout=None):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
     Phase 1: Fetch kinds [1, 1063, 1111, 30023] with optional authors filter.
@@ -3123,6 +3151,9 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
     still surface in the iyou circle.
 
     `deadline` optionally bounds the total wall-clock time (Phase 34 instant shell).
+
+    `settle_timeout` is forwarded to relay_req so WAN-heavy queries (Global feed)
+    can reserve a longer settle window inside the total ceiling.
     """
     if authors is not None and not authors and not tags:
         return {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
@@ -3131,7 +3162,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
     if authors:
         filter_obj["authors"] = authors
 
-    raw_events = relay_req(filter_obj, relay_urls=relay_urls, timeout=timeout, deadline=deadline)
+    raw_events = relay_req(filter_obj, relay_urls=relay_urls, timeout=timeout, deadline=deadline, settle_timeout=settle_timeout)
 
     # Inclusive tag query: fetch events carrying the given tag(s) alongside the
     # authors query and merge/deduplicate by event id.
@@ -3141,7 +3172,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
             if isinstance(values, (list, tuple)) and values:
                 # NIP-01 tag filters use the "#<tagname>" form (e.g. #t).
                 tagged_filter["#" + str(key).lstrip("#")] = list(values)
-        tagged_events = relay_req(tagged_filter, relay_urls=relay_urls, timeout=timeout, deadline=deadline)
+        tagged_events = relay_req(tagged_filter, relay_urls=relay_urls, timeout=timeout, deadline=deadline, settle_timeout=settle_timeout)
         raw_events = _merge_events_by_id(raw_events, tagged_events)
 
     # Filter out non-renderable events (empty notes, P2P discovery beacons) unless in dev_mode
@@ -3165,6 +3196,7 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
             relay_urls=relay_urls,
             timeout=timeout,
             deadline=deadline,
+            settle_timeout=settle_timeout,
         )
         for e in profile_events.values():
             pk = e.get("pubkey", "")

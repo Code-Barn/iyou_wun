@@ -252,15 +252,45 @@ def is_renderable_note(event: dict) -> bool:
 
 
 def has_iyou_tag(tags) -> bool:
-    """Determine if a tag list includes an #iyou topic or client tag."""
+    """Determine if a tag list includes an #iyou topic or ecosystem client tag."""
     if not tags:
         return False
     for t in tags:
         if isinstance(t, (list, tuple)) and len(t) >= 2:
             key = str(t[0]).strip().lower()
             val = str(t[1]).strip().lower()
-            if (key == "t" and val == "iyou") or (key == "client" and val == "iyou"):
+            if (key == "t" and val == "iyou") or (
+                key == "client" and (val == "iyou" or val.startswith("iyou_") or val.startswith("omni_social"))
+            ):
                 return True
+    return False
+
+
+# Official ecosystem platform relays: events sourced from these are iyou mesh
+# traffic regardless of the publisher being registered on this node's DB.
+IYOU_PLATFORM_RELAYS = {"ws://127.0.0.1:9003", "wss://relay.iyou.me"}
+
+
+def is_ecosystem_envelope(event) -> bool:
+    """Determines if a Nostr event belongs to the iyou ecosystem:
+    carries #iyou tag, iyou_* / omni_social client tag, or was received
+    from an official ecosystem platform relay.
+    """
+    if not isinstance(event, dict):
+        return False
+    for t in event.get("tags") or []:
+        if isinstance(t, (list, tuple)) and len(t) >= 2:
+            key, val = str(t[0]).strip().lower(), str(t[1]).strip().lower()
+            if (key == "t" and val == "iyou") or (
+                key == "client" and (val == "iyou" or val.startswith("iyou_") or val.startswith("omni_social"))
+            ):
+                return True
+    origin = str(event.get("_primary_relay") or event.get("_relay_url") or "").lower()
+    if origin in IYOU_PLATFORM_RELAYS:
+        return True
+    for r in event.get("_relay_sources") or []:
+        if str(r).lower() in IYOU_PLATFORM_RELAYS:
+            return True
     return False
 
 
@@ -772,9 +802,8 @@ def build_thread_tree(raw_events, profiles=None):
     if profiles is None:
         profiles = {}
 
-    from .views import get_iyou_pubkeys, hex_to_npub, resolve_author_did
+    from .views import hex_to_npub, resolve_author_did
     from .identity import decorate_author_identity
-    iyou_native_set = set(get_iyou_pubkeys())
 
     def _ts_to_datetime(ts):
         from datetime import datetime
@@ -807,7 +836,7 @@ def build_thread_tree(raw_events, profiles=None):
             "npub": hex_to_npub(pk) if pk else "",
             "nip05": prof.get("nip05") or "",
             "lud16": prof.get("lud16") or "",
-            "is_iyou_native": bool(pk in iyou_native_set),
+            "is_iyou_native": bool(is_ecosystem_envelope(e)),
             "has_nip05": bool(prof.get("nip05")),
             "content": e.get("content", ""),
             "created_at": dt_val,
@@ -836,7 +865,7 @@ def build_thread_tree(raw_events, profiles=None):
         note["relay_sources"] = note["_relay_sources"]
         note["primary_relay"] = note["_primary_relay"]
         note["filter_status"] = note["_filter_status"]
-        note["is_iyou_native"] = bool(e.get("is_iyou_native") or (pk in iyou_native_set))
+        note["is_iyou_native"] = bool(e.get("is_iyou_native") or is_ecosystem_envelope(e))
         note["is_iyou_circle"] = bool(note["is_iyou_native"] or has_iyou_tag(tags))
         return decorate_author_identity(extract_media_from_note(note))
 
@@ -936,7 +965,7 @@ def build_thread_tree(raw_events, profiles=None):
 
 def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pubkey=""):
     """Enrich a root event (Kind 1, 1063, 30023) with author profile."""
-    from .views import get_iyou_pubkeys, hex_to_npub, get_tag_value, resolve_author_did
+    from .views import hex_to_npub, get_tag_value, resolve_author_did
     from .identity import decorate_author_identity
     pk = e.get("pubkey", "")
     prof = profiles.get(pk, {})
@@ -961,7 +990,7 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         "npub": hex_to_npub(pk) if pk else "",
         "nip05": prof.get("nip05") or "",
         "lud16": prof.get("lud16") or "",
-        "is_iyou_native": bool(pk and pk in set(get_iyou_pubkeys())),
+        "is_iyou_native": bool(is_ecosystem_envelope(e)),
         "has_nip05": bool(prof.get("nip05")),
         "content": e.get("content", ""),
         "created_at": dt_val,
@@ -990,7 +1019,7 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
     note["relay_sources"] = note["_relay_sources"]
     note["primary_relay"] = note["_primary_relay"]
     note["filter_status"] = note["_filter_status"]
-    note["is_iyou_native"] = bool(e.get("is_iyou_native") or (pk and pk in set(get_iyou_pubkeys())))
+    note["is_iyou_native"] = bool(e.get("is_iyou_native") or is_ecosystem_envelope(e))
     note["is_iyou_circle"] = bool(note["is_iyou_native"] or has_iyou_tag(tags))
 
     if kind == 1063:
