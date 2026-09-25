@@ -880,7 +880,6 @@
 
         const feedContainer = getFeedContainer();
         if (isFeedPage && feedContainer && (!suppressCircleToasts || previousCircle !== activeCircle)) {
-            feedContainer.querySelectorAll(".feed-note-card").forEach(el => el.remove());
             const feedEmpty = document.getElementById("feed-empty-state");
             if (feedEmpty) { feedEmpty.style.display = "none"; feedEmpty.classList.add("hidden"); }
             const circleEmpty = document.getElementById("circle-empty-state");

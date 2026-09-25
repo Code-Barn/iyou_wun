@@ -301,7 +301,6 @@
                     if (sockets[i].readyState === WebSocket.OPEN) {
                         sockets[i].send(JSON.stringify(["CLOSE", subId]));
                     }
-                    sockets[i].close();
                 } catch (e) { /* ignore */ }
             }
         }

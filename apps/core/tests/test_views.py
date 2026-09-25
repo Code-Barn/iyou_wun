@@ -366,7 +366,7 @@ class GalleryViewTest(TestCase):
         self.assertContains(response, "Dashboard")
         self.assertContains(response, "Gallery")
 
-    def test_gallery_view_renders_plyr_and_categorized_decks(self):
+    def test_gallery_view_renders_category_decks_with_lightbox(self):
         pk = "a" * 64
         img_event = make_event("k1063_img", 1063, pubkey=pk, created_at=1700000100, tags=[
             ["url", "https://cdn.example.com/art.jpg"],
@@ -392,13 +392,14 @@ class GalleryViewTest(TestCase):
             response = self.client.get(reverse("gallery"))
             self.assertEqual(response.status_code, 200)
             self.assertTemplateUsed(response, "gallery.html")
-            self.assertContains(response, "plyr.css")
-            self.assertContains(response, "plyr.polyfilled.js")
-            self.assertContains(response, "plyr-video-container")
-            self.assertContains(response, "gallery-video-player")
-            self.assertContains(response, "audio-play-btn")
-            self.assertContains(response, "scrubber")
-            self.assertContains(response, "gallery-pagination-sentinel")
+            self.assertContains(response, "gallery-image-grid")
+            self.assertContains(response, "gallery-video-deck")
+            self.assertContains(response, "gallery-audio-deck")
+            self.assertContains(response, "https://cdn.example.com/art.jpg")
+            self.assertContains(response, "https://cdn.example.com/video.mp4")
+            self.assertContains(response, "https://cdn.example.com/podcast.mp3")
+            self.assertContains(response, 'id="lightbox-modal"')
+            self.assertContains(response, "openLightbox(")
             self.assertEqual(response.context["counts"]["images"], 1)
             self.assertEqual(response.context["counts"]["videos"], 1)
             self.assertEqual(response.context["counts"]["audio"], 1)
@@ -3850,13 +3851,13 @@ class Phase45SessionAndRelayHardeningTests(TestCase):
             self.assertTrue(data.get("success"))
 
     def test_default_relays_prioritizes_fast_endpoints(self):
-        from apps.core.views import DEFAULT_RELAYS
-        self.assertIn("wss://relay.damus.io", DEFAULT_RELAYS[:2])
-        self.assertIn("wss://nos.lol", DEFAULT_RELAYS[:2])
-        self.assertIn("wss://relay.primal.net", DEFAULT_RELAYS[:3])
-        self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:4])
-        self.assertIn("ws://127.0.0.1:9003", DEFAULT_RELAYS)
-        self.assertIn("wss://purplerelay.com", DEFAULT_RELAYS)
+        from apps.core.views import DEFAULT_RELAYS, EXCLUDED_RELAYS
+        self.assertEqual(DEFAULT_RELAYS[0], "ws://127.0.0.1:9003")
+        self.assertIn("wss://relay.primal.net", DEFAULT_RELAYS[:2])
+        self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:3])
+        self.assertIn("wss://relay.iyou.me", DEFAULT_RELAYS)
+        for excluded in EXCLUDED_RELAYS:
+            self.assertNotIn(excluded, DEFAULT_RELAYS)
 
 
 class Secp256k1PubkeyIngestionTests(TestCase):
@@ -4127,6 +4128,82 @@ class Secp256k1PubkeyIngestionTests(TestCase):
         self.assertEqual(response.status_code, 500)
         self.assertContains(response, "Internal Node Fault", status_code=500)
         self.assertContains(response, 'id="app-l2-ribbon"', status_code=500)
+
+
+class RelayFanoutStabilizationTests(TestCase):
+    def test_relay_req_locates_local_relay_first(self):
+        """relay_req pins LOCAL_RELAY at index 0 when fanning out."""
+        from apps.core.views import LOCAL_RELAY, relay_req
+
+        call_order = []
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            call_order.append(relay_url)
+            if relay_url == LOCAL_RELAY:
+                return {"e1": {"id": "e1", "content": "from local"}}
+            return {}
+
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            events = relay_req(
+                {"kinds": [1]},
+                relay_urls=[LOCAL_RELAY, "wss://relay.primal.net"],
+                timeout=1.0,
+            )
+        self.assertIn("e1", events)
+        self.assertTrue(call_order)
+        self.assertEqual(call_order[0], LOCAL_RELAY)
+
+    def test_excluded_relays_stripped_and_not_reinjected_by_floor(self):
+        """purplerelay.com/nos.lol are stripped by order_relays and never re-injected by ensure_min_relay_floor."""
+        from apps.core.views import EXCLUDED_RELAYS, LOCAL_RELAY, ensure_min_relay_floor, order_relays
+
+        dirty = [LOCAL_RELAY, "wss://purplerelay.com", "wss://nos.lol", "wss://relay.primal.net"]
+        ordered = order_relays(dirty)
+        for excluded in EXCLUDED_RELAYS:
+            self.assertNotIn(excluded, ordered)
+        self.assertEqual(ordered[0], LOCAL_RELAY)
+
+        # Force DEFAULT_RELAYS to contain excluded relays so the padding path
+        # must prove it skips them while still meeting the survivability floor.
+        with patch("apps.core.views.DEFAULT_RELAYS", [
+            "wss://purplerelay.com",
+            "wss://nos.lol",
+            "wss://relay.primal.net",
+            LOCAL_RELAY,
+            "wss://relay.nostr.band",
+        ]):
+            floored = ensure_min_relay_floor([LOCAL_RELAY])
+        for excluded in EXCLUDED_RELAYS:
+            self.assertNotIn(excluded, floored)
+        self.assertGreaterEqual(len(floored), 3)
+
+    def test_relay_req_returns_early_on_first_completed(self):
+        """relay_req returns the first responder's events without waiting for laggard relays."""
+        import time
+        from apps.core.views import LOCAL_RELAY, relay_req
+
+        def mock_connect(relay_url, sub_id, filter_obj, timeout):
+            if relay_url == LOCAL_RELAY:
+                return {"fast": {"id": "fast", "content": "local answered first"}}
+            time.sleep(0.6)
+            return {"slow": {"id": "slow", "content": "laggard answered late"}}
+
+        start = time.time()
+        with patch("apps.core.views._connect_relay", side_effect=mock_connect):
+            events = relay_req(
+                {"kinds": [1]},
+                relay_urls=[
+                    LOCAL_RELAY,
+                    "wss://relay.primal.net",
+                    "wss://relay.nostr.band",
+                    "wss://relay.iyou.me",
+                ],
+                timeout=1.5,
+            )
+        elapsed = time.time() - start
+        self.assertIn("fast", events)
+        self.assertNotIn("slow", events)
+        self.assertLess(elapsed, 1.0)
 
 
 

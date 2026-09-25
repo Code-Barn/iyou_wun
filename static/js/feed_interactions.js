@@ -1395,19 +1395,33 @@
                         emptyState.style.display = "none";
                     }
                 } else {
-                    if (!emptyState) {
-                        emptyState = document.createElement("div");
-                        emptyState.id = "feed-empty-state";
-                        emptyState.className = "text-center py-12 text-slate-400 font-mono text-xs";
-                        container.appendChild(emptyState);
-                    }
-                    if (window.circleFeedFilter && typeof window.circleFeedFilter.updateEmptyStateContent === "function") {
-                        window.circleFeedFilter.updateEmptyStateContent(emptyState, circle);
+                    var existingCards = container.querySelectorAll(".feed-note-card");
+                    if (existingCards.length > 0) {
+                        // Keep already-rendered circle content visible instead of
+                        // overlaying the empty slate on top of live cards.
+                        var toastFn0 = (typeof window.showToast === "function")
+                            ? window.showToast
+                            : (typeof global.showToast === "function" ? global.showToast : null);
+                        if (toastFn0) toastFn0("No new notes found in this circle", "info");
+                        if (emptyState) {
+                            emptyState.classList.add("hidden");
+                            emptyState.style.display = "none";
+                        }
                     } else {
-                        emptyState.textContent = "No notes found in this circle.";
+                        if (!emptyState) {
+                            emptyState = document.createElement("div");
+                            emptyState.id = "feed-empty-state";
+                            emptyState.className = "text-center py-12 text-slate-400 font-mono text-xs";
+                            container.appendChild(emptyState);
+                        }
+                        if (window.circleFeedFilter && typeof window.circleFeedFilter.updateEmptyStateContent === "function") {
+                            window.circleFeedFilter.updateEmptyStateContent(emptyState, circle);
+                        } else {
+                            emptyState.textContent = "No notes found in this circle.";
+                        }
+                        emptyState.classList.remove("hidden");
+                        emptyState.style.display = "";
                     }
-                    emptyState.classList.remove("hidden");
-                    emptyState.style.display = "";
                     hydrateFromRelayPool();
                 }
 
@@ -1631,11 +1645,12 @@
                 var notes = data.notes || [];
                 var repliesMap = data.replies || {};
 
-                if (isReset) {
-                    container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
-                }
-
                 if (notes.length > 0) {
+                    if (isReset) {
+                        // Swap only when the new batch actually arrived: clear the
+                        // previous circle's cards and render the fresh notes.
+                        container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
+                    }
                     var emptyState = document.getElementById("feed-empty-state");
                     var circleEmpty = document.getElementById("circle-empty-state");
                     if (emptyState) {
@@ -1696,6 +1711,13 @@
                     if (btn) btn.classList.add("hidden");
                     if (spinner) spinner.classList.add("hidden");
 
+                    if (isReset) {
+                        var toastFn = (typeof window.showToast === "function")
+                            ? window.showToast
+                            : (typeof global.showToast === "function" ? global.showToast : null);
+                        if (toastFn) toastFn("No new notes found in this circle", "info");
+                    }
+
                     var visibleCards = container.querySelectorAll(".feed-note-card:not(.hidden)");
                     if (visibleCards.length === 0) {
                         if (endMsg) endMsg.classList.add("hidden");
@@ -1755,8 +1777,8 @@
             try { timelineEnd.remove(); } catch (e) { timelineEnd.classList.add('hidden'); }
         }
 
-        // Clear existing cards immediately to prevent switching flash
-        container.querySelectorAll('.feed-note-card').forEach(function (el) { el.remove(); });
+        // Keep existing cards rendered under the loading indicator while the
+        // new circle's feed batch resolves; the swap happens on arrival.
         if (sentinel) {
             sentinel.dataset.oldestTimestamp = '';
         }

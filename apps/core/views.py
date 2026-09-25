@@ -54,6 +54,7 @@ from .identity import (
     get_ecosystem_pubkeys,
     invalidate_author_identity,
     invalidate_ecosystem_cache,
+    resolve_author_identity,
 )
 from .moderation import (
     annotate_progressive_friction,
@@ -2446,6 +2447,16 @@ DEFAULT_RELAYS = [
     "wss://nostr.mom",
 ]
 
+# Centralized relay fleet: NOSTR_RELAYS from Django settings wins when defined;
+# otherwise fall back to the canonical bootstrap list above.
+DEFAULT_RELAYS = getattr(settings, "NOSTR_RELAYS", DEFAULT_RELAYS)
+
+# Local loopback bridge is pinned first in every fan-out so it is preferred.
+LOCAL_RELAY = "ws://127.0.0.1:9003"
+
+# Relays excluded from fan-out: never queried nor re-injected by the floor.
+EXCLUDED_RELAYS = {"wss://purplerelay.com", "wss://nos.lol"}
+
 # Phase 6 — Outbox Gossip Routing (AUDIT-004): author NIP-65 (Kind 10002)
 # relay-list metadata is aggregated to prioritize the relay query set for the
 # feed's known authors. Every relay query set is pinned to at least this many
@@ -2521,19 +2532,48 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
     return events
 
 
+def order_relays(relay_urls):
+    """Order and sanitize a relay query set for fan-out.
+
+    LOCAL_RELAY is pinned at index 0, followed by the core responsive fleet
+    (primal, nostr.band, relay.iyou.me), then any remaining caller relays.
+    Excluded relays are stripped and the set is deduped while preserving order.
+    """
+    if not relay_urls:
+        return []
+    ordered = [LOCAL_RELAY]
+    for fleet_url in (
+        "wss://relay.primal.net",
+        "wss://relay.nostr.band",
+        "wss://relay.iyou.me",
+    ):
+        if fleet_url not in ordered and fleet_url not in EXCLUDED_RELAYS:
+            ordered.append(fleet_url)
+    for url in relay_urls:
+        if url in EXCLUDED_RELAYS or url in ordered:
+            continue
+        ordered.append(url)
+    return ordered
+
+
 def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=None):
     """Query multiple relays concurrently with ThreadPoolExecutor, aggregating all events.
 
     Replaces sequential failover with concurrent fan-out across all configured relays.
     Enforces a strict aggregate deadline (max 1.5s across all relays, or earlier if `deadline`
-    is specified). Rather than exiting early on the first responsive relay, events from all
-    responsive sockets are aggregated and deduplicated by event id.
+    is specified). Returns as soon as the first responsive relay answers; a brief settle
+    window collects any relay that finishes just after the winner, then all stragglers are
+    cancelled and deduplicated events are returned immediately.
     """
     if sub_id is None:
         sub_id = "wun_" + str(int(time.time() * 1000000))[-8:]
 
     if relay_urls is None:
         relay_urls = DEFAULT_RELAYS
+
+    # Sanitize + prioritize the query set: LOCAL_RELAY at index 0, core fleet
+    # next, exclusions stripped, deduped — before the survivability floor.
+    relay_urls = order_relays(relay_urls)
 
     # Phase 6 (AUDIT-004): the relay query set never drops below the active
     # bootstrap floor, even when a poisoned relay list or session config tries
@@ -2560,13 +2600,13 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {
-            executor.submit(_connect_relay, url, sub_id, filter_obj, effective_timeout): url
+            executor.submit(_connect_relay, url, sub_id, filter_obj, min(effective_timeout, 1.0)): url
             for url in relay_urls
         }
         done, not_done = concurrent.futures.wait(
             future_to_url.keys(),
             timeout=effective_timeout,
-            return_when=concurrent.futures.ALL_COMPLETED,
+            return_when=concurrent.futures.FIRST_COMPLETED,
         )
 
         for future in done:
@@ -2594,6 +2634,39 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
             except Exception as e:
                 logger.debug("relay_req concurrent task failed on %s: %s", url, e)
 
+        if not_done:
+            # Brief settle window: collect any relay that finished just after the
+            # first responder before cancelling the stragglers.
+            more_done, _ = concurrent.futures.wait(
+                not_done,
+                timeout=0.05,
+                return_when=concurrent.futures.ALL_COMPLETED,
+            )
+            for future in more_done:
+                url = future_to_url[future]
+                try:
+                    events = future.result()
+                    if isinstance(events, dict):
+                        items = events.items()
+                    elif isinstance(events, list):
+                        items = [(ev.get("id"), ev) for ev in events if isinstance(ev, dict) and ev.get("id")]
+                    else:
+                        items = []
+
+                    for eid, ev in items:
+                        if not eid or not isinstance(ev, dict):
+                            continue
+                        if eid not in aggregated_events:
+                            ev["_relay_sources"] = [url]
+                            ev["_primary_relay"] = url
+                            aggregated_events[eid] = ev
+                        else:
+                            sources = aggregated_events[eid].setdefault("_relay_sources", [])
+                            if url not in sources:
+                                sources.append(url)
+                except Exception as e:
+                    logger.debug("relay_req settle task failed on %s: %s", url, e)
+
         for future in not_done:
             future.cancel()
 
@@ -2616,6 +2689,8 @@ def ensure_min_relay_floor(relays, min_count=MIN_RELAY_FLOOR):
         if len(result) >= min_count:
             break
         if url in result:
+            continue
+        if url in EXCLUDED_RELAYS:
             continue
         if not has_insecure and str(url).startswith("ws://"):
             continue
@@ -3448,13 +3523,32 @@ class GalleryView(TemplateView):
         authors = [filter_pubkey] if filter_pubkey else None
         notes = fetch_media_assets(authors=authors, limit=24, until=until, relay_urls=relays)
 
-        images = [n for n in notes if n["media_type"] == "image"]
-        videos = [n for n in notes if n["media_type"] == "video"]
-        audio = [n for n in notes if n["media_type"] == "audio"]
-        other = [n for n in notes if n["media_type"] == "other"]
+        # Identity Translation Service enrichment: every gallery item carries the
+        # canonical deck-backed display name / handle / membership flags.
+        media_items = list(notes)
+        for item in media_items:
+            pk = item.get("pubkey") or item.get("pubkey_hex") or ""
+            ident = resolve_author_identity(pk)
+            item["author_display_name"] = ident["display_name"] or item.get("author_display_name", "")
+            item["author_handle"] = ident["handle"]
+            item["is_ecosystem_member"] = ident["is_member"]
+            item["category"] = item.get("media_type") or categorize_media(item)
+            item["url"] = item.get("file_url") or ""
+            item["author_npub"] = item.get("npub") or ""
+            item["caption"] = (
+                item.get("display_title")
+                or item.get("alt_text")
+                or item.get("content")
+                or ""
+            )
+
+        images = [n for n in media_items if n["category"] == "image"]
+        videos = [n for n in media_items if n["category"] == "video"]
+        audio = [n for n in media_items if n["category"] == "audio"]
+        other = [n for n in media_items if n["category"] == "other"]
 
         min_ts = None
-        for n in notes:
+        for n in media_items:
             ts = n.get("created_at_ts")
             if ts is None:
                 dt = n.get("created_at")
@@ -3464,19 +3558,23 @@ class GalleryView(TemplateView):
             if min_ts is None or ts < min_ts:
                 min_ts = ts
 
-        context["notes"] = notes
+        context["notes"] = media_items
+        context["media_items"] = media_items
+        context["image_items"] = images
+        context["video_items"] = videos
+        context["audio_items"] = audio
         context["images"] = images
         og_image = (
-            (notes[0].get("media_attachments") or [{}])[0].get("url")
-            or notes[0].get("thumbnail_url")
-            or notes[0].get("file_url")
+            (media_items[0].get("media_attachments") or [{}])[0].get("url")
+            or media_items[0].get("thumbnail_url")
+            or media_items[0].get("file_url")
             or og_fallback_image(self.request)
-        ) if notes else og_fallback_image(self.request)
+        ) if media_items else og_fallback_image(self.request)
         context["og_image"] = og_image
         context["videos"] = videos
-        context["audio_items"] = audio
         context["other_items"] = other
         context["filter_pubkey"] = filter_pubkey
+        context["selected_type"] = media_type
         context["active_type"] = media_type
         context["oldest_timestamp"] = min_ts or ""
         context["has_more"] = len(notes) >= 24
