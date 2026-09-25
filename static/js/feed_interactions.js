@@ -18,6 +18,7 @@
     var pendingReport = null;
     var quotedTarget = null;
     var attachedMedia = null;
+    var stagedMedia = [];
 
     // 15-second ceiling for the iyou_home signature-approval handshake. If the
     // bridge never returns a signed event inside this window (or its socket
@@ -65,7 +66,8 @@
     async function postToNostr() {
         var content = document.getElementById("postContent");
         var text = content ? content.value.trim() : "";
-        if (!text && !attachedMedia) {
+        var originalText = text;
+        if (!text && !attachedMedia && stagedMedia.length === 0) {
             showToast("Please enter some content or attach media to post.", true);
             return;
         }
@@ -79,7 +81,23 @@
             tags.push(["q", quotedTarget.id, "wss://relay.iyou.me", quotedTarget.pubkey || ""]);
             if (quotedTarget.pubkey) tags.push(["p", quotedTarget.pubkey]);
         }
-        if (attachedMedia && attachedMedia.url) {
+        if (stagedMedia.length > 0) {
+            // Staged multi-attachment deck: stamp per-media content-addressed
+            // tags and append the Blossom URLs to the note body (leading
+            // newlines keep the URLs separable from authored text for the
+            // server-side media card extractor).
+            for (var si = 0; si < stagedMedia.length; si++) {
+                var sm = stagedMedia[si];
+                if (sm.url) tags.push(["url", sm.url]);
+                if (sm.hash) tags.push(["x", sm.hash]);
+                if (sm.mimeType) tags.push(["m", sm.mimeType]);
+                if (sm.size) tags.push(["size", String(sm.size)]);
+            }
+            var mediaUrls = stagedMedia.map(function (m) { return m.url; }).filter(Boolean);
+            if (mediaUrls.length > 0) {
+                text = (text + "\n\n" + mediaUrls.join("\n")).trim();
+            }
+        } else if (attachedMedia && attachedMedia.url) {
             tags.push(["url", attachedMedia.url]);
             if (attachedMedia.hash) tags.push(["x", attachedMedia.hash]);
             if (attachedMedia.mimeType) tags.push(["m", attachedMedia.mimeType]);
@@ -93,7 +111,7 @@
         if (!tags.some(function (t) { return t[0] === "t" && t[1] === "iyou"; })) {
             tags.push(["t", "iyou"]);
         }
-        var kind = (attachedMedia && !text) ? 1063 : 1;
+        var kind = (attachedMedia && stagedMedia.length === 0 && !originalText) ? 1063 : 1;
         var event = {
             kind: kind,
             content: text,
@@ -293,6 +311,7 @@
                 if (editor) editor.value = "";
                 clearQuoteAttachment();
                 clearMediaAttachment();
+                clearComposerStagedMedia();
             });
         }
     }
@@ -1925,6 +1944,80 @@
     }
     window.clearMediaAttachment = clearMediaAttachment;
 
+    async function ensureBlossomUpload(baseUrl, file, arrayBuffer, hash, statusFn) {
+        // Resilient Blossom cascade shared by the legacy single-attachment
+        // handler and the multi-attachment staged deck: content-addressed HEAD
+        // probe, direct PUT (with 404/405 content-hash fallback), then server
+        // proxy fallback. Resolves to the canonical blob URL.
+        if (statusFn) statusFn("Checking Blossom...");
+        try {
+            var headRes = await fetch(baseUrl + "/" + hash, {
+                method: "HEAD",
+            });
+            if (headRes.ok) {
+                return baseUrl + "/" + hash;
+            }
+        } catch (e) {
+            // Direct HEAD failed (PNA / CORS / network), continue to upload attempts
+        }
+
+        if (statusFn) statusFn("Uploading to Blossom...");
+        var directUploaded = false;
+        var uploadedUrl = null;
+        try {
+            var mimeType = file.type || "application/octet-stream";
+            var putRes = await fetch(baseUrl + "/upload", {
+                method: "PUT",
+                headers: {
+                    "Content-Type": mimeType,
+                    "X-SHA-256": hash,
+                },
+                body: arrayBuffer,
+            });
+            if (putRes.status === 200 || putRes.status === 201) {
+                directUploaded = true;
+                try {
+                    var putData = await putRes.json();
+                    if (putData && putData.url) {
+                        uploadedUrl = putData.url;
+                    }
+                } catch (err) {
+                    /* ignore JSON parse */
+                }
+                if (!uploadedUrl) {
+                    uploadedUrl = baseUrl + "/" + hash;
+                }
+            } else if (putRes.status === 404 || putRes.status === 405) {
+                var putHashRes = await fetch(baseUrl + "/" + hash, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": mimeType,
+                        "X-SHA-256": hash,
+                    },
+                    body: arrayBuffer,
+                });
+                if (putHashRes.status === 200 || putHashRes.status === 201) {
+                    directUploaded = true;
+                    uploadedUrl = baseUrl + "/" + hash;
+                }
+            }
+        } catch (directErr) {
+            console.warn("Direct Blossom upload failed, trying server proxy:", directErr);
+        }
+
+        if (!directUploaded) {
+            if (statusFn) statusFn("Proxying upload via server...");
+            try {
+                var proxyData = await uploadViaServerProxy(file, hash);
+                uploadedUrl = (proxyData && proxyData.url) ? proxyData.url : (baseUrl + "/" + hash);
+            } catch (proxyErr) {
+                console.warn("Server proxy upload also failed:", proxyErr);
+                uploadedUrl = baseUrl + "/" + hash;
+            }
+        }
+        return uploadedUrl;
+    }
+
     async function handleMediaSelected(file) {
         if (!file) return;
         setUploadStatus("Hashing file...");
@@ -1932,81 +2025,7 @@
             var arrayBuffer = await file.arrayBuffer();
             var hash = await sha256Hex(arrayBuffer);
             var baseUrl = getBlossomBaseUrl();
-            var uploadedUrl = null;
-            var blobExists = false;
-
-            setUploadStatus("Checking Blossom...");
-            try {
-                var headRes = await fetch(baseUrl + "/" + hash, {
-                    method: "HEAD",
-                });
-                if (headRes.ok) {
-                    blobExists = true;
-                    uploadedUrl = baseUrl + "/" + hash;
-                }
-            } catch (e) {
-                // Direct HEAD failed (PNA / CORS / network), continue to upload attempts
-            }
-
-            if (!blobExists) {
-                setUploadStatus("Uploading to Blossom...");
-                var directUploaded = false;
-                try {
-                    var mimeType = file.type || "application/octet-stream";
-                    var putRes = await fetch(baseUrl + "/upload", {
-                        method: "PUT",
-                        headers: {
-                            "Content-Type": mimeType,
-                            "X-SHA-256": hash,
-                        },
-                        body: arrayBuffer,
-                    });
-                    if (putRes.status === 200 || putRes.status === 201) {
-                        directUploaded = true;
-                        try {
-                            var putData = await putRes.json();
-                            if (putData && putData.url) {
-                                uploadedUrl = putData.url;
-                            }
-                        } catch (err) {
-                            /* ignore JSON parse */
-                        }
-                        if (!uploadedUrl) {
-                            uploadedUrl = baseUrl + "/" + hash;
-                        }
-                    } else if (putRes.status === 404 || putRes.status === 405) {
-                        var putHashRes = await fetch(baseUrl + "/" + hash, {
-                            method: "PUT",
-                            headers: {
-                                "Content-Type": mimeType,
-                                "X-SHA-256": hash,
-                            },
-                            body: arrayBuffer,
-                        });
-                        if (putHashRes.status === 200 || putHashRes.status === 201) {
-                            directUploaded = true;
-                            uploadedUrl = baseUrl + "/" + hash;
-                        }
-                    }
-                } catch (directErr) {
-                    console.warn("Direct Blossom upload failed, trying server proxy:", directErr);
-                }
-
-                if (!directUploaded) {
-                    setUploadStatus("Proxying upload via server...");
-                    try {
-                        var proxyData = await uploadViaServerProxy(file, hash);
-                        if (proxyData && proxyData.url) {
-                            uploadedUrl = proxyData.url;
-                        } else {
-                            uploadedUrl = baseUrl + "/" + hash;
-                        }
-                    } catch (proxyErr) {
-                        console.warn("Server proxy upload also failed:", proxyErr);
-                        uploadedUrl = baseUrl + "/" + hash;
-                    }
-                }
-            }
+            var uploadedUrl = await ensureBlossomUpload(baseUrl, file, arrayBuffer, hash, setUploadStatus);
 
             var ext = file.name ? file.name.split('.').pop().toLowerCase() : '';
             var canonicalUrl = "https://cdn.iyou.me/" + hash + (ext ? "." + ext : "");
@@ -2065,6 +2084,133 @@
                 var el = document.getElementById("uploadStatus");
                 if (el) el.classList.add("hidden");
             }, 3000);
+        }
+    }
+
+    // ---------- Composer Multi-Media Staged Deck (Blossom BUD-01) ----------
+
+    function composerUploadStatus(text, clear) {
+        var el = document.getElementById("composer-upload-status");
+        if (!el) return;
+        if (clear) {
+            el.textContent = "";
+            el.classList.add("hidden");
+            return;
+        }
+        el.textContent = text;
+        el.classList.remove("hidden");
+    }
+
+    function renderStagedMedia() {
+        var deck = document.getElementById("composer-staged-media");
+        var list = document.getElementById("composer-staged-list");
+        var countEl = document.getElementById("composer-staged-count");
+        if (!deck || !list) return;
+        if (countEl) countEl.textContent = String(stagedMedia.length);
+        if (stagedMedia.length === 0) {
+            deck.classList.add("hidden");
+            return;
+        }
+        deck.classList.remove("hidden");
+        list.innerHTML = "";
+        stagedMedia.forEach(function (item, i) {
+            var row = document.createElement("div");
+            row.className = "flex items-center gap-2 p-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800";
+
+            var thumb = document.createElement("span");
+            thumb.className = "w-10 h-10 rounded-md overflow-hidden bg-slate-100 dark:bg-slate-800 shrink-0 flex items-center justify-center border border-slate-200 dark:border-slate-800";
+            var mime = item.mimeType || "";
+            if (mime.indexOf("image") !== -1) {
+                thumb.innerHTML = '<img src="' + (item.localPreview || "") + '" alt="" class="w-full h-full object-cover" />';
+            } else if (mime.indexOf("video") !== -1) {
+                thumb.innerHTML = '<video src="' + (item.localPreview || "") + '" muted playsinline class="w-full h-full object-cover"></video>';
+            } else {
+                thumb.textContent = mime.indexOf("audio") !== -1 ? "🎵" : "📄";
+            }
+
+            var info = document.createElement("span");
+            info.className = "flex-1 min-w-0";
+            info.innerHTML = '<span class="block text-xs font-mono font-semibold text-slate-800 dark:text-slate-200 truncate">' +
+                escapeHtml(item.name || "Media File") + '</span>' +
+                '<span class="block text-[9px] font-mono text-slate-400 truncate">SHA-256: ' + item.hash.slice(0, 16) + "..." + '</span>' +
+                '<span class="block text-[9px] font-mono text-violet-500 truncate">' + escapeHtml(item.url) + '</span>';
+
+            var btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-800 transition shrink-0";
+            btn.textContent = "✕";
+            btn.title = "Remove attachment";
+            btn.onclick = (function (idx) {
+                return function () { removeStagedMedia(idx); };
+            })(i);
+
+            row.appendChild(thumb);
+            row.appendChild(info);
+            row.appendChild(btn);
+            list.appendChild(row);
+        });
+    }
+
+    function removeStagedMedia(index) {
+        if (index < 0 || index >= stagedMedia.length) return;
+        var removed = stagedMedia.splice(index, 1)[0];
+        if (removed && removed.localPreview) {
+            try { URL.revokeObjectURL(removed.localPreview); } catch (e) { /* ignore */ }
+        }
+        renderStagedMedia();
+    }
+
+    function clearComposerStagedMedia() {
+        stagedMedia.forEach(function (item) {
+            if (item.localPreview) {
+                try { URL.revokeObjectURL(item.localPreview); } catch (e) { /* ignore */ }
+            }
+        });
+        stagedMedia = [];
+        var list = document.getElementById("composer-staged-list");
+        if (list) list.innerHTML = "";
+        var deck = document.getElementById("composer-staged-media");
+        if (deck) deck.classList.add("hidden");
+        var input = document.getElementById("composer-media-input");
+        if (input) input.value = "";
+        composerUploadStatus("", true);
+    }
+
+    async function handleComposerMediaSelected(event) {
+        var input = event && event.target ? event.target : null;
+        var files = (input && input.files) ? Array.prototype.slice.call(input.files) : [];
+        if (!files.length) return;
+        composerUploadStatus("Preparing " + files.length + " attachment(s)...");
+        var baseUrl = getBlossomBaseUrl();
+        var failed = false;
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            try {
+                composerUploadStatus("Hashing " + (i + 1) + "/" + files.length + "...");
+                var arrayBuffer = await file.arrayBuffer();
+                var hash = await sha256Hex(arrayBuffer);
+                var uploadedUrl = await ensureBlossomUpload(baseUrl, file, arrayBuffer, hash, composerUploadStatus);
+                var ext = file.name ? file.name.split('.').pop().toLowerCase() : '';
+                var finalUrl = uploadedUrl || ("https://cdn.iyou.me/" + hash + (ext ? "." + ext : ""));
+                stagedMedia.push({
+                    url: finalUrl,
+                    hash: hash,
+                    mimeType: file.type || "application/octet-stream",
+                    size: file.size,
+                    name: file.name,
+                    localPreview: URL.createObjectURL(file)
+                });
+                renderStagedMedia();
+            } catch (err) {
+                failed = true;
+                composerUploadStatus("Upload failed for " + (file.name || "file") + ": " + err.message);
+                break;
+            }
+        }
+        if (input) input.value = "";
+        if (!failed) {
+            composerUploadStatus("Media attached ready to post.");
+            setTimeout(function () { composerUploadStatus("", true); }, 2500);
         }
     }
 
@@ -2891,6 +3037,9 @@
     window.retryOlderNotes = retryOlderNotes;
     window.getBlossomBaseUrl = getBlossomBaseUrl;
     window.handleMediaSelected = handleMediaSelected;
+    window.handleComposerMediaSelected = handleComposerMediaSelected;
+    window.removeStagedMedia = removeStagedMedia;
+    window.clearComposerStagedMedia = clearComposerStagedMedia;
     window.toggleGear = toggleGear;
     window.toggleKebabMenu = toggleKebabMenu;
     window.likeNote = likeNote;

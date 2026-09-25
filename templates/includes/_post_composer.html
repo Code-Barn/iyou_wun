@@ -23,32 +23,22 @@
         </div>
       </div>
     </div>
-    <!-- Media Attachment Preview Dock (Blossom BUD-01) -->
-    <div id="composer-media-preview-dock" class="hidden mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
+    <!-- Composer Media Staged Deck (Blossom BUD-01 multi-attachment pipeline) -->
+    <div id="composer-staged-media" class="hidden mt-2.5 p-3 rounded-xl bg-slate-50 dark:bg-slate-950/60 border border-slate-200 dark:border-slate-800">
       <div class="flex items-center justify-between gap-2 mb-1.5">
         <span class="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wide flex items-center gap-1">
           <span>🌸</span> <span>Blossom Media Attached</span>
+          <span id="composer-staged-count" class="text-emerald-500">0</span>
         </span>
-        <button type="button" onclick="clearMediaAttachment()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 transition" title="Remove attachment">✕</button>
+        <button type="button" onclick="window.clearComposerStagedMedia && window.clearComposerStagedMedia()" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-800 transition" title="Remove all attachments">✕</button>
       </div>
-      <div class="flex items-center gap-3">
-        <div class="w-16 h-16 rounded-lg overflow-hidden bg-slate-900 shrink-0 border border-slate-200 dark:border-slate-800 flex items-center justify-center">
-          <img id="composer-media-preview-img" src="" alt="Media preview" class="w-full h-full object-cover hidden" />
-          <video id="composer-media-preview-video" src="" class="w-full h-full object-cover hidden" muted playsinline></video>
-          <span id="composer-media-preview-icon" class="text-xl hidden">🎵</span>
-        </div>
-        <div class="flex-1 min-w-0">
-          <div id="composer-media-filename" class="text-xs font-mono font-semibold text-slate-800 dark:text-slate-200 truncate"></div>
-          <div id="composer-media-hash" class="text-[10px] font-mono text-slate-400 truncate mt-0.5"></div>
-          <div id="composer-media-url" class="text-[10px] font-mono text-violet-500 truncate mt-0.5"></div>
-        </div>
-      </div>
+      <div id="composer-staged-list" class="space-y-1.5 max-h-44 overflow-y-auto"></div>
+      <div id="composer-upload-status" class="hidden text-[10px] font-mono text-slate-500 mt-2"></div>
     </div>
-    <input type="file" id="composer-file-input" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
-    <input type="file" id="mediaInput" class="hidden" accept="image/*,video/*,audio/*" onchange="handleMediaSelected(this.files[0])" />
+    <input type="file" id="composer-media-input" class="hidden" accept="image/*,video/*,audio/*" multiple onchange="window.handleComposerMediaSelected && window.handleComposerMediaSelected(event)" />
     <div class="flex flex-wrap items-center justify-between gap-2 mt-3 pt-3 border-t border-slate-100 dark:border-slate-800">
       <div class="flex items-center gap-2">
-        <button type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-mono text-slate-600 dark:text-slate-300 transition" onclick="document.getElementById('composer-file-input').click()">
+        <button type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-mono text-slate-600 dark:text-slate-300 transition" onclick="document.getElementById('composer-media-input').click()">
           📷 Media
         </button>
         <button type="button" class="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-xs font-mono text-slate-600 dark:text-slate-300 transition" onclick="openPollCreateModal()">
