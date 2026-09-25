@@ -3958,9 +3958,21 @@ class Phase45SessionAndRelayHardeningTests(TestCase):
     def test_default_relays_prioritizes_fast_endpoints(self):
         from apps.core.views import DEFAULT_RELAYS, EXCLUDED_RELAYS
         self.assertEqual(DEFAULT_RELAYS[0], "ws://127.0.0.1:9003")
-        self.assertIn("wss://relay.primal.net", DEFAULT_RELAYS[:2])
-        self.assertIn("wss://relay.nostr.band", DEFAULT_RELAYS[:3])
-        self.assertIn("wss://relay.iyou.me", DEFAULT_RELAYS)
+        # Host-verified responsive fleet (live NIP-01 REQ, measured handshake +
+        # event delivery). Dead and eventless uplinks are absent.
+        for responsive in (
+            "wss://offchain.pub",
+            "wss://relay.damus.io",
+            "wss://relay.wellorder.net",
+            "wss://relay.snort.social",
+            "wss://nostr.oxtr.dev",
+            "wss://relay.primal.net",
+        ):
+            self.assertIn(responsive, DEFAULT_RELAYS)
+        # Removed: relay.nostr.band (TCP connect timeout) and relay.iyou.me
+        # (handshakes but delivers zero events for public kinds).
+        self.assertNotIn("wss://relay.nostr.band", DEFAULT_RELAYS)
+        self.assertNotIn("wss://relay.iyou.me", DEFAULT_RELAYS)
         for excluded in EXCLUDED_RELAYS:
             self.assertNotIn(excluded, DEFAULT_RELAYS)
 
@@ -4236,6 +4248,51 @@ class Secp256k1PubkeyIngestionTests(TestCase):
 
 
 class RelayFanoutStabilizationTests(TestCase):
+    def test_connect_relay_honors_two_element_eose_frame(self):
+        """A NIP-01 ["EOSE", sub_id] frame is 2 elements and must break the recv loop.
+
+        Regression guard: gating on len(msg) < 3 discarded EOSE, so every worker
+        burned its full socket timeout and relay_req's FIRST_COMPLETED wait()
+        returned an empty done set — silently zeroing every relay query.
+        """
+        import time
+        from apps.core.views import _connect_relay
+
+        class FakeSocket:
+            def __init__(self, frames):
+                self.frames = list(frames)
+                self.recv_calls = 0
+                self.sent = []
+
+            def send(self, payload):
+                self.sent.append(payload)
+
+            def recv(self):
+                self.recv_calls += 1
+                if self.frames:
+                    return self.frames.pop(0)
+                # Past EOSE a real socket would block until the deadline.
+                time.sleep(0.01)
+                return b'["NOTICE", "still open"]'
+
+            def close(self):
+                pass
+
+        socket_obj = FakeSocket([
+            b'["EVENT", "s1", {"id": "abc", "content": "hello"}]',
+            b'["EOSE", "s1"]',
+        ])
+        start = time.time()
+        with patch("apps.core.views.create_connection", return_value=socket_obj):
+            events = _connect_relay("ws://127.0.0.1:9003", "s1", {"kinds": [1]}, 5.0)
+        elapsed = time.time() - start
+
+        self.assertIn("abc", events)
+        # Exactly two reads: the EVENT and the EOSE. Any further recv means the
+        # EOSE was not recognized as a terminator.
+        self.assertEqual(socket_obj.recv_calls, 2)
+        self.assertLess(elapsed, 1.0)
+
     def test_relay_req_locates_local_relay_first(self):
         """relay_req pins LOCAL_RELAY at index 0 when fanning out."""
         from apps.core.views import LOCAL_RELAY, relay_req

@@ -45,7 +45,7 @@ from django.views.decorators.csrf import csrf_exempt, ensure_csrf_cookie
 from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import TemplateView
 from django.views import View
-from websocket import create_connection
+from websocket import WebSocketException, create_connection
 
 from services.poly_client import PolyClient, PolyConnectionError
 
@@ -1722,12 +1722,32 @@ def api_profile_notes(request, identifier):
         pass
     
     # Enrich events with profile data
+    from .nip10 import is_ecosystem_envelope
+
+    # resolve_author_did walks the user registry, so memoize per unique pubkey
+    # instead of re-scanning for every note in the batch.
+    did_cache = {}
+
+    def _author_did(pubkey):
+        if not pubkey:
+            return ""
+        if pubkey not in did_cache:
+            did_cache[pubkey] = resolve_author_did(pubkey)
+        return did_cache[pubkey]
+
     notes = []
     for e in sorted_events:
+        event_pubkey = e.get("pubkey", "") or hex_pubkey
+        # The profile payload is consumed by appendNoteToFeed, whose circle gate
+        # keys off these flags. Resolve them from the ecosystem envelope (tags /
+        # platform-relay provenance) plus the local author registry so a profile
+        # page never drops the very notes it just fetched.
+        in_envelope = is_ecosystem_envelope(e)
+        author_did = _author_did(event_pubkey)
         note = {
             "id": e.get("id", ""),
-            "pubkey": e.get("pubkey", hex_pubkey),
-            "pubkey_hex": e.get("pubkey", hex_pubkey),
+            "pubkey": event_pubkey,
+            "pubkey_hex": event_pubkey,
             "created_at": e.get("created_at", 0),
             "created_at_epoch": e.get("created_at", 0),
             "content": e.get("content", ""),
@@ -1736,13 +1756,14 @@ def api_profile_notes(request, identifier):
             "sig": e.get("sig", ""),
             "author_name": profile.get("name") or profile.get("display_name") or "",
             "author_avatar": profile.get("picture") or "",
-            "author_did": "",
+            "author_did": author_did,
+            "is_iyou_native": bool(in_envelope or author_did),
+            "is_sovereign": bool(author_did),
             "display_content": e.get("content", ""),
             "media_attachments": [],
             "repost_count": 0,
             "reply_count": 0,
             "like_count": 0,
-            "is_sovereign": False,
         }
         notes.append(note)
     
@@ -2454,14 +2475,14 @@ def get_tag_value(tags, tag_name, index=1, default=""):
 
 
 DEFAULT_RELAYS = [
-    "wss://relay.damus.io",
-    "wss://nos.lol",
-    "wss://relay.primal.net",
-    "wss://relay.nostr.band",
     "ws://127.0.0.1:9003",
-    "wss://relay.iyou.me",
-    "wss://purplerelay.com",
+    "wss://offchain.pub",
+    "wss://relay.damus.io",
+    "wss://relay.wellorder.net",
+    "wss://relay.snort.social",
     "wss://nostr.mom",
+    "wss://nostr.oxtr.dev",
+    "wss://relay.primal.net",
 ]
 
 # Centralized relay fleet: NOSTR_RELAYS from Django settings wins when defined;
@@ -2525,7 +2546,11 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
             timeout=timeout,
             sslopt={"cert_reqs": ssl.CERT_NONE},
         )
-    except (ConnectionRefusedError, socket.timeout, TimeoutError, OSError) as e:
+    except (ConnectionRefusedError, socket.timeout, TimeoutError, OSError, WebSocketException) as e:
+        # WebSocketException covers handshake timeouts and refused upgrades: a
+        # relay that accepts TCP but never answers the HTTP upgrade (e.g. a
+        # wedged local Tauri relay) must take this same fast, empty-result path
+        # rather than propagating out of the fan-out worker.
         logger.debug("_connect_relay unreachable %s: %s", relay_url, e)
         return events
 
@@ -2539,7 +2564,13 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
                 msg = json.loads(text)
             except (ValueError, TypeError, UnicodeDecodeError):
                 continue
-            if not isinstance(msg, list) or len(msg) < 3:
+            # NIP-01 control frames are 2-element arrays: ["EOSE", <sub_id>] and
+            # ["CLOSED", <sub_id>, <reason>]. Only EVENT carries a third element
+            # (the event object). Gating on len < 3 discarded every EOSE, so the
+            # recv loop could never break and each worker burned its full socket
+            # timeout — which left relay_req's FIRST_COMPLETED wait() with an
+            # empty done set, silently returning {} for every query.
+            if not isinstance(msg, list) or len(msg) < 2:
                 continue
             if msg[0] == "EVENT" and msg[1] == sub_id:
                 e = msg[2]
@@ -2563,24 +2594,38 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
 def order_relays(relay_urls):
     """Order and sanitize a relay query set for fan-out.
 
-    LOCAL_RELAY is pinned at index 0, followed by the core responsive fleet
-    (primal, nostr.band, relay.iyou.me), then any remaining caller relays.
-    Excluded relays are stripped and the set is deduped while preserving order.
+    LOCAL_RELAY is pinned at index 0, followed by the host-verified responsive
+    fleet (settings.NOSTR_RELAYS — offchain.pub, damus, wellorder, snort, mom,
+    oxtr, primal), then the caller's own relays. Excluded relays are stripped
+    and the set is deduped while preserving order.
+
+    The fleet is read from DEFAULT_RELAYS rather than hardcoded so the pinned
+    order and the configured fleet can never drift apart.
+
+    The fleet is budget-capped against MAX_RELAY_FANOUT: the caller's relays are
+    reserved slots first, so a full-size fleet can never crowd out NIP-65 outbox
+    hints or a session relay pool via the fan-out truncation in relay_req().
     """
     if not relay_urls:
         return []
+    seen = set()
+    caller = []
+    for url in relay_urls:
+        if url in EXCLUDED_RELAYS or url in seen:
+            continue
+        seen.add(url)
+        caller.append(url)
+
+    fleet_budget = max(0, MAX_RELAY_FANOUT - len(caller) - 1)
     ordered = [LOCAL_RELAY]
-    for fleet_url in (
-        "wss://relay.primal.net",
-        "wss://relay.nostr.band",
-        "wss://relay.iyou.me",
-    ):
+    for fleet_url in DEFAULT_RELAYS:
+        if len(ordered) - 1 >= fleet_budget:
+            break
         if fleet_url not in ordered and fleet_url not in EXCLUDED_RELAYS:
             ordered.append(fleet_url)
-    for url in relay_urls:
-        if url in EXCLUDED_RELAYS or url in ordered:
-            continue
-        ordered.append(url)
+    for url in caller:
+        if url not in ordered:
+            ordered.append(url)
     return ordered
 
 
@@ -2638,7 +2683,13 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
     aggregated_events = {}
     max_workers = len(relay_urls)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    # Explicit executor (no `with` block): the context manager's __exit__ calls
+    # shutdown(wait=True), which joins still-running workers and let a wedged
+    # relay push wall-clock well past TOTAL_RELAY_CEILING. Ownership of the
+    # shutdown is taken in the finally below with wait=False so stragglers are
+    # abandoned the instant the ceiling is hit.
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
+    try:
         future_to_url = {
             executor.submit(_connect_relay, url, sub_id, filter_obj, min(effective_timeout, 1.0)): url
             for url in relay_urls
@@ -2667,8 +2718,8 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
             done.update(more_done)
 
         # Cancel any futures still pending; already-running workers self-bound
-        # to their own `timeout` (<= 1.0s) so the executor drain stays inside
-        # the ceiling.
+        # to their own `timeout` (<= 1.0s) and are abandoned by the non-blocking
+        # shutdown, so the executor drain can never extend past the ceiling.
         for future in future_to_url:
             if future not in done:
                 future.cancel()
@@ -2697,6 +2748,8 @@ def relay_req(filter_obj, sub_id=None, timeout=1.5, relay_urls=None, deadline=No
                             sources.append(url)
             except Exception as e:
                 logger.debug("relay_req concurrent task failed on %s: %s", url, e)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     return aggregated_events
 

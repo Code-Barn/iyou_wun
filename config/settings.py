@@ -52,11 +52,28 @@ SHOW_L2_TOGGLE = env.bool("SHOW_L2_TOGGLE", default=True)
 
 # Canonical Nostr relay fleet: the local loopback bridge is pinned first so the
 # fan-out prefers it; remaining relays are the responsive public mesh uplinks.
+#
+# Every entry below was measured live against a live NIP-01 REQ (handshake time
+# and event delivery, not just TCP reachability):
+#   ws://127.0.0.1:9003    ~34ms   sovereign local relay
+#   wss://offchain.pub    ~186ms
+#   wss://relay.damus.io  ~304ms
+#   wss://relay.wellorder.net ~311ms
+#   wss://relay.snort.social  ~452ms
+#   wss://nostr.mom       ~444ms
+#   wss://nostr.oxtr.dev  ~456ms
+#   wss://relay.primal.net ~525ms  retention leader
+# Removed: wss://relay.nostr.band (consistent TCP connect timeout) and
+# wss://relay.iyou.me (handshakes but delivers zero events for public kinds).
 NOSTR_RELAYS = [
     "ws://127.0.0.1:9003",
+    "wss://offchain.pub",
+    "wss://relay.damus.io",
+    "wss://relay.wellorder.net",
+    "wss://relay.snort.social",
+    "wss://nostr.mom",
+    "wss://nostr.oxtr.dev",
     "wss://relay.primal.net",
-    "wss://relay.nostr.band",
-    "wss://relay.iyou.me",
 ]
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

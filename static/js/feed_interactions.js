@@ -300,7 +300,7 @@
                     if (optimisticWelcome) optimisticWelcome.style.display = "none";
                 }
             }
-            bridgeClient.broadcastToRelays(pendingEvent, null, function (localOk, anyOk) {
+            bridgeClient.broadcastToRelays(signedEvent, null, function (localOk, anyOk) {
                 if (anyOk) {
                     showToast("Note published to mesh relays", "success");
                 } else if (!localOk) {
@@ -1241,7 +1241,19 @@
 
         const matchesIyou = hasIyouTag || isIyouClient || isEcosystem;
 
-        if (!isDevMode && activeCircle === 'iyou' && !matchesIyou) {
+        // Profile pages hydrate a single author through /api/profile/<pk>/notes/.
+        // That endpoint is already author-scoped, so the active-circle gate must
+        // not drop the very notes it just fetched — otherwise an untagged author
+        // renders an empty panel behind a "Posts (0)" tab. Match on the profile
+        // target carried by the panel's data-identifier, not on a blanket bypass.
+        const isProfileView = /^\/profile\//.test(window.location.pathname);
+        const profileTarget = isProfileView
+            ? String((container.getAttribute && container.getAttribute('data-identifier')) || '').toLowerCase()
+            : '';
+        const noteAuthorKey = String(note.pubkey_hex || note.pubkey || '').toLowerCase();
+        const isProfileAuthor = isProfileView && !!profileTarget && noteAuthorKey === profileTarget;
+
+        if (!isDevMode && activeCircle === 'iyou' && !matchesIyou && !isProfileAuthor) {
             return; // Drop non-iyou notes only in standard mode
         }
 
