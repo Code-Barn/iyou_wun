@@ -558,6 +558,41 @@ def _resolve_profile_candidates(identifier):
             candidates = [hex_pubkey]
         return carried, owner_user, owner_deck, hex_pubkey, candidates
 
+    # Human handle: /profile/<handle>/ must resolve a claimed Link Deck instead of
+    # falling through to "Peer Not Found on Mesh". resolve_universal_identifier()
+    # only understands npub1..., 64-char hex and "@"-bearing NIP-05, so a bare
+    # handle could never satisfy it -- the page 404'd for every registered deck.
+    #
+    # Placed before that resolver for two reasons: a handle carries no "@" so the
+    # NIP-05 branch can never match it, and this local index lookup is strictly
+    # cheaper than the DNS + .well-known/nostr.json fetch the resolver would
+    # attempt and fail. Ordered by discriminator then pk because uniq_handle_disc
+    # permits one handle at several discriminators; the lowest discriminator is the
+    # canonical deck, matching what /@<handle>/ resolves to.
+    if "@" not in identifier and HANDLE_PATTERN.match(identifier.lower()):
+        deck = (
+            UserLinkDeck.objects.select_related("user")
+            .filter(handle__iexact=identifier)
+            .order_by("discriminator", "pk")
+            .first()
+        )
+        if deck:
+            owner_deck = deck
+            owner_user = deck.user
+            carried = "handle"
+            # A deck may hold either a raw hex key or an enclave-synced npub.
+            raw_key = (deck.nostr_pubkey or "").strip()
+            if re.fullmatch(r"[0-9a-fA-F]{64}", raw_key):
+                deck_hex = raw_key.lower()
+            else:
+                deck_hex = npub_to_hex(raw_key) or ""
+            did_hex = did_to_pubkey(deck.user.username) or "" if deck.user_id else ""
+            # Prefer the enclave-synced Nostr key; fall back to the DID-derived key
+            # so a deck that has never synced still hydrates from relays.
+            hex_pubkey = deck_hex or did_hex
+            candidates = list(filter(None, [deck_hex, did_hex, hex_pubkey]))
+            return carried, owner_user, owner_deck, hex_pubkey, candidates
+
     # npub or NIP-05: resolve via the universal identifier resolver.
     pubkey_candidate, _carried = resolve_universal_identifier(identifier)
     if pubkey_candidate:
@@ -2669,13 +2704,7 @@ def get_tag_value(tags, tag_name, index=1, default=""):
 
 DEFAULT_RELAYS = [
     "ws://127.0.0.1:9003",
-    "wss://offchain.pub",
-    "wss://relay.damus.io",
-    "wss://relay.wellorder.net",
-    "wss://relay.snort.social",
-    "wss://nostr.mom",
-    "wss://nostr.oxtr.dev",
-    "wss://relay.primal.net",
+    "wss://relay.iyou.me",
 ]
 
 # Centralized relay fleet: NOSTR_RELAYS from Django settings wins when defined;
@@ -2693,7 +2722,10 @@ EXCLUDED_RELAYS = {"wss://purplerelay.com", "wss://nos.lol"}
 # feed's known authors. Every relay query set is pinned to at least this many
 # active bootstrap connections so a poisoned/wedged relay list can never starve
 # a feed below the survivability floor.
-MIN_RELAY_FLOOR = 3
+# Sized to the lean insider fleet: both bootstrap endpoints (local sovereign
+# relay + read-only relay.iyou.me) must survive aggregation. A floor above the
+# fleet size would be unsatisfiable and silently degrade to a no-op.
+MIN_RELAY_FLOOR = 2
 # The outbox hint query is strictly opportunistic: it must fit inside the
 # initial-feed shell budget without stealing time from the notes fetch itself.
 FEED_OUTBOX_TIMEOUT = 0.8
@@ -4117,16 +4149,27 @@ class ProfileView(TemplateView):
         context["hex_pubkey"] = hex_pubkey or ""
         context["target_pubkey_hex"] = hex_pubkey or ""
         context["target_nostr_pubkey_hex"] = hex_pubkey or ""
-        context["npub"] = hex_to_npub(hex_pubkey) if hex_pubkey else identifier or ""
+        # Never echo the raw URL segment into the npub field. For an unresolvable
+        # identifier that used to print a bare handle under the "Nostr Public Key"
+        # label, which reads as a real key but is not one.
+        context["npub"] = hex_to_npub(hex_pubkey) if hex_pubkey else ""
         context["target_npub"] = context["npub"]
         context["og_image"] = og_fallback_image(self.request)
 
-        if not hex_pubkey:
+        # A claimed Link Deck is a valid sovereign identity in its own right, so a
+        # handle whose deck has not linked a Nostr key yet must still render rather
+        # than being reported as absent from the mesh.
+        deck_only = not hex_pubkey and bool(owner_deck)
+        context["no_nostr_key"] = deck_only
+
+        if not hex_pubkey and not owner_deck:
             context["error"] = f"Peer Not Found on Mesh: {identifier}"
             return context
 
         # Instant Profile Shell: resolve local metadata immediately without blocking on relays.
-        context["hydrate_profile"] = True
+        # Deck-only profiles have no author key to query, so relay hydration is skipped
+        # entirely rather than fired with an empty candidate list.
+        context["hydrate_profile"] = not deck_only
         context["candidates_json"] = json.dumps(author_candidates)
 
         profile = {}

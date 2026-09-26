@@ -55,28 +55,20 @@ SHOW_L2_TOGGLE = env.bool("SHOW_L2_TOGGLE", default=True)
 #
 # Every entry below was measured live against a live NIP-01 REQ (handshake time
 # and event delivery, not just TCP reachability):
-#   ws://127.0.0.1:9003    ~34ms   sovereign local relay
-#   wss://offchain.pub    ~186ms
-#   wss://relay.damus.io  ~304ms
-#   wss://relay.wellorder.net ~311ms
-#   wss://relay.snort.social  ~452ms
-#   wss://nostr.mom       ~444ms
-#   wss://nostr.oxtr.dev  ~456ms
-#   wss://relay.primal.net ~525ms  retention leader
-#   wss://relay.iyou.me    ecosystem peer — first-party relay. Reinstated as a
-#                           read-only peer: it handshakes reliably but delivers
-#                           zero events for public kinds, so it is queried for
-#                           coverage and is never a write target or the primary.
-# Removed: wss://relay.nostr.band (consistent TCP connect timeout).
+#   ws://127.0.0.1:9003  sovereign local relay, ~34ms, primary read/write
+#   wss://relay.iyou.me  ecosystem peer — first-party relay. Read-only peer: it
+#                           handshakes reliably and is queried for coverage, but
+#                           delivers zero events for public kinds, so it is never
+#                           a write target. See the WRITE_EXCLUDED policy in
+#                           apps/core/nip10.py and relay_pool.js buildBootstrapRelays.
+# Trimmed to the two sovereign endpoints. The seven public relays that used to sit
+# between them (offchain.pub, damus, wellorder, snort, nostr.mom, oxtr, primal)
+# each added a WAN round trip to every settle window while contributing no
+# first-party traffic; circle-aware settle budgets in apps/core/views.py already
+# widen the window for the Global scope, which is where public coverage belongs.
+# Re-add individual public relays at the top of the list to opt back in.
 NOSTR_RELAYS = [
     "ws://127.0.0.1:9003",
-    "wss://offchain.pub",
-    "wss://relay.damus.io",
-    "wss://relay.wellorder.net",
-    "wss://relay.snort.social",
-    "wss://nostr.mom",
-    "wss://nostr.oxtr.dev",
-    "wss://relay.primal.net",
     "wss://relay.iyou.me",
 ]
 

@@ -129,9 +129,15 @@
           <span class="author-badge-slot shrink-0" data-author-slot="{{ target_pubkey_hex }}"></span>
         </div>
 
+        {% if no_nostr_key %}
+        <p class="text-xs font-mono text-slate-400 dark:text-slate-500 truncate max-w-sm sm:max-w-xl">
+          No Nostr key linked to this deck yet
+        </p>
+        {% elif target_npub %}
         <p class="text-xs font-mono text-slate-400 dark:text-slate-500 truncate max-w-sm sm:max-w-xl" title="{{ target_npub }}">
           {{ target_npub }}
         </p>
+        {% endif %}
 
         <!-- Bio / About -->
         {% if profile.about %}

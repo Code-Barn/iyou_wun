@@ -234,3 +234,142 @@ class SyncKeysCacheInvalidationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.deck.refresh_from_db()
         self.assertEqual(self.deck.nostr_pubkey, ENCLAVE_PUBKEY)
+
+
+class PolymorphicProfileIdentifierTests(TestCase):
+    """``/profile/<identifier>/`` must accept a claimed Link Deck handle.
+
+    resolve_universal_identifier() only understands npub1..., 64-char hex and
+    "@"-bearing NIP-05, so a bare handle like ``dcbyers13`` fell through every
+    branch and rendered "Peer Not Found on Mesh" for a peer that is registered
+    in our own database.
+    """
+
+    HEX_A = "a" * 64
+    HEX_B = "b" * 64
+
+    def _user(self, username="did:key:z6MkhFNrAUrHnkQ2S2t4LrPQqT7jV2mR9dYcXbN3qW5eK"):
+        from django.contrib.auth import get_user_model
+
+        return get_user_model().objects.create_user(username=username, password=None)
+
+    def _deck(self, username, handle, **kwargs):
+        from apps.core.models import UserLinkDeck
+
+        return UserLinkDeck.objects.create(
+            user=self._user(username), handle=handle, **kwargs
+        )
+
+    def _resolve(self, identifier):
+        from apps.core.views import _resolve_profile_candidates
+
+        return _resolve_profile_candidates(identifier)
+
+    def test_handle_resolves_to_deck_and_nostr_pubkey(self):
+        deck = self._deck("did:key:zA", "dcbyers13", nostr_pubkey=self.HEX_A)
+
+        carried, _user, owner_deck, hex_pubkey, candidates = self._resolve("dcbyers13")
+
+        self.assertEqual(carried, "handle")
+        self.assertEqual(owner_deck.pk, deck.pk)
+        self.assertEqual(hex_pubkey, self.HEX_A)
+        self.assertIn(self.HEX_A, candidates)
+
+    def test_handle_lookup_is_case_insensitive(self):
+        deck = self._deck("did:key:zB", "dcbyers13", nostr_pubkey=self.HEX_A)
+
+        _carried, _user, owner_deck, hex_pubkey, _c = self._resolve("DCByers13")
+
+        self.assertEqual(owner_deck.pk, deck.pk)
+        self.assertEqual(hex_pubkey, self.HEX_A)
+
+    def test_enclave_synced_npub_handle_key_decodes_to_hex(self):
+        from apps.core.views import hex_to_npub
+
+        self._deck("did:key:zC", "npubholder", nostr_pubkey=hex_to_npub(self.HEX_B))
+
+        _carried, _user, _deck, hex_pubkey, candidates = self._resolve("npubholder")
+
+        self.assertEqual(hex_pubkey, self.HEX_B)
+        self.assertIn(self.HEX_B, candidates)
+
+    def test_handle_without_nostr_key_falls_back_to_did_derived_key(self):
+        from apps.core.did_kit import did_to_pubkey
+
+        user = self._user("did:iyou:0x" + "c" * 64)
+        from apps.core.models import UserLinkDeck
+
+        UserLinkDeck.objects.create(user=user, handle="deckonly", nostr_pubkey="")
+
+        _carried, owner_user, _deck, hex_pubkey, _c = self._resolve("deckonly")
+
+        self.assertEqual(owner_user.pk, user.pk)
+        self.assertEqual(hex_pubkey, did_to_pubkey(user.username))
+
+    def test_handle_with_no_key_at_all_still_returns_the_deck(self):
+        """A deck that has never linked a key is still a real sovereign identity.
+
+        hex_pubkey is empty here -- the username is not a DID and the deck has no
+        nostr_pubkey -- so the caller must key off owner_deck rather than
+        reporting the peer as absent from the mesh.
+        """
+        deck = self._deck("plain_unresolvable_username", "keyless", nostr_pubkey="")
+
+        carried, _user, owner_deck, hex_pubkey, _c = self._resolve("keyless")
+
+        self.assertEqual(carried, "handle")
+        self.assertEqual(owner_deck.pk, deck.pk)
+        self.assertEqual(hex_pubkey, "")
+
+    def test_duplicate_handle_prefers_lowest_discriminator(self):
+        user = self._user("did:iyou:0x" + "e" * 64)
+        from apps.core.models import UserLinkDeck
+
+        base = UserLinkDeck.objects.create(
+            user=user, handle="reclaimed", discriminator=0, nostr_pubkey=self.HEX_A
+        )
+        UserLinkDeck.objects.create(
+            user=self._user("did:iyou:0x" + "f" * 64),
+            handle="reclaimed",
+            discriminator=1,
+            nostr_pubkey=self.HEX_B,
+        )
+
+        _carried, _user, owner_deck, hex_pubkey, _c = self._resolve("reclaimed")
+
+        self.assertEqual(owner_deck.pk, base.pk)
+        self.assertEqual(hex_pubkey, self.HEX_A)
+
+    def test_unknown_handle_resolves_to_nothing(self):
+        self._deck("did:iyou:0x" + "1" * 64, "someoneelse", nostr_pubkey=self.HEX_A)
+
+        carried, owner_user, owner_deck, hex_pubkey, _c = self._resolve("ghost")
+
+        self.assertEqual(carried, "")
+        self.assertIsNone(owner_deck)
+        self.assertEqual(hex_pubkey, "")
+
+    def test_nip05_is_not_shadowed_by_handle_lookup(self):
+        """A NIP-05 still goes to the universal resolver, never the local index."""
+        from apps.core.views import resolve_universal_identifier
+
+        self._deck("did:iyou:0x" + "2" * 64, "alice", nostr_pubkey=self.HEX_A)
+
+        pubkey, carried = resolve_universal_identifier("alice@elsewhere.example")
+
+        self.assertIsNone(pubkey)
+        self.assertIsNone(carried)
+
+    def test_hex_identifier_is_not_treated_as_a_handle(self):
+        from apps.core.models import UserLinkDeck
+
+        UserLinkDeck.objects.create(
+            user=self._user("did:iyou:0x" + "3" * 64),
+            handle=self.HEX_A[:32],
+            nostr_pubkey=self.HEX_A,
+        )
+
+        carried, _user, _deck, hex_pubkey, _c = self._resolve(self.HEX_A)
+
+        self.assertEqual(carried, "hex")
+        self.assertEqual(hex_pubkey, self.HEX_A)

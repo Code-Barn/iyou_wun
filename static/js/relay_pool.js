@@ -53,18 +53,19 @@
     }
 
     function buildBootstrapRelays() {
+        // Insider-first lean fleet: our own two sovereign endpoints only.
+        //   ws://127.0.0.1:9003  local relay — primary read/write, sub-50ms, so it
+        //                         answers the settle window before it closes.
+        //   wss://relay.iyou.me   first-party peer — read-only. It handshakes
+        //                         reliably but delivers zero events for public
+        //                         kinds and its writes are dropped server-side, so
+        //                         it must never be a publish target or primary.
+        // The seven public relays this list used to carry (offchain.pub, damus,
+        // wellorder, snort, nostr.mom, oxtr, primal) each cost a WAN round trip in
+        // every settle window for no first-party traffic. Add them back here to opt
+        // back into public coverage.
         const fleet = [
-            { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false },
-            { url: "wss://offchain.pub", read: true, write: true, isLocal: false, primary: true },
-            { url: "wss://relay.damus.io", read: true, write: true, isLocal: false, primary: false },
-            { url: "wss://relay.wellorder.net", read: true, write: true, isLocal: false, primary: false },
-            { url: "wss://relay.snort.social", read: true, write: true, isLocal: false, primary: false },
-            { url: "wss://nostr.mom", read: true, write: true, isLocal: false, primary: false },
-            { url: "wss://nostr.oxtr.dev", read: true, write: true, isLocal: false, primary: false },
-            { url: "wss://relay.primal.net", read: true, write: true, isLocal: false, primary: false },
-            // Ecosystem peer relay: first-party, handshakes reliably, but delivers
-            // zero events for public kinds. Read-only — writes to it are dropped
-            // server-side, so it must never be a publish target or the primary.
+            { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: true },
             { url: "wss://relay.iyou.me", read: true, write: false, isLocal: false, primary: false }
         ];
         return fleet.filter(function (r) { return !isExcludedRelay(r.url); });

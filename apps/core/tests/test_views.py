@@ -3957,29 +3957,44 @@ class Phase45SessionAndRelayHardeningTests(TestCase):
 
     def test_default_relays_prioritizes_fast_endpoints(self):
         from apps.core.views import DEFAULT_RELAYS, EXCLUDED_RELAYS
+        # Insider-first lean fleet: the pinned local sovereign relay leads, the
+        # read-only first-party peer tails it.
         self.assertEqual(DEFAULT_RELAYS[0], "ws://127.0.0.1:9003")
-        # Host-verified responsive fleet (live NIP-01 REQ, measured handshake +
-        # event delivery). Dead and eventless uplinks are absent.
-        for responsive in (
+        self.assertIn("wss://relay.iyou.me", DEFAULT_RELAYS)
+        self.assertEqual(DEFAULT_RELAYS[-1], "wss://relay.iyou.me")
+        # The seven public WAN relays were trimmed: each added a round trip to
+        # every settle window for no first-party traffic. Global-scope queries
+        # widen the settle window instead, which is where public coverage belongs.
+        for trimmed in (
             "wss://offchain.pub",
             "wss://relay.damus.io",
             "wss://relay.wellorder.net",
             "wss://relay.snort.social",
+            "wss://nostr.mom",
             "wss://nostr.oxtr.dev",
             "wss://relay.primal.net",
+            "wss://relay.nostr.band",
         ):
-            self.assertIn(responsive, DEFAULT_RELAYS)
-        # Removed: relay.nostr.band (consistent TCP connect timeout).
-        self.assertNotIn("wss://relay.nostr.band", DEFAULT_RELAYS)
-        # Reinstated as a read-only ecosystem peer: it handshakes reliably but
-        # delivers zero events for public kinds, so it is queried for coverage
-        # and is never a write target or the primary. It is deliberately the
-        # tail of the fleet, and MAX_RELAY_FANOUT is sized so the fan-out budget
-        # does not truncate it out of the default query set.
-        self.assertIn("wss://relay.iyou.me", DEFAULT_RELAYS)
-        self.assertEqual(DEFAULT_RELAYS[-1], "wss://relay.iyou.me")
+            self.assertNotIn(trimmed, DEFAULT_RELAYS)
         for excluded in EXCLUDED_RELAYS:
             self.assertNotIn(excluded, DEFAULT_RELAYS)
+
+    def test_min_relay_floor_is_satisfiable_by_the_lean_fleet(self):
+        """A floor above the fleet size would silently degrade to a no-op."""
+        from apps.core.views import (
+            DEFAULT_RELAYS,
+            EXCLUDED_RELAYS,
+            LOCAL_RELAY,
+            MIN_RELAY_FLOOR,
+            ensure_min_relay_floor,
+        )
+
+        self.assertLessEqual(MIN_RELAY_FLOOR, len(DEFAULT_RELAYS))
+        floored = ensure_min_relay_floor([])
+        self.assertGreaterEqual(len(floored), MIN_RELAY_FLOOR)
+        self.assertEqual(floored[0], LOCAL_RELAY)
+        for excluded in EXCLUDED_RELAYS:
+            self.assertNotIn(excluded, floored)
 
     def test_fanout_ceiling_covers_the_full_fleet(self):
         """MAX_RELAY_FANOUT must be at least the fleet size.
@@ -4370,7 +4385,11 @@ class RelayFanoutStabilizationTests(TestCase):
             floored = ensure_min_relay_floor([LOCAL_RELAY])
         for excluded in EXCLUDED_RELAYS:
             self.assertNotIn(excluded, floored)
-        self.assertGreaterEqual(len(floored), 3)
+        # Referenced, not hardcoded: the floor is sized to the lean insider fleet
+        # and must stay satisfiable by whatever DEFAULT_RELAYS contains.
+        from apps.core.views import MIN_RELAY_FLOOR
+
+        self.assertGreaterEqual(len(floored), MIN_RELAY_FLOOR)
 
     def test_relay_req_returns_early_on_first_completed(self):
         """relay_req returns the first responder's events without waiting for laggard relays."""
@@ -4402,3 +4421,168 @@ class RelayFanoutStabilizationTests(TestCase):
 
 
 
+
+
+class ProfileHandleResolutionViewTests(TestCase):
+    """The view-level contract: a claimed handle renders, a ghost handle 404s.
+
+    The regression was "/profile/dcbyers13/ -> Peer Not Found on Mesh" for a
+    peer registered in our own database, plus the invalid handle being echoed
+    into the "Nostr Public Key (npub)" box as if it were a real key.
+    """
+
+    HEX = "3f" * 32
+
+    def _deck(self, handle, username="did:iyou:0x" + "9" * 64, **kwargs):
+        from django.contrib.auth import get_user_model
+
+        from apps.core.models import UserLinkDeck
+
+        user = get_user_model().objects.create_user(username=username, password=None)
+        return UserLinkDeck.objects.create(user=user, handle=handle, **kwargs)
+
+    def test_known_handle_renders_profile_without_peer_not_found(self):
+        self._deck(
+            "dcbyers13",
+            display_name="Dan Byers",
+            headline="Building sovereign things",
+            nostr_pubkey=self.HEX,
+        )
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            resp = self.client.get("/profile/dcbyers13/")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("Peer Not Found", body)
+        self.assertIn("Dan Byers", body)
+        self.assertIn("Building sovereign things", body)
+        self.assertIn("@dcbyers13", body)
+
+    def test_known_handle_exposes_hex_key_to_relay_hydration(self):
+        self._deck("hydration", nostr_pubkey=self.HEX)
+
+        with patch("apps.core.views.relay_req", return_value={}) as relay:
+            resp = self.client.get("/profile/hydration/")
+
+        self.assertEqual(resp.status_code, 200)
+        # The resolved hex reaches the client as an author candidate...
+        self.assertTrue(resp.context["hydrate_profile"])
+        self.assertIn(self.HEX, resp.context["candidates_json"])
+        # ...while the deck itself supplies the server-rendered shell, so the
+        # blocking Kind 0 relay query is short-circuited.
+        self.assertFalse(relay.called)
+
+    def test_keyless_deck_renders_from_local_model_and_skips_relays(self):
+        """No Nostr key: render the deck, and never query relays for nothing."""
+        self._deck(
+            "keyless",
+            username="plain_unresolvable_username",
+            display_name="Deck Only Human",
+            headline="No key linked",
+            nostr_pubkey="",
+        )
+
+        with patch("apps.core.views.relay_req", return_value={}) as relay:
+            resp = self.client.get("/profile/keyless/")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertNotIn("Peer Not Found", body)
+        self.assertIn("Deck Only Human", body)
+        self.assertIn("No Nostr key linked to this deck yet", body)
+        # No author key exists, so relay hydration is disabled outright.
+        self.assertFalse(resp.context["hydrate_profile"])
+        self.assertFalse(relay.called)
+
+    def test_unknown_handle_reports_peer_not_found_without_faking_an_npub(self):
+        self._deck("realhandle", nostr_pubkey=self.HEX)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            resp = self.client.get("/profile/nosuchhandle/")
+
+        self.assertEqual(resp.status_code, 200)
+        body = resp.content.decode()
+        self.assertIn("Peer Not Found", body)
+        # The invalid handle must never be presented as a Nostr public key.
+        self.assertEqual(resp.context["target_npub"], "")
+
+    def test_garbage_identifier_is_not_echoed_into_the_npub_box(self):
+        """A routeable but unresolvable identifier must not become an npub.
+
+        ``/profile/x/`` is too short for HANDLE_PATTERN, is not hex, not npub1 and
+        carries no "@" for NIP-05, so it reaches the error branch with an empty
+        target_npub. (Characters outside the URL pattern's
+        ``[a-zA-Z0-9_@.-]`` charset never reach the view at all -- Django's
+        router 404s them, which is the stricter outcome.)
+        """
+        with patch("apps.core.views.relay_req", return_value={}):
+            resp = self.client.get("/profile/x/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Peer Not Found", resp.content.decode())
+        self.assertEqual(resp.context["target_npub"], "")
+        self.assertEqual(resp.context["npub"], "")
+
+    def test_npub_and_hex_paths_are_unregressed(self):
+        from apps.core.views import hex_to_npub
+
+        self._deck("byhandle", nostr_pubkey=self.HEX)
+        npub = hex_to_npub(self.HEX)
+
+        with patch("apps.core.views.relay_req", return_value={}):
+            npub_resp = self.client.get(f"/profile/{npub}/")
+            hex_resp = self.client.get(f"/profile/{self.HEX}/")
+
+        for resp in (npub_resp, hex_resp):
+            self.assertEqual(resp.status_code, 200)
+            self.assertNotIn("Peer Not Found", resp.content.decode())
+            self.assertEqual(resp.context["target_npub"], npub)
+
+
+class SovereignCreatorsWidgetLinkTests(TestCase):
+    """Right-rail creator links must land on a route that actually resolves.
+
+    The widget links to {% url 'profile' creator.handle|cut:"@" %}. That only
+    works now that ProfileView accepts a handle, so the two are locked together
+    here: a creator's advertised link target must return 200 and render the deck.
+    """
+
+    HEX = "7c" * 32
+
+    def test_creator_link_target_renders_for_a_real_handle(self):
+        from django.contrib.auth import get_user_model
+
+        from apps.core.models import UserLinkDeck
+
+        user = get_user_model().objects.create_user(
+            username="did:iyou:0x" + "4" * 64, password=None
+        )
+        UserLinkDeck.objects.create(
+            user=user,
+            handle="dcbyers13",
+            display_name="Dan Byers",
+            nostr_pubkey=self.HEX,
+        )
+
+        # The exact href the widget emits: /profile/<handle without @>/
+        with patch("apps.core.views.relay_req", return_value={}):
+            resp = self.client.get("/profile/dcbyers13/")
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertNotIn("Peer Not Found", resp.content.decode())
+        self.assertIn("Dan Byers", resp.content.decode())
+
+    def test_right_rail_uses_the_profile_route_for_creators(self):
+        """Static guard: the widget must not link creators at /@handle/, which is
+        the Link Deck detail route, nor at a hardcoded peer."""
+        from pathlib import Path
+
+        import apps.core as core_app
+
+        rail = Path(core_app.__file__).resolve().parent.parent.parent
+        src = (rail / "templates" / "includes" / "_feed_right_rail.html").read_text()
+
+        self.assertIn("{% url 'profile' profile_id %}", src)
+        self.assertIn('creator.handle|cut:"@"', src)
+        self.assertNotIn('href="/@{{ creator.handle }}"', src)
