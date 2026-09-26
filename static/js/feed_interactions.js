@@ -770,7 +770,7 @@
         var npub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "You");
         var authorName = note.author_display_name || note.author_name || npub;
         var authorHandle = note.author_handle || note.handle || "";
-        var authorSubLabel = authorHandle || note.author_name || "";
+        var authorSubLabel = (authorHandle && authorHandle !== authorName) ? authorHandle : "";
         var authorUrl = note.author_url || (authorHandle ? "/@" + authorHandle + "/" : "/profile/" + npub + "/");
         var authorAvatar = note.author_avatar || "";
         var authorDid = note.author_did || "";

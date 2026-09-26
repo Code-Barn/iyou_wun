@@ -1,6 +1,10 @@
 <!-- Floating Chat Messenger System -->
 <script>
-  window.__iknowyou_user_authenticated__ = true;
+  {% if user.is_authenticated %}
+    window.__iknowyou_user_authenticated__ = true;
+  {% else %}
+    window.__iknowyou_user_authenticated__ = false;
+  {% endif %}
 </script>
 <div id="floating-chat-root" class="fixed bottom-0 right-20 z-40 flex items-end gap-3 pointer-events-none font-mono max-lg:bottom-16">
 

@@ -296,7 +296,12 @@
   function initChatSession() {
     if (!window.__iknowyou_user_authenticated__) return;
     fetch('/api/chat/session/', { credentials: 'same-origin' })
-      .then(function (res) { return res.json(); })
+      .then(function (res) {
+        // A 401/5xx body is not the session payload — do not hand it to the
+        // consumers below, and never throw on a non-JSON error page.
+        if (!res || !res.ok) return null;
+        return res.json();
+      })
       .then(function (data) {
         if (!data || data.success === false) return;
         chatSession = data;

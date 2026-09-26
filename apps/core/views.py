@@ -3114,7 +3114,12 @@ def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None, settl
     enriched) so templates can render a compact nested quote card. Roots whose
     quoted event is unreachable are left with an empty `quoted_note` dict.
     """
-    from .nip10 import _enrich_root, extract_media_from_note
+    from .nip10 import (
+        _enrich_root,
+        extract_media_from_note,
+        inspect_note_diagnostics,
+        is_renderable_note,
+    )
 
     def _ts_to_dt(ts):
         from datetime import datetime
@@ -3163,6 +3168,16 @@ def attach_quoted_notes(roots, relay_urls=None, timeout=10, deadline=None, settl
     quoted_map = {}
     for eid, e in raw_quoted.items():
         if eid not in quoted_ids:
+            continue
+        # Quoted events are attached *after* process_into_feed's sanitizer pass,
+        # so re-apply the same gate here or machine noise rides in via a quote.
+        # is_renderable_note drops empty notes / P2P discovery beacons;
+        # inspect_note_diagnostics is what actually catches machine noise such as
+        # raw JSON telemetry ({"type":"presence", ...}), which is non-empty
+        # content and therefore renderable by the first check alone.
+        if not is_renderable_note(e):
+            continue
+        if inspect_note_diagnostics(e)["status"] == "BLOCKED":
             continue
         quoted = _enrich_root(e, e.get("kind"), profiles, _ts_to_dt)
         quoted = extract_media_from_note(quoted)

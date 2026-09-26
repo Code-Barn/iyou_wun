@@ -197,6 +197,27 @@ class DeckRoutingTests(TestCase):
         self.assertEqual(response.status_code, 301)
         self.assertEqual(response["Location"], "/@alice[1]")
 
+    def test_deck_routes_omit_floating_chat_dock_for_anonymous(self):
+        """Public /@handle/ pages must not mount the chat dock for logged-out visitors.
+
+        The dock sets window.__iknowyou_user_authenticated__, which gates the
+        /api/chat/session/ fetch in floating_chat.js. A hardcoded true there made
+        anonymous visitors fire a guaranteed 401.
+        """
+        for url in ("/@alice", f"/u/{self.deckless.username}/"):
+            with self.subTest(url=url):
+                response, _ = self._get_with_relays_down(url)
+                self.assertEqual(response.status_code, 200)
+                self.assertNotContains(response, "floating-chat-root")
+                self.assertNotContains(response, "__iknowyou_user_authenticated__")
+
+    def test_deck_routes_mount_floating_chat_dock_for_authenticated(self):
+        self.client.force_login(self.deckless)
+        response, _ = self._get_with_relays_down(f"/u/{self.deckless.username}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "floating-chat-root")
+        self.assertContains(response, "window.__iknowyou_user_authenticated__ = true;")
+
     def test_did_fallback_without_deck_renders_card(self):
         response, _ = self._get_with_relays_down(f"/u/{self.deckless.username}/")
         self.assertEqual(response.status_code, 200)

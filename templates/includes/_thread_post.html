@@ -63,9 +63,11 @@
         <a href="{% if note.author_url %}{{ note.author_url }}{% else %}{% url 'profile' npub=note.npub %}{% endif %}" class="font-bold text-slate-900 dark:text-slate-100 hover:underline text-sm truncate font-mono">
           {% if note.author_display_name %}{{ note.author_display_name }}{% else %}{{ note.author_name|default:note.npub|truncatechars:14 }}{% endif %}
         </a>
-        <span class="text-xs text-slate-400 font-mono truncate hidden sm:inline">
-          @{{ note.author_handle|default:note.author_name|default:note.npub|truncatechars:12 }}
-        </span>
+        {% if note.author_handle and note.author_handle != note.author_display_name %}
+          <span class="text-xs text-slate-400 font-mono truncate hidden sm:inline">
+            @{{ note.author_handle|truncatechars:12 }}
+          </span>
+        {% endif %}
         <span class="author-badge-slot" data-author-slot="{{ note.pubkey }}"></span>
         {% if note.is_iyou_native %}
         <span class="px-1.5 py-0.2 rounded bg-violet-100 dark:bg-violet-950/80 text-violet-700 dark:text-violet-300 border border-violet-300 dark:border-violet-700/60 text-[10px] font-mono font-semibold" title="Native Sovereign Peer">

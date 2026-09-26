@@ -19,7 +19,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from ..views import process_into_feed
+from ..views import attach_quoted_notes, process_into_feed
 from .helpers import make_event, VALID_PUBKEY_HEX
 
 
@@ -878,6 +878,46 @@ class FeedSanitizerTests(TestCase):
         roots = feed["roots"]
         self.assertEqual(len(roots), 1)
         self.assertEqual(roots[0]["id"], "clean_card")
+
+    def test_quoted_raw_json_noise_dropped(self):
+        """attach_quoted_notes runs after the main sanitizer, so it must re-gate.
+
+        Quoted events are attached post-filter; without an explicit check a raw
+        JSON telemetry ping rode into quote cards even in production.
+        """
+        noise = make_event("quote_noise", 1, content='{"type":"presence","ts":1700000000}')
+        clean = make_event("quote_clean", 1, content="a genuine quoted observation")
+        beacon = make_event(
+            "quote_beacon",
+            1,
+            content="",
+            tags=[["t", "p2p-beacon"]],
+        )
+
+        def fake_relay_req(filter_obj, **kwargs):
+            if "ids" in filter_obj:
+                return {"quote_noise": noise, "quote_clean": clean, "quote_beacon": beacon}
+            return {}
+
+        roots = [
+            {"id": "r1", "kind": 1, "pubkey": VALID_PUBKEY_HEX, "npub": "npub1root",
+             "quoted_id": "quote_noise", "content": "root one", "created_at_epoch": 1700000000},
+            {"id": "r2", "kind": 1, "pubkey": VALID_PUBKEY_HEX, "npub": "npub1root",
+             "quoted_id": "quote_clean", "content": "root two", "created_at_epoch": 1700000000},
+            {"id": "r3", "kind": 1, "pubkey": VALID_PUBKEY_HEX, "npub": "npub1root",
+             "quoted_id": "quote_beacon", "content": "root three", "created_at_epoch": 1700000000},
+        ]
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            result = attach_quoted_notes(roots)
+
+        # Raw JSON telemetry: dropped, leaving the empty dict the template guards on.
+        self.assertEqual(result[0]["quoted_note"], {})
+        # Empty P2P discovery beacon: dropped.
+        self.assertEqual(result[2]["quoted_note"], {})
+        # Human note survives the gate.
+        self.assertEqual(result[1]["quoted_note"]["id"], "quote_clean")
+        self.assertEqual(result[1]["quoted_note"]["content"], "a genuine quoted observation")
 
     def test_roster_telemetry_and_hex_dumps_dropped_as_noise(self):
         clean_note = make_event("clean_human", 1, content="Hello mesh peers, welcome to iyou_wun!")
@@ -1985,6 +2025,67 @@ class Phase2FrontendDiagnosticTests(TestCase):
         self.assertIn("data-is-iyou=\"true\"", html)
 
 
+class AuthorSublineRenderTests(TestCase):
+    """The @handle subline must not repeat the display name.
 
+    resolve_author_identity falls back to deck.handle when display_name is
+    blank, so author_display_name and author_handle are frequently identical,
+    which rendered as "primary_identity_9e7db757 @primary_identity_9e7db757".
+    """
 
+    SUBLINE_SPAN = 'class="text-xs text-slate-400 font-mono truncate hidden sm:inline"'
 
+    def _render(self, **overrides):
+        from datetime import datetime
+
+        from django.contrib.auth.models import AnonymousUser
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+
+        request = RequestFactory().get("/feed")
+        request.user = AnonymousUser()
+
+        note = {
+            "id": "subline_note",
+            "kind": 1,
+            "pubkey": "ab" * 32,
+            "npub": "npub1subline",
+            "author_display_name": "primary_identity_9e7db757",
+            "author_handle": "primary_identity_9e7db757",
+            "author_name": "",
+            "content": "hello mesh",
+            "created_at": datetime(2023, 11, 14, 22, 13, 20),
+            "created_at_epoch": 1700000000,
+            "tags": [],
+            "replies": [],
+        }
+        note.update(overrides)
+        return render_to_string(
+            "includes/_thread_post.html", {"note": note, "request": request}, request=request
+        )
+
+    def test_subline_hidden_when_handle_equals_display_name(self):
+        html = self._render()
+
+        self.assertEqual(html.count("primary_identity_9e7db757"), 1)
+        self.assertNotIn("@primary_identity_9e7db757", html)
+        self.assertNotIn(self.SUBLINE_SPAN, html)
+
+    def test_subline_shown_when_handle_differs_from_display_name(self):
+        html = self._render(author_display_name="Zork", author_handle="zorkhandle")
+
+        self.assertIn("Zork", html)
+        self.assertIn(self.SUBLINE_SPAN, html)
+        self.assertIn("@zorkhandle", html)
+
+    def test_subline_hidden_when_no_registered_handle(self):
+        """Kind-0-only authors have no deck handle; do not fall back to the npub.
+
+        Asserts on the header subline span specifically. `@npub1subline` still
+        appears in the pre-existing kebab moderation menu (Mute/Block), which is
+        a separate fallback chain and out of scope here.
+        """
+        html = self._render(author_handle="", author_display_name="Zork Sifter")
+
+        self.assertIn("Zork Sifter", html)
+        self.assertNotIn(self.SUBLINE_SPAN, html)
