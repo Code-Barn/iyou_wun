@@ -2027,6 +2027,10 @@ def fetch_profile_data(hex_pubkey, relay_urls=None):
 
 
 
+MEDIA_OVERFETCH_FACTOR = 3
+# A Kind 1 relay event can expand to many media cards, and the gallery tab split
+# runs after categorization, so fetch_media_assets() queries `limit * FACTOR`
+# events and trims once every card has been classified.
 MEDIA_CATEGORIES = {
     "image": {
         "mime_prefixes": ("image/",),
@@ -2044,9 +2048,18 @@ MEDIA_CATEGORIES = {
 
 
 def categorize_media(note):
-    """Classify a media note into image/video/audio/other by MIME and extension."""
+    """Classify a media note into image/video/audio/other by MIME and extension.
+
+    The URL is compared against the extension table with any query string and
+    fragment stripped first: Blossom and CDN media links routinely carry
+    ``?x=<sha256>`` style parameters, and a bare ``endswith`` would file every
+    one of them under "other" instead of its real type.
+    """
     mime = (note.get("mime_type") or "").lower()
     url = (note.get("file_url") or "").lower()
+    for sep in ("?", "#"):
+        if sep in url:
+            url = url.split(sep, 1)[0]
 
     for cat, spec in MEDIA_CATEGORIES.items():
         for prefix in spec["mime_prefixes"]:
@@ -2056,6 +2069,14 @@ def categorize_media(note):
             if url.endswith(ext):
                 return cat
     return "other"
+
+
+def _is_local_media_url(url):
+    """True when a media URL points at a sovereign/local enclave (loopback Blossom)."""
+    if not url:
+        return False
+    lowered = url.lower()
+    return "127.0.0.1" in lowered or "localhost" in lowered or "[::1]" in lowered
 
 
 def _extract_nip94_tags(tags):
@@ -2117,8 +2138,24 @@ def _extract_display_title(content, summary="", alt_text=""):
 
 
 def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
-    """Fetch Kind 1063 media attachments and resolve Kind 0 profiles."""
-    filter_obj = {"kinds": [1063], "limit": limit}
+    """Fetch media cards from Kind 1063 file headers *and* Kind 1 text notes.
+
+    Most Nostr media is never published as a dedicated NIP-94 file-header event:
+    it arrives as an ordinary text note with an unfurled image/video/audio URL (or
+    a Blossom link) in the content. Querying Kind 1063 alone therefore left the
+    gallery tabs chronically sparse, so Kind 1 is queried alongside it and the two
+    are normalized into one card shape by the enrichment loop below.
+
+    One relay event can yield zero, one, or many cards (a Kind 1 note with three
+    media URLs becomes three cards), and the per-tab split is applied *after*
+    categorization. The query therefore over-fetches by MEDIA_OVERFETCH_FACTOR:
+    without headroom, Kind 1 volume dominates the mixed result set and the
+    truncation to `limit` starves the image tab of the very items Kind 1 was
+    added to surface.
+    """
+    from .nip10 import extract_media_from_note
+
+    filter_obj = {"kinds": [1, 1063], "limit": limit * MEDIA_OVERFETCH_FACTOR}
     if authors:
         filter_obj["authors"] = authors
     if until is not None:
@@ -2163,53 +2200,160 @@ def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
                 profiles[pk] = {}
 
     result = []
+    # Guards against one card per duplicate attachment when a URL is repeated
+    # inside a note or echoed by both a Kind 1 note and a Kind 1063 header.
+    emitted_cards = set()
+
     for e in raw_events.values():
         tags = e.get("tags", [])
         pk = e.get("pubkey", "")
         npub_val = hex_to_npub(pk) if pk else ""
         profile = profiles.get(pk, {})
-        file_url = sanitize_media_url(get_tag_value(tags, "url"))
-        nip94 = _extract_nip94_tags(tags)
         raw_content = e.get("content", "")
-        alt_val = get_tag_value(tags, "alt") or get_tag_value(tags, "summary") or ""
-        display_title = _extract_display_title(raw_content, nip94["summary"], alt_val)
 
         created_at_ts = int(e.get("created_at") or 0)
         dt = datetime.fromtimestamp(created_at_ts)
 
-        note = {
-            "id": e.get("id", ""),
-            "kind": 1063,
+        # Author envelope shared by both kinds so every card carries the same
+        # identity surface regardless of which event produced it.
+        author_envelope = {
             "pubkey": pk,
             "pubkey_hex": pk,
             "author_did": resolve_author_did(pk),
-            "tags_json": json.dumps(tags),
             "npub": npub_val,
             "nip05": profile.get("nip05") or "",
             "lud16": profile.get("lud16") or "",
+            "author_name": profile.get("display_name") or profile.get("name") or "",
+            "author_avatar": sanitize_media_url(profile.get("picture", "")),
+        }
+
+        if int(e.get("kind") or 0) == 1063:
+            # --- NIP-94 file header: one event, one card, tag-driven ---
+            file_url = sanitize_media_url(get_tag_value(tags, "url"))
+            nip94 = _extract_nip94_tags(tags)
+            alt_val = get_tag_value(tags, "alt") or get_tag_value(tags, "summary") or ""
+            display_title = _extract_display_title(raw_content, nip94["summary"], alt_val)
+
+            note = dict(author_envelope)
+            note.update({
+                "id": e.get("id", ""),
+                "kind": 1063,
+                "is_kind1": False,
+                "parent_event_id": e.get("id", ""),
+                "tags_json": json.dumps(tags),
+                "content": raw_content,
+                "display_title": display_title,
+                "created_at": dt,
+                "created_at_ts": created_at_ts,
+                "created_at_datetime": dt,
+                "seen_on": dt,
+                "tags": tags,
+                "file_url": file_url,
+                "media_url": file_url or "",
+                "mime_type": get_tag_value(tags, "m"),
+                "dimensions": get_tag_value(tags, "dim"),
+                "thumbnail_url": sanitize_media_url(get_tag_value(tags, "thumb")),
+                "alt_text": alt_val,
+                "is_sovereign": bool(file_url and _is_local_media_url(file_url)),
+                "duration": nip94["duration"],
+                "blossom_hash": nip94["blossom_hash"],
+                "blurhash": nip94["blurhash"],
+                "summary": nip94["summary"],
+            })
+            # Uniform attachment surface across both kinds: GalleryView resolves
+            # the OG image from media_attachments[0], which was always empty for
+            # 1063 cards and silently degraded the social preview to thumbnail_url.
+            note["media_attachments"] = (
+                [{"type": categorize_media(note), "url": file_url, "mime": note["mime_type"]}]
+                if file_url else []
+            )
+
+            note["media_type"] = categorize_media(note)
+            if not file_url:
+                continue
+            card_key = (note["parent_event_id"], file_url)
+            if card_key in emitted_cards:
+                continue
+            emitted_cards.add(card_key)
+            result.append(note)
+            continue
+
+        # --- Kind 1 text note: unfurl content into one card per attachment ---
+        note = dict(author_envelope)
+        note.update({
+            "id": e.get("id", ""),
+            "kind": 1,
+            "is_kind1": True,
+            "parent_event_id": e.get("id", ""),
+            "tags_json": json.dumps(tags),
             "content": raw_content,
-            "display_title": display_title,
             "created_at": dt,
             "created_at_ts": created_at_ts,
             "created_at_datetime": dt,
+            "seen_on": dt,
             "tags": tags,
-            "file_url": file_url,
-            "media_url": file_url or "",
-            "mime_type": get_tag_value(tags, "m"),
-            "dimensions": get_tag_value(tags, "dim"),
-            "thumbnail_url": sanitize_media_url(get_tag_value(tags, "thumb")),
-            "alt_text": alt_val,
-            "is_sovereign": bool(file_url and "127.0.0.1" in file_url),
-            "author_name": profile.get("display_name") or profile.get("name") or "",
-            "author_avatar": sanitize_media_url(profile.get("picture", "")),
-            "duration": nip94["duration"],
-            "blossom_hash": nip94["blossom_hash"],
-            "blurhash": nip94["blurhash"],
-            "summary": nip94["summary"],
-        }
+        })
 
-        note["media_type"] = categorize_media(note)
-        result.append(note)
+        # extract_media_from_note scans the content for media URLs, types each one
+        # via the shared extension tables, and returns both the attachment list
+        # and a display_content with the media URLs stripped out.
+        note = extract_media_from_note(note)
+        attachments = note.get("media_attachments") or []
+        if not attachments:
+            continue
+
+        stripped_content = note.get("display_content") or raw_content
+        for a in attachments:
+            a_url = a.get("url") or ""
+            if not a_url:
+                continue
+            card_key = (note["parent_event_id"], a_url)
+            if card_key in emitted_cards:
+                continue
+            emitted_cards.add(card_key)
+
+            a_alt = a.get("alt") or ""
+            card = dict(author_envelope)
+            card.update({
+                "id": e.get("id", ""),
+                "kind": 1,
+                "is_kind1": True,
+                "parent_event_id": e.get("id", ""),
+                "tags_json": json.dumps(tags),
+                "content": raw_content,
+                "display_content": stripped_content,
+                # A text note has no title field; the URL-stripped body is the
+                # best human label available, ahead of the raw content.
+                "display_title": a_alt or stripped_content or raw_content,
+                "created_at": dt,
+                "created_at_ts": created_at_ts,
+                "created_at_datetime": dt,
+                "seen_on": dt,
+                "tags": tags,
+                "file_url": a_url,
+                "media_url": a_url,
+                "mime_type": a.get("mime") or "",
+                "dimensions": a.get("dim") or "",
+                "thumbnail_url": a.get("thumb") or "",
+                "alt_text": a_alt,
+                "is_sovereign": bool(_is_local_media_url(a_url)),
+                "duration": "",
+                "blossom_hash": a.get("hash") or "",
+                "blurhash": "",
+                "summary": "",
+                "media_attachments": [a],
+            })
+            # file_url is set per attachment, so the shared classifier resolves the
+            # type from the extension that extract_media_from_note already matched.
+            card["media_type"] = categorize_media(card)
+            if card["media_type"] == "other" and a.get("type"):
+                # Blossom links are content-addressed and therefore extensionless
+                # (https://blossom.host/<sha256>), so the extension table can never
+                # classify them. Fall back to the type the extractor already
+                # resolved via its host table, otherwise every Blossom card would
+                # land in "other" and populate no tab at all.
+                card["media_type"] = a["type"]
+            result.append(card)
 
     result.sort(key=lambda x: x["created_at_ts"], reverse=True)
     return result[:limit]

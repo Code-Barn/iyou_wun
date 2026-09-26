@@ -540,3 +540,287 @@ class GalleryCardModernizationAndAttributionTest(TestCase):
         self.assertContains(resp, 'href="/@creatorprime"')
 
 
+
+
+class FetchMediaAssetsUnifiedIngestionTest(TestCase):
+    """fetch_media_assets() must surface Kind 1 media alongside Kind 1063.
+
+    Kind 1063 (NIP-94) file-header events are a small minority of real Nostr
+    media; most media arrives as an ordinary text note with an unfurled URL.
+    The gallery tabs were chronically sparse because the relay filter only ever
+    asked for Kind 1063.
+    """
+
+    def _patch_relay_req(self, events):
+        """Patch relay_req so the first call (the media query) returns `events`
+        and the second (the Kind 0 profile hydration) returns nothing."""
+        calls = []
+
+        def fake_relay_req(filter_obj, **kwargs):
+            calls.append(filter_obj)
+            if filter_obj.get("kinds") == [0]:
+                return {}
+            return events
+
+        return patch("apps.core.views.relay_req", side_effect=fake_relay_req), calls
+
+    def test_relay_filter_requests_both_kinds_with_overfetch(self):
+        from apps.core.views import fetch_media_assets
+
+        patcher, calls = self._patch_relay_req({})
+        with patcher:
+            fetch_media_assets(limit=24)
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["kinds"], [1, 1063])
+        # Over-fetch headroom: one event can expand to many cards and the tab
+        # split runs after categorization.
+        self.assertEqual(calls[0]["limit"], 24 * 3)
+
+    def test_authors_and_until_filters_preserved(self):
+        from apps.core.views import fetch_media_assets
+
+        patcher, calls = self._patch_relay_req({})
+        with patcher:
+            fetch_media_assets(authors=["ab" * 32], limit=10, until=1700000000)
+
+        self.assertEqual(calls[0]["authors"], ["ab" * 32])
+        self.assertEqual(calls[0]["until"], 1700000000)
+
+    def test_kind1_image_note_flattens_to_image_card(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {
+            "e1": {
+                "id": "e1",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "sunset over the mesh https://cdn.example.com/sunset.jpg",
+                "tags": [],
+                "created_at": 1700000000,
+            }
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item["media_type"], "image")
+        self.assertEqual(item["file_url"], "https://cdn.example.com/sunset.jpg")
+        self.assertTrue(item["is_kind1"])
+        self.assertEqual(item["parent_event_id"], "e1")
+        # The media URL is stripped from the human label.
+        self.assertIn("sunset over the mesh", item["display_title"])
+        self.assertNotIn("sunset.jpg", item["display_title"])
+        # Author envelope is populated even without a Kind 0 profile.
+        self.assertEqual(item["pubkey"], "aa" * 32)
+        self.assertIn("npub", item)
+
+    def test_kind1_multi_media_note_flattens_to_distinct_cards(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {
+            "e1": {
+                "id": "e1",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": (
+                    "three files: "
+                    "https://cdn.example.com/a.png "
+                    "https://cdn.example.com/clip.mp4 "
+                    "https://cdn.example.com/track.mp3"
+                ),
+                "tags": [],
+                "created_at": 1700000000,
+            }
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        # One event, three distinct cards.
+        self.assertEqual(len(items), 3)
+        self.assertEqual({i["media_type"] for i in items}, {"image", "video", "audio"})
+        self.assertEqual(len({i["file_url"] for i in items}), 3)
+        # All three share the parent event.
+        self.assertEqual({i["parent_event_id"] for i in items}, {"e1"})
+
+    def test_mixed_kinds_categorize_into_separate_tabs(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {
+            "e1063": {
+                "id": "e1063",
+                "kind": 1063,
+                "pubkey": "bb" * 32,
+                "content": "NIP-94 header",
+                "tags": [["url", "https://cdn.example.com/header.png"], ["m", "image/png"]],
+                "created_at": 1700000005,
+            },
+            "e1img": {
+                "id": "e1img",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "note with https://cdn.example.com/inline.jpg",
+                "tags": [],
+                "created_at": 1700000010,
+            },
+            "e1vid": {
+                "id": "e1vid",
+                "kind": 1,
+                "pubkey": "cc" * 32,
+                "content": "clip https://cdn.example.com/inline.mp4",
+                "tags": [],
+                "created_at": 1700000001,
+            },
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        by_type = {}
+        for i in items:
+            by_type.setdefault(i["media_type"], []).append(i)
+
+        self.assertEqual(len(by_type.get("image", [])), 2)   # one 1063 + one kind 1
+        self.assertEqual(len(by_type.get("video", [])), 1)
+        # The 1063 card is not flagged as a text note.
+        header = [i for i in items if i["id"] == "e1063"][0]
+        self.assertFalse(header["is_kind1"])
+        self.assertEqual(header["mime_type"], "image/png")
+        self.assertEqual(header["media_type"], "image")
+
+    def test_blossom_url_with_query_string_still_categorizes(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {
+            "e1": {
+                "id": "e1",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "blossom https://blossom.example.com/abcdef123456?x=deadbeef",
+                "tags": [],
+                "created_at": 1700000000,
+            }
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["media_type"], "image")
+
+    def test_kind1_note_without_media_yields_no_cards(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {
+            "e1": {
+                "id": "e1",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "just text, no media here",
+                "tags": [],
+                "created_at": 1700000000,
+            }
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        self.assertEqual(items, [])
+
+    def test_results_truncated_to_limit_after_sorting(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {}
+        for idx in range(10):
+            events["e%d" % idx] = {
+                "id": "e%d" % idx,
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "n%d https://cdn.example.com/i%d.png" % (idx, idx),
+                "tags": [],
+                "created_at": 1700000000 + idx,
+            }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=3)
+
+        self.assertEqual(len(items), 3)
+        # Newest first.
+        self.assertEqual([i["created_at_ts"] for i in items],
+                         [1700000009, 1700000008, 1700000007])
+
+    def test_1063_card_without_url_is_dropped(self):
+        from apps.core.views import fetch_media_assets
+
+        events = {
+            "e1": {
+                "id": "e1",
+                "kind": 1063,
+                "pubkey": "aa" * 32,
+                "content": "no url tag here",
+                "tags": [["m", "image/png"]],
+                "created_at": 1700000000,
+            }
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        self.assertEqual(items, [])
+
+    def test_duplicate_url_within_one_note_is_deduped(self):
+        from apps.core.views import fetch_media_assets
+
+        url = "https://cdn.example.com/same.png"
+        # The same asset referenced twice by a single text note (unfurl plus an
+        # explicit link) must not produce two cards.
+        events = {
+            "e1": {
+                "id": "e1",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "look %s and again %s" % (url, url),
+                "tags": [],
+                "created_at": 1700000000,
+            }
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["file_url"], url)
+
+    def test_same_url_from_distinct_events_yields_distinct_cards(self):
+        from apps.core.views import fetch_media_assets
+
+        url = "https://cdn.example.com/shared.png"
+        events = {
+            "e1063": {
+                "id": "e1063",
+                "kind": 1063,
+                "pubkey": "aa" * 32,
+                "content": "header",
+                "tags": [["url", url], ["m", "image/png"]],
+                "created_at": 1700000000,
+            },
+            "e1": {
+                "id": "e1",
+                "kind": 1,
+                "pubkey": "aa" * 32,
+                "content": "note %s" % url,
+                "tags": [],
+                "created_at": 1700000001,
+            },
+        }
+        patcher, _ = self._patch_relay_req(events)
+        with patcher:
+            items = fetch_media_assets(limit=24)
+
+        # Deduplication is scoped to (parent_event_id, url): two genuinely
+        # distinct events are two distinct posts and both stay visible.
+        self.assertEqual(len(items), 2)
+        self.assertEqual({i["file_url"] for i in items}, {url})
