@@ -11,6 +11,60 @@
 {% block twitter_description %}Sovereign visuals, video, and audio from the iyou_wun mesh.{% endblock %}
 {% block twitter_image %}{{ og_image }}{% endblock %}
 
+{% block extra_head %}
+{# Theater canvas is restored pre-paint so a reload never flashes the narrow
+   3-pane layout before settling into the full-width deck. The class is only ever
+   added by this page, so every other template is unaffected by the overrides. #}
+<script>
+  if (localStorage.getItem('wun_gallery_theater') === 'true') {
+    document.documentElement.classList.add('gallery-theater');
+  }
+</script>
+<style>
+  /* Expanded canvas: collapse the discovery rail's grid track (not just its
+     display, or a 300px phantom column would persist) and release the
+     stream column's 640px cap. The left rail is retained as context. */
+  html.gallery-theater #chassis-grid {
+    grid-template-columns: 48px minmax(0, 1fr) !important;
+  }
+  @media (min-width: 1280px) {
+    html.gallery-theater #chassis-grid {
+      grid-template-columns: 184px minmax(0, 1fr) !important;
+    }
+  }
+  html.gallery-theater #right-rail {
+    display: none !important;
+  }
+  html.gallery-theater #stream-column {
+    max-width: none !important;
+  }
+
+  /* Media deck scaling. The video deck switches from flow layout to a grid, so
+     the default `space-y-*` sibling margins are neutralised by `gap` (space-y
+     only targets direct children, which `display: grid` re-parents away). */
+  html.gallery-theater #gallery-image-grid {
+    columns: 4 !important;
+  }
+  html.gallery-theater #gallery-video-deck {
+    display: grid !important;
+    grid-template-columns: repeat(1, minmax(0, 1fr));
+    gap: 1rem;
+  }
+  @media (min-width: 1280px) {
+    html.gallery-theater #gallery-video-deck {
+      grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    }
+  }
+  html.gallery-theater #gallery-audio-deck {
+    display: grid !important;
+    gap: 1rem;
+  }
+  html.gallery-theater #gallery-audio-deck audio {
+    height: 3rem !important;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="w-full max-w-2xl mx-auto space-y-4 font-mono text-xs">
 
@@ -34,7 +88,15 @@
         🎵 Audio
       </a>
     </div>
-    <span class="hidden sm:inline-block text-[10px] text-slate-400 font-bold uppercase tracking-wider">NIP-94 Blossom</span>
+    <div class="flex items-center gap-2 shrink-0">
+      <span class="hidden sm:inline-block text-[10px] text-slate-400 font-bold uppercase tracking-wider">NIP-94 Blossom</span>
+      {# Theater canvas toggle: flips the `gallery-theater` class on <html>,
+         which is what the scoped styles in extra_head key off. #}
+      <button type="button" id="gallery-canvas-toggle" aria-pressed="false" aria-label="Toggle expanded gallery canvas"
+              class="px-2.5 py-1.5 rounded-xl font-bold text-xs transition bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-violet-600 hover:text-white shrink-0">
+        &#x26F6; Expand
+      </button>
+    </div>
   </div>
 
   <!-- Media Stream Container -->
@@ -47,7 +109,8 @@
           <div class="columns-2 gap-3 space-y-3" id="gallery-image-grid">
             {% for item in image_items|default:media_items %}
               {% if item.category == 'image' %}
-                <div class="break-inside-avoid rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm group hover:border-violet-500/50 transition">
+                <div class="break-inside-avoid rounded-xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm group hover:border-violet-500/50 transition"
+                     data-lb-url="{{ item.file_url }}" data-lb-type="{{ item.media_type|default:'image' }}" data-lb-alt="{{ item.alt_text|default:item.caption }}" data-lb-caption="{{ item.caption }}" data-lb-author="{{ item.author_name }}" data-lb-author-url="{% if item.author_handle %}/@{{ item.author_handle }}{% else %}{% url 'profile' npub=item.author_npub %}{% endif %}" data-lb-date="{{ item.created_at|date:'M j' }}">
                   <div class="relative cursor-pointer overflow-hidden bg-slate-100 dark:bg-slate-800"
                        onclick="openLightbox('{{ item.url }}', 'image', '{{ item.caption|escapejs }}', '{{ item.author_display_name|escapejs }}', '{{ item.author_handle|escapejs }}')">
                     <img src="{{ item.url }}" alt="{{ item.caption }}" loading="lazy" class="w-full h-auto object-cover group-hover:scale-102 transition duration-200" />
@@ -74,7 +137,8 @@
           <div class="space-y-4" id="gallery-video-deck">
             {% for item in video_items|default:media_items %}
               {% if item.category == 'video' %}
-                <div class="rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2">
+                <div class="rounded-2xl overflow-hidden bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2"
+                     data-lb-url="{{ item.file_url }}" data-lb-type="{{ item.media_type|default:'video' }}" data-lb-alt="{{ item.alt_text|default:item.caption }}" data-lb-caption="{{ item.caption }}" data-lb-author="{{ item.author_name }}" data-lb-author-url="{% if item.author_handle %}/@{{ item.author_handle }}{% else %}{% url 'profile' npub=item.author_npub %}{% endif %}" data-lb-date="{{ item.created_at|date:'M j, Y' }}">
                   <div class="aspect-video bg-black relative">
                     <video src="{{ item.url }}" controls preload="metadata" class="w-full h-full object-contain"></video>
                   </div>
@@ -100,7 +164,8 @@
           <div class="space-y-3" id="gallery-audio-deck">
             {% for item in audio_items|default:media_items %}
               {% if item.category == 'audio' %}
-                <div class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2">
+                <div class="p-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-2"
+                     data-lb-url="{{ item.file_url }}" data-lb-type="{{ item.media_type|default:'audio' }}" data-lb-alt="{{ item.alt_text|default:item.caption }}" data-lb-caption="{{ item.caption }}" data-lb-author="{{ item.author_name }}" data-lb-author-url="{% if item.author_handle %}/@{{ item.author_handle }}{% else %}{% url 'profile' npub=item.author_npub %}{% endif %}" data-lb-date="{{ item.created_at|date:'M j, Y' }}">
                   <div class="flex items-center justify-between gap-2">
                     <div class="flex items-center gap-2 min-w-0">
                       <span class="text-base shrink-0">🎵</span>

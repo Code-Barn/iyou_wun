@@ -118,66 +118,119 @@
 
     // ---------- Item Collection for Prev/Next ----------
 
-    function collectLightboxItems(type) {
+    // Card hydration is driven by data-lb-* attributes rather than Tailwind
+    // utility classes. The legacy selectors below keyed off classes like
+    // `.break-inside-avoid` / `.rounded-2xl` / `.p-3`, which meant any restyle
+    // of the deck silently broke lightbox navigation. data-lb-* decouples
+    // collection from presentation, so the theater canvas can switch the decks
+    // between masonry / flow / grid without touching this logic.
+    var DECK_CONTAINERS = {
+        image: "gallery-image-grid",
+        video: "gallery-video-deck",
+        audio: "gallery-audio-deck"
+    };
+
+    function stripAtPrefix(name) {
+        return String(name || "").replace(/^\s*@/, "");
+    }
+
+    function collectFromDataAttrs(container, fallbackType) {
+        if (!container) return [];
         var items = [];
-        var container;
-        if (type === "video") {
-            container = document.getElementById("gallery-video-deck");
-            if (container) {
-                container.querySelectorAll(".rounded-2xl").forEach(function (card) {
-                    var video = card.querySelector("video");
-                    var captionEl = card.querySelector(".p-3 p");
-                    var authorA = card.querySelector(".p-3 a");
-                    var dateEl = card.querySelector(".p-3 span:last-child");
-                    if (!video) return;
-                    items.push({
-                        url: video.getAttribute("src") || "",
-                        type: "video",
-                        caption: captionEl ? captionEl.textContent : "",
-                        author: authorA ? authorA.textContent.replace(/^\s*@/, "") : "",
-                        authorUrl: authorA ? authorA.getAttribute("href") : "",
-                        date: dateEl ? dateEl.textContent.trim() : ""
-                    });
-                });
-            }
-        } else if (type === "audio") {
-            container = document.getElementById("gallery-audio-deck");
-            if (container) {
-                container.querySelectorAll(".p-3.rounded-2xl").forEach(function (card) {
-                    var aud = card.querySelector("audio");
-                    var captionEl = card.querySelector(".truncate");
-                    var authorA = card.querySelector("a");
-                    if (!aud) return;
-                    items.push({
-                        url: aud.getAttribute("src") || "",
-                        type: "audio",
-                        caption: captionEl ? captionEl.textContent : "",
-                        author: authorA ? authorA.textContent.replace(/^\s*@/, "") : "",
-                        authorUrl: authorA ? authorA.getAttribute("href") : "",
-                        date: ""
-                    });
-                });
-            }
-        } else {
-            container = document.getElementById("gallery-image-grid");
-            if (container) {
-                container.querySelectorAll(".break-inside-avoid").forEach(function (card) {
-                    var img = card.querySelector("img");
-                    var authorA = card.querySelector(".p-2 a");
-                    var dateEl = card.querySelector(".p-2 span");
-                    if (!img) return;
-                    items.push({
-                        url: img.getAttribute("src") || "",
-                        type: "image",
-                        caption: img.getAttribute("alt") || "",
-                        author: authorA ? authorA.textContent.replace(/^\s*@/, "") : "",
-                        authorUrl: authorA ? authorA.getAttribute("href") : "",
-                        date: dateEl ? dateEl.textContent.trim() : ""
-                    });
-                });
-            }
+        var cards = container.querySelectorAll("[data-lb-url]");
+        for (var i = 0; i < cards.length; i++) {
+            var card = cards[i];
+            var url = card.getAttribute("data-lb-url") || "";
+            if (!url) continue;
+            items.push({
+                url: url,
+                type: card.getAttribute("data-lb-type") || fallbackType,
+                caption: card.getAttribute("data-lb-caption") ||
+                    card.getAttribute("data-lb-alt") || "",
+                author: stripAtPrefix(card.getAttribute("data-lb-author")),
+                authorUrl: card.getAttribute("data-lb-author-url") || "",
+                date: (card.getAttribute("data-lb-date") || "").trim()
+            });
         }
-        return items.filter(function (it) { return it.url; });
+        return items;
+    }
+
+    function collectLegacyImageCards() {
+        var items = [];
+        var container = document.getElementById("gallery-image-grid");
+        if (!container) return items;
+        container.querySelectorAll(".break-inside-avoid").forEach(function (card) {
+            var img = card.querySelector("img");
+            var authorA = card.querySelector(".p-2 a");
+            var dateEl = card.querySelector(".p-2 span");
+            if (!img) return;
+            items.push({
+                url: img.getAttribute("src") || "",
+                type: "image",
+                caption: img.getAttribute("alt") || "",
+                author: stripAtPrefix(authorA ? authorA.textContent : ""),
+                authorUrl: authorA ? authorA.getAttribute("href") : "",
+                date: dateEl ? dateEl.textContent.trim() : ""
+            });
+        });
+        return items;
+    }
+
+    function collectLegacyVideoCards() {
+        var items = [];
+        var container = document.getElementById("gallery-video-deck");
+        if (!container) return items;
+        container.querySelectorAll(".rounded-2xl").forEach(function (card) {
+            var video = card.querySelector("video");
+            var captionEl = card.querySelector(".p-3 p");
+            var authorA = card.querySelector(".p-3 a");
+            var dateEl = card.querySelector(".p-3 span:last-child");
+            if (!video) return;
+            items.push({
+                url: video.getAttribute("src") || "",
+                type: "video",
+                caption: captionEl ? captionEl.textContent : "",
+                author: stripAtPrefix(authorA ? authorA.textContent : ""),
+                authorUrl: authorA ? authorA.getAttribute("href") : "",
+                date: dateEl ? dateEl.textContent.trim() : ""
+            });
+        });
+        return items;
+    }
+
+    function collectLegacyAudioCards() {
+        var items = [];
+        var container = document.getElementById("gallery-audio-deck");
+        if (!container) return items;
+        container.querySelectorAll(".p-3.rounded-2xl").forEach(function (card) {
+            var aud = card.querySelector("audio");
+            var captionEl = card.querySelector(".truncate");
+            var authorA = card.querySelector("a");
+            if (!aud) return;
+            items.push({
+                url: aud.getAttribute("src") || "",
+                type: "audio",
+                caption: captionEl ? captionEl.textContent : "",
+                author: stripAtPrefix(authorA ? authorA.textContent : ""),
+                authorUrl: authorA ? authorA.getAttribute("href") : "",
+                date: ""
+            });
+        });
+        return items;
+    }
+
+    function collectLightboxItems(type) {
+        var kind = type === "video" ? "video" : (type === "audio" ? "audio" : "image");
+        var container = document.getElementById(DECK_CONTAINERS[kind]);
+
+        // Preferred path: explicit data-lb-* hydration on the server-rendered card.
+        var items = collectFromDataAttrs(container, kind);
+        if (items.length) return items;
+
+        // Fallback: legacy class-scoped markup from the infinite-scroll pipeline.
+        if (kind === "video") return collectLegacyVideoCards();
+        if (kind === "audio") return collectLegacyAudioCards();
+        return collectLegacyImageCards();
     }
 
     // ---------- Lightbox Controller ----------
@@ -435,10 +488,79 @@
         audio.onended = function () { activeMedia = null; };
     }
 
+    // ---------- Theater Canvas Controller ----------
+    //
+    // The expanded canvas is pure CSS driven by a `gallery-theater` class on
+    // <html>, so toggling is a single class flip with no re-render. State is
+    // persisted and restored pre-paint by the inline script in gallery.html's
+    // extra_head block; this module only syncs the control to that class, so JS
+    // and CSS can never disagree about the current mode.
+
+    var THEATER_STORAGE_KEY = "wun_gallery_theater";
+    var THEATER_TOGGLE_ID = "gallery-canvas-toggle";
+
+    function isTheater() {
+        return document.documentElement.classList.contains("gallery-theater");
+    }
+
+    function syncTheaterButton(theaterOn) {
+        var btn = document.getElementById(THEATER_TOGGLE_ID);
+        if (!btn) return;
+        btn.setAttribute("aria-pressed", theaterOn ? "true" : "false");
+        // textContent, not innerHTML: the label is static UI copy, and there is
+        // no reason to hand a string to the HTML parser.
+        btn.textContent = theaterOn ? "\u21F2 Collapse" : "\u26F6 Expand";
+    }
+
+    function applyTheater(enable) {
+        var theaterOn = !!enable;
+        document.documentElement.classList.toggle("gallery-theater", theaterOn);
+        try {
+            localStorage.setItem(THEATER_STORAGE_KEY, theaterOn ? "true" : "false");
+        } catch (e) { /* private mode / storage disabled: class still applies */ }
+        syncTheaterButton(theaterOn);
+
+        // The reflow re-parents media elements; pause first so a half-positioned
+        // player is never left running behind the transition.
+        stopActiveMedia();
+
+        // Drop the cached navigation set — indices are re-derived on next open.
+        lightboxItems = [];
+    }
+
+    function toggleTheater() {
+        applyTheater(!isTheater());
+    }
+
     // ---------- Initialization ----------
 
     document.addEventListener("DOMContentLoaded", function () {
         initPlyrPlayers(document);
+
+        var btn = document.getElementById(THEATER_TOGGLE_ID);
+        if (btn) {
+            syncTheaterButton(isTheater());
+            btn.addEventListener("click", toggleTheater);
+        }
+    });
+
+    // `f` toggles the expanded canvas. Bound separately from the media hotkey
+    // handler above so the two concerns stay independent, but behind the same
+    // text-entry guard so it never fires while the user is typing a comment.
+    document.addEventListener("keydown", function (e) {
+        if (!e.key && e.keyCode !== 70) return;
+        if (e.key !== "f" && e.key !== "F") return;
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+        var t = e.target;
+        if (!t) return;
+        var tag = (t.tagName || "").toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select" || t.isContentEditable) return;
+
+        if (!document.getElementById(THEATER_TOGGLE_ID)) return; // not the gallery page
+
+        e.preventDefault();
+        toggleTheater();
     });
 
     // ---------- Public API ----------
@@ -450,4 +572,7 @@
     window.toggleAudioPlayer = toggleAudioPlayer;
     window.stopActiveMedia = stopActiveMedia;
     window.initPlyrPlayers = initPlyrPlayers;
+    window.setGalleryTheater = applyTheater;
+    window.toggleGalleryTheater = toggleTheater;
+    window.isGalleryTheater = isTheater;
 })();
