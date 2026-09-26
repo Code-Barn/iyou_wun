@@ -91,6 +91,15 @@ NOSTR_PUBLIC_RELAYS = [
     "wss://relay.primal.net",
 ]
 
+# Relays we read from but never publish to. wss://relay.iyou.me handshakes
+# reliably and is queried for coverage, but its writes are dropped server-side,
+# so it must never appear in a publish target set. Mirrors the `write: false`
+# entry in buildBootstrapRelays() in static/js/relay_pool.js; a test asserts
+# the two catalogs agree so the policy cannot drift.
+NOSTR_READ_ONLY_RELAYS = [
+    "wss://relay.iyou.me",
+]
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 

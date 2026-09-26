@@ -890,67 +890,210 @@
     if (btnLoading) btnLoading.classList.add("hidden");
     if (saveBtn) saveBtn.disabled = false;
   }
-
   // --- Relay Management ---
+  //
+  // The server renders the full catalog (sovereign insiders + the public fleet
+  // with its default participation state) and this controller reconciles it with
+  // the browser's persisted preference. localStorage is the source of truth for
+  // toggles; the server render is only the default for a profile that has never
+  // stored one.
+  //
+  // Two invariants this replaces:
+  //   * The list is never rebuilt from scratch, so cataloged relays cannot be
+  //     dropped from the UI by a partial refresh.
+  //   * Storage is merged, never overwritten from the server's *active* relay
+  //     list. Writing the 2 active relays back over wun_custom_relays used to
+  //     erase a user's public-relay opt-in on the next dashboard load.
   var userRelays = [];
+  var CATALOG_SOVEREIGN = [];
+  var CATALOG_PUBLIC = [];
+  var CUSTOM_RELAY_ROWS = [];
+
   function normalizeRelayUrl(url) {
     var u = String(url || "").trim();
     if (u.endsWith("/")) u = u.slice(0, -1);
     return u.toLowerCase();
   }
   function relayUrlOf(entry) { return typeof entry === "string" ? entry : (entry && entry.url); }
-  function renderRelayList() {
-    var list = document.getElementById("relayList");
-    if (!list) return;
-    list.innerHTML = "";
-    if (!userRelays || userRelays.length === 0) {
-      list.innerHTML = '<div class="text-center text-slate-400 text-xs font-mono py-4">No relays configured.</div>';
-      return;
+
+  function readCatalogFromDom() {
+    CATALOG_SOVEREIGN = [];
+    CATALOG_PUBLIC = [];
+    var rows = document.querySelectorAll("[data-relay-row]");
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var entry = {
+        url: row.getAttribute("data-relay-row"),
+        enabled: row.getAttribute("data-relay-enabled-default") === "true",
+        write: row.getAttribute("data-relay-write") !== "false",
+        read: true
+      };
+      if (row.closest("#relayListPublic")) { entry.sovereign = false; CATALOG_PUBLIC.push(entry); }
+      else { entry.sovereign = true; CATALOG_SOVEREIGN.push(entry); }
     }
-    userRelays.forEach(function (entry) {
-      var url = relayUrlOf(entry);
-      if (!url) return;
-      var enabled = (entry && entry.enabled !== false);
+  }
+
+  function readStoredPreferences() {
+    var prefs = {};
+    ["wun_custom_relays", "wun_relays"].forEach(function (key) {
+      try {
+        var raw = JSON.parse(localStorage.getItem(key) || "[]");
+        if (!Array.isArray(raw)) return;
+        raw.forEach(function (entry) {
+          var url = relayUrlOf(entry);
+          if (!url) return;
+          // Only an explicit boolean counts as a stored preference, and this must
+          // stay byte-for-byte in step with the enabledMap built by
+          // _initPool() in static/js/relay_pool.js. A bare string is a legacy
+          // URL-only entry: reading it as "on" would silently switch a cataloged
+          // disabled-by-default public relay back on the next page load.
+          if (entry && typeof entry === "object" && typeof entry.enabled === "boolean") {
+            prefs[normalizeRelayUrl(url)] = entry.enabled;
+          }
+        });
+      } catch (err) { /* ignore */ }
+    });
+    return prefs;
+  }
+
+  function findRelayEntry(url) {
+    var target = normalizeRelayUrl(url);
+    var all = CATALOG_SOVEREIGN.concat(CATALOG_PUBLIC, CUSTOM_RELAY_ROWS);
+    for (var i = 0; i < all.length; i++) {
+      if (normalizeRelayUrl(all[i].url) === target) return all[i];
+    }
+    return null;
+  }
+
+  function persistRelayPreferences() {
+    try {
+      var all = CATALOG_SOVEREIGN.concat(CATALOG_PUBLIC, CUSTOM_RELAY_ROWS);
+      localStorage.setItem("wun_custom_relays", JSON.stringify(all));
+      localStorage.setItem("wun_relays", JSON.stringify(all.map(relayUrlOf)));
+    } catch (err) { /* ignore */ }
+  }
+
+  // Reconcile every rendered checkbox against the merged preference map. This
+  // never inserts or removes rows.
+  function applyRelayPreferences(prefs) {
+    userRelays = [];
+    var all = CATALOG_SOVEREIGN.concat(CATALOG_PUBLIC, CUSTOM_RELAY_ROWS);
+    all.forEach(function (entry) {
+      var norm = normalizeRelayUrl(entry.url);
+      if (prefs.hasOwnProperty(norm)) entry.enabled = prefs[norm];
+      var box = document.querySelector('.relay-toggle-checkbox[data-relay-url="' + CSS.escape(entry.url) + '"]');
+      if (box) box.checked = entry.enabled !== false;
+      userRelays.push(entry);
+    });
+  }
+
+  function setRelayStatusDot(url, online) {
+    var row = document.querySelector('[data-relay-row="' + CSS.escape(url) + '"]');
+    if (!row) return;
+    var dot = row.querySelector(".relay-status-dot");
+    if (!dot) return;
+    dot.classList.toggle("bg-emerald-500", !!online);
+    dot.classList.toggle("bg-slate-300", !online);
+    dot.classList.toggle("dark:bg-slate-600", !online);
+  }
+
+  function renderCustomRelays() {
+    var list = document.getElementById("relayListPublic");
+    if (!list) return;
+    // Drop only previously rendered custom rows; cataloged public relays stay.
+    CUSTOM_RELAY_ROWS.forEach(function (entry) {
+      var row = document.querySelector('[data-relay-row="' + CSS.escape(entry.url) + '"]');
+      if (row && row.getAttribute("data-relay-custom") === "true") row.remove();
+    });
+    CUSTOM_RELAY_ROWS.forEach(function (entry) {
+      if (document.querySelector('[data-relay-row="' + CSS.escape(entry.url) + '"]')) return;
       var div = document.createElement("div");
       div.className = "flex items-center justify-between bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2 gap-3";
+      div.setAttribute("data-relay-row", entry.url);
+      div.setAttribute("data-relay-enabled-default", entry.enabled ? "true" : "false");
+      div.setAttribute("data-relay-write", "true");
+      div.setAttribute("data-relay-custom", "true");
       div.innerHTML =
         '<span class="text-xs font-mono text-slate-700 dark:text-slate-300 break-all flex items-center gap-2 min-w-0">' +
-          '<span class="w-2 h-2 rounded-full bg-emerald-500 shrink-0"></span>' +
-          '<span class="truncate">' + escapeHtml(url) + '</span>' +
+          '<span class="relay-status-dot w-2 h-2 rounded-full bg-slate-300 dark:bg-slate-600 shrink-0"></span>' +
+          '<span class="truncate">' + escapeHtml(entry.url) + '</span>' +
         '</span>' +
         '<div class="flex items-center gap-2.5 flex-shrink-0">' +
           '<label class="relative inline-flex items-center cursor-pointer">' +
-            '<input type="checkbox" class="sr-only peer relay-toggle-checkbox" data-relay-url="' + escapeHtml(url) + '"' + (enabled ? ' checked' : '') + ' onchange="toggleRelayState(\'' + escapeHtml(url) + '\', this.checked)">' +
+            '<input type="checkbox" class="sr-only peer relay-toggle-checkbox" data-relay-url="' + escapeHtml(entry.url) + '"' + (entry.enabled ? ' checked' : '') + ' onchange="toggleRelayState(\'' + escapeHtml(entry.url) + '\', this.checked)">' +
             '<div class="w-8 h-4 bg-slate-200 peer-focus:outline-none rounded-full peer dark:bg-slate-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-slate-600 peer-checked:bg-violet-600"></div>' +
           '</label>' +
-          '<button type="button" onclick="removeRelay(\'' + escapeHtml(url) + '\')" class="text-rose-500 hover:text-rose-600 text-xs font-mono font-medium flex-shrink-0">Remove</button>' +
+          '<button type="button" onclick="removeRelay(\'' + escapeHtml(entry.url) + '\')" class="text-rose-500 hover:text-rose-600 text-xs font-mono font-medium flex-shrink-0">Remove</button>' +
         '</div>';
       list.appendChild(div);
     });
   }
+
+  /**
+   * Toggle a relay's participation.
+   *
+   * Persists immediately (no "Save" required) so a public relay a user switched
+   * on stays on across reloads, and hands the change to relayPool so the socket
+   * is dialled or torn down right away. relay_pool.js filters every read/write
+   * set on `enabled !== false`, so this single flag governs participation.
+   */
+  function toggleRelayState(url, isEnabled) {
+    var entry = findRelayEntry(url);
+    if (entry) entry.enabled = !!isEnabled;
+    var prefs = readStoredPreferences();
+    prefs[normalizeRelayUrl(url)] = !!isEnabled;
+    applyRelayPreferences(prefs);
+    persistRelayPreferences();
+    if (window.relayPool && typeof window.relayPool.toggleRelayState === "function") {
+      try { window.relayPool.toggleRelayState(url, !!isEnabled); } catch (err) { /* ignore */ }
+    }
+    showRelayStatus(url + (isEnabled ? " enabled" : " disabled"), !isEnabled);
+  }
+
   function addRelay() {
     var input = document.getElementById("relayInput");
     if (!input) return;
     var url = input.value.trim();
     if (!url) return;
     if (!url.startsWith("ws://") && !url.startsWith("wss://")) { showRelayStatus("Relay URL must start with ws:// or wss://", true); return; }
-    var dup = userRelays.some(function (e) { return normalizeRelayUrl(relayUrlOf(e)) === normalizeRelayUrl(url); });
-    if (dup) { showRelayStatus("Relay already in list", true); return; }
-    userRelays.push({ url: url, enabled: true, read: true, write: true });
+    if (findRelayEntry(url)) { showRelayStatus("Relay already in list", true); return; }
+    CUSTOM_RELAY_ROWS.push({ url: url, enabled: true, read: true, write: true, sovereign: false, custom: true });
     input.value = "";
-    renderRelayList();
-  }
-  function removeRelay(url) {
-    userRelays = userRelays.filter(function (e) { return normalizeRelayUrl(relayUrlOf(e)) !== normalizeRelayUrl(url); });
-    renderRelayList();
+    renderCustomRelays();
+    applyRelayPreferences(readStoredPreferences());
+    persistRelayPreferences();
+    // There is no public pool.addRelay(); toggleRelayState() creates the record
+    // when it is missing, so routing through it enrolls the relay in the live
+    // pool now instead of waiting for the next page load to re-seed from storage.
     if (window.relayPool && typeof window.relayPool.toggleRelayState === "function") {
-      window.relayPool.toggleRelayState(url, false);
+      try { window.relayPool.toggleRelayState(url, true); } catch (err) { /* ignore */ }
+    }
+    showRelayStatus("Relay added.", false);
+  }
+
+  function removeRelay(url) {
+    var target = normalizeRelayUrl(url);
+    // Cataloged relays are part of the fleet, not user content: "removing" one
+    // just switches it off so it stops participating.
+    var entry = findRelayEntry(url);
+    if (entry && !entry.custom) {
+      toggleRelayState(url, false);
+      return;
+    }
+    CUSTOM_RELAY_ROWS = CUSTOM_RELAY_ROWS.filter(function (e) { return normalizeRelayUrl(e.url) !== target; });
+    var row = document.querySelector('[data-relay-row="' + CSS.escape(url) + '"]');
+    if (row && row.getAttribute("data-relay-custom") === "true") row.remove();
+    applyRelayPreferences(readStoredPreferences());
+    persistRelayPreferences();
+    if (window.relayPool && typeof window.relayPool.toggleRelayState === "function") {
+      try { window.relayPool.toggleRelayState(url, false); } catch (err) { /* ignore */ }
     }
   }
+
   function saveRelays() {
-    var urls = userRelays.map(relayUrlOf);
-    localStorage.setItem("wun_relays", JSON.stringify(urls));
-    localStorage.setItem("wun_custom_relays", JSON.stringify(userRelays));
+    applyRelayPreferences(readStoredPreferences());
+    persistRelayPreferences();
+    var urls = userRelays.filter(function (e) { return e.enabled !== false; }).map(relayUrlOf);
     var csrfToken = document.querySelector("[name=csrfmiddlewaretoken]") ? document.querySelector("[name=csrfmiddlewaretoken]").value : "";
     fetch("/api/relays", {
       method: "POST",
@@ -967,27 +1110,19 @@
     el.classList.remove("hidden");
     setTimeout(function () { el.classList.add("hidden"); }, 3000);
   }
+
+  /**
+   * Hydrate the catalog from the server render, then overlay the stored
+   * preference. The server is not asked to re-derive the fleet: /api/relays only
+   * knows the currently active relays, which would collapse the catalog back to
+   * the two sovereign endpoints and silently drop public opt-ins.
+   */
   function loadRelays() {
-    fetch("/api/relays").then(function (r) { return r.json(); }).then(function (data) {
-      var storedMap = {};
-      try {
-        var stored = JSON.parse(localStorage.getItem("wun_custom_relays") || "[]");
-        stored.forEach(function (e) { storedMap[normalizeRelayUrl(relayUrlOf(e))] = e.enabled !== false; });
-      } catch (err) {}
-      var raw = (data && data.relays) || (typeof getRelays === "function" ? getRelays() : []);
-      userRelays = (raw || []).map(function (u) {
-        var url = relayUrlOf(u);
-        var enabled = (storedMap[normalizeRelayUrl(url)] !== undefined) ? storedMap[normalizeRelayUrl(url)] : (u && u.enabled !== false);
-        return { url: url, enabled: enabled, read: true, write: true };
-      });
-      localStorage.setItem("wun_relays", JSON.stringify(userRelays.map(relayUrlOf)));
-      localStorage.setItem("wun_custom_relays", JSON.stringify(userRelays));
-      renderRelayList();
-    }).catch(function () {
-      userRelays = (typeof getRelays === "function") ? getRelays() : [];
-      userRelays = userRelays.map(function (u) { return { url: relayUrlOf(u), enabled: true, read: true, write: true }; });
-      renderRelayList();
-    });
+    readCatalogFromDom();
+    applyRelayPreferences(readStoredPreferences());
+    renderCustomRelays();
+    applyRelayPreferences(readStoredPreferences());
+    persistRelayPreferences();
   }
 
   function loadFeedHygienePreferences() {

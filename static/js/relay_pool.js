@@ -52,23 +52,53 @@
         return hostname === "127.0.0.1" || hostname === "localhost" || hostname === "0.0.0.0";
     }
 
+    /**
+     * The full relay catalog, "cataloged but disabled-by-default".
+     *
+     * Every relay the app knows about is present in the pool from first paint so
+     * the Switchboard can render a complete list and a user can opt in with one
+     * toggle. Participation is governed solely by the `enabled` flag:
+     *
+     *   enabled: true   joins read/write sets, is probed, and is connectable.
+     *   enabled: false  is cataloged and listed, but filtered out of
+     *                   getRelays/getReadRelays/getWriteRelays, scores 0 in
+     *                   NIP-65 outbox weighting, and is never probed or dialled.
+     *
+     * The `enabled` value here is only the *default* for a browser profile that
+     * has never stored a preference; a persisted toggle in `wun_relays` /
+     * `wun_custom_relays` always wins (see _initPool).
+     *
+     * Sovereign insiders (enabled):
+     *   ws://127.0.0.1:9003  local relay. Primary read/write on a local dev
+     *                         origin -- sub-50ms, so it answers the settle window
+     *                         before it closes. Not `primary` in the NIP-65 tier
+     *                         sense: quality is earned by being measured online
+     *                         rather than asserted up front.
+     *   wss://relay.iyou.me   first-party peer. Handshakes reliably but delivers
+     *                         zero events for public kinds and its writes are
+     *                         dropped server-side, so it is read-only and never
+     *                         a publish target.
+     *
+     * Global public fleet (disabled): offchain, damus, primal, nostr.mom, snort,
+     * wellorder, oxtr. Each costs a WAN round trip in every settle window, so
+     * none is dialled until a user asks for public coverage. offchain is the
+     * `primary` public tier for when it is switched on.
+     */
     function buildBootstrapRelays() {
-        // Insider-first lean fleet: our own two sovereign endpoints only.
-        //   ws://127.0.0.1:9003  local relay — primary read/write, sub-50ms, so it
-        //                         answers the settle window before it closes.
-        //   wss://relay.iyou.me   first-party peer — read-only. It handshakes
-        //                         reliably but delivers zero events for public
-        //                         kinds and its writes are dropped server-side, so
-        //                         it must never be a publish target or primary.
-        // The seven public relays this list used to carry (offchain.pub, damus,
-        // wellorder, snort, nostr.mom, oxtr, primal) each cost a WAN round trip in
-        // every settle window for no first-party traffic. Add them back here to opt
-        // back into public coverage.
-        const fleet = [
-            { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: true },
-            { url: "wss://relay.iyou.me", read: true, write: false, isLocal: false, primary: false }
-        ];
-        return fleet.filter(function (r) { return !isExcludedRelay(r.url); });
+        return [
+            // Sovereign Insiders (enabled by default)
+            { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false, enabled: true },
+            { url: "wss://relay.iyou.me", read: true, write: false, isLocal: false, primary: false, enabled: true },
+
+            // Global Public Fleet (cataloged, disabled by default)
+            { url: "wss://offchain.pub", read: true, write: true, isLocal: false, primary: true, enabled: false },
+            { url: "wss://relay.damus.io", read: true, write: true, isLocal: false, primary: false, enabled: false },
+            { url: "wss://relay.primal.net", read: true, write: true, isLocal: false, primary: false, enabled: false },
+            { url: "wss://nostr.mom", read: true, write: true, isLocal: false, primary: false, enabled: false },
+            { url: "wss://relay.snort.social", read: true, write: true, isLocal: false, primary: false, enabled: false },
+            { url: "wss://relay.wellorder.net", read: true, write: true, isLocal: false, primary: false, enabled: false },
+            { url: "wss://nostr.oxtr.dev", read: true, write: true, isLocal: false, primary: false, enabled: false }
+        ].filter(function (r) { return !isExcludedRelay(r.url); });
     }
 
     var BOOTSTRAP_RELAYS = buildBootstrapRelays();
@@ -161,7 +191,13 @@
                             var url = typeof entry === "string" ? entry : (entry && entry.url);
                             if (!url) return;
                             if (isExcludedRelay(url)) return;
-                            enabledMap[normalizeUrl(url)] = entry.enabled !== false;
+                            // Only an explicit boolean is a stored preference. A bare
+                            // string is a legacy URL-only entry, and treating it as
+                            // "enabled" would silently switch a cataloged
+                            // disabled-by-default public relay back on.
+                            if (entry && typeof entry === "object" && typeof entry.enabled === "boolean") {
+                                enabledMap[normalizeUrl(url)] = entry.enabled;
+                            }
                         });
                     }
                 }
@@ -634,7 +670,11 @@
         if (!record) return false;
 
         var nextEnabled = !!isEnabled;
-        var changed = (record.enabled || true) !== nextEnabled;
+        // Compare against the same "absent means enabled" rule the catalog uses.
+        // `(record.enabled || true)` would collapse a cataloged `false` back to
+        // `true`, making ON the no-op for every disabled-by-default relay and
+        // silently dropping the persisted preference.
+        var changed = (record.enabled !== false) !== nextEnabled;
         record.enabled = nextEnabled;
 
         if (!nextEnabled) {

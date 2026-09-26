@@ -724,7 +724,10 @@ def dashboard(request):
     user_pubkey = get_effective_user_pubkey(request)
     user_npub = did_to_npub(request.user.username)
     relays = get_relays_for_request(request)
-    relay_objs = [{"url": url, "enabled": True} for url in relays]
+    # Render the full catalog, not just the active fleet, so the Switchboard can
+    # list every known relay with its default participation state. The browser
+    # then reconciles these toggles against its persisted preference.
+    relay_objs = relay_catalog()
     profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
     deck = UserLinkDeck.objects.filter(user=request.user).first()
     active_frictions = get_author_active_frictions(request.user.username)
@@ -2843,6 +2846,54 @@ PUBLIC_RELAYS = getattr(
 # Centralized relay fleet: NOSTR_RELAYS from Django settings wins when defined;
 # otherwise fall back to the canonical bootstrap list above.
 DEFAULT_RELAYS = getattr(settings, "NOSTR_RELAYS", DEFAULT_RELAYS)
+
+# Relays we read from but never publish to. See NOSTR_READ_ONLY_RELAYS in
+# config/settings.py; mirrored by the `write: false` catalog entry in
+# static/js/relay_pool.js.
+READ_ONLY_RELAYS = set(getattr(settings, "NOSTR_READ_ONLY_RELAYS", ["wss://relay.iyou.me"]))
+
+
+def relay_catalog():
+    """Every relay the app knows about, with its default participation state.
+
+    The Switchboard renders this list so a user can opt into public coverage with
+    one toggle instead of hand-editing config. It is deliberately wider than
+    ``DEFAULT_RELAYS``: the sovereign fleet is enabled, the public fleet is
+    cataloged but disabled, matching the ``enabled`` flags in
+    ``buildBootstrapRelays()`` in static/js/relay_pool.js.
+
+    This is the server-side *default* only. The browser's persisted toggle
+    (``wun_relays`` / ``wun_custom_relays``) is the real source of truth and
+    reconciles these checkboxes on load, so a relay a user previously switched on
+    renders back as on.
+    """
+    catalog = []
+    seen = set()
+    for url in DEFAULT_RELAYS:
+        if url in seen:
+            continue
+        seen.add(url)
+        catalog.append({
+            "url": url,
+            "enabled": True,
+            "read": True,
+            "write": url not in READ_ONLY_RELAYS,
+            "sovereign": True,
+        })
+    for url in PUBLIC_RELAYS:
+        if url in seen:
+            continue
+        seen.add(url)
+        catalog.append({
+            "url": url,
+            # Cataloged, not participating: off until a user opts in.
+            "enabled": False,
+            "read": True,
+            "write": True,
+            "sovereign": False,
+        })
+    return catalog
+
 
 # Global circle relay set: insider endpoints first (they answer in ~2-34ms and
 # win the race), then the public WAN fleet. GLOBAL_SETTLE_TIMEOUT exists solely
