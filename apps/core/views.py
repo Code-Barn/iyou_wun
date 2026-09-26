@@ -877,21 +877,20 @@ class FeedView(TemplateView):
             context["focused_note"] = context.get("thread_root")
         else:
             from .context import get_dependent_context
-            from apps.feed.selectors import filter_feed_for_dependent, is_feed_circle_allowed
+            from apps.feed.selectors import filter_feed_for_dependent
 
             dep_ctx = get_dependent_context(self.request)
-            circle_param = self.request.GET.get("circle")
-            mode_param = self.request.GET.get("mode")
-            selected_circle = (circle_param or mode_param or "iyou").lower()
-
-            # Stage 1 (U14): Global public timeline is disabled
-            if dep_ctx.get("is_dependent") and not is_feed_circle_allowed(selected_circle, dep_ctx):
-                selected_circle = "iyou"
+            selected_circle = _selected_circle(self.request, dep_ctx)
 
             context["feed_mode"] = selected_circle
             context["feed_circle"] = selected_circle
             context["selected_circle"] = selected_circle
             circle = selected_circle
+
+            # Insider-first default, WAN fleet only for Global: the widened settle
+            # window below is only meaningful if the public relays it waits for are
+            # actually queried.
+            relays = _relays_for_circle(circle, relays)
 
             dev_param = self.request.GET.get("dev")
             dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
@@ -1326,6 +1325,11 @@ def api_feed(request):
     else:
         relays = get_relays_for_request(request)
 
+    # Insider-first default; the Global circle additionally queries the public WAN
+    # fleet, which is what its widened settle window below is waiting for. A
+    # client-supplied relay set is an explicit override and is left untouched.
+    if not client_relays:
+        relays = _relays_for_circle(circle, relays)
 
     dev_param = request.GET.get("dev")
     dev_mode = (dev_param == "1" or str(dev_param).lower() == "true") or bool(getattr(settings, "DEBUG", False))
@@ -2172,6 +2176,46 @@ def _extract_display_title(content, summary="", alt_text=""):
     return ""
 
 
+def _selected_circle(request, dep_ctx=None):
+    """Resolve the requested feed circle, applying the U14 dependent guard.
+
+    Single source of truth for "which circle is this request in". The settle
+    window and the relay set are both derived from it, so the two can never
+    disagree -- previously the circle selected a 750ms WAN settle window while
+    the relay set stayed insider-only, so the window waited on relays that were
+    never queried.
+    """
+    if dep_ctx is None:
+        from .context import get_dependent_context
+
+        dep_ctx = get_dependent_context(request)
+
+    circle_param = request.GET.get("circle")
+    mode_param = request.GET.get("mode")
+    selected = (circle_param or mode_param or "iyou").lower()
+
+    if dep_ctx.get("is_dependent"):
+        from apps.feed.selectors import is_feed_circle_allowed
+
+        if not is_feed_circle_allowed(selected, dep_ctx):
+            selected = "iyou"
+
+    return selected
+
+
+def _relays_for_circle(circle, base_relays=None):
+    """Relay query set for a circle: lean insider fleet, WAN fleet for Global.
+
+    Session-pinned relay sets win over both -- an explicit user override is
+    always honored.
+    """
+    if base_relays is None:
+        base_relays = DEFAULT_RELAYS
+    if circle == "global" and base_relays == DEFAULT_RELAYS:
+        return GLOBAL_RELAYS
+    return base_relays
+
+
 def _gallery_settle_budget(request):
     """Mode-aware relay settle window for gallery media queries.
 
@@ -2181,16 +2225,7 @@ def _gallery_settle_budget(request):
     bracket guard is applied first so a U14 session cannot widen its own race
     window by passing ?circle=global.
     """
-    from .context import get_dependent_context
-    from apps.feed.selectors import is_feed_circle_allowed
-
-    dep_ctx = get_dependent_context(request)
-    circle_param = request.GET.get("circle")
-    mode_param = request.GET.get("mode")
-    selected_circle = (circle_param or mode_param or "iyou").lower()
-
-    if dep_ctx.get("is_dependent") and not is_feed_circle_allowed(selected_circle, dep_ctx):
-        selected_circle = "iyou"
+    selected_circle = _selected_circle(request)
 
     return GLOBAL_SETTLE_TIMEOUT if selected_circle == "global" else DEFAULT_SETTLE_TIMEOUT
 
@@ -2707,9 +2742,31 @@ DEFAULT_RELAYS = [
     "wss://relay.iyou.me",
 ]
 
+# Public WAN fleet, consulted only by the Global circle. Kept out of
+# DEFAULT_RELAYS so iyou/sovereign traffic never pays a WAN round trip; see
+# NOSTR_PUBLIC_RELAYS in config/settings.py for the rationale.
+PUBLIC_RELAYS = getattr(
+    settings,
+    "NOSTR_PUBLIC_RELAYS",
+    [
+        "wss://offchain.pub",
+        "wss://relay.damus.io",
+        "wss://relay.wellorder.net",
+        "wss://relay.snort.social",
+        "wss://nostr.mom",
+        "wss://nostr.oxtr.dev",
+        "wss://relay.primal.net",
+    ],
+)
+
 # Centralized relay fleet: NOSTR_RELAYS from Django settings wins when defined;
 # otherwise fall back to the canonical bootstrap list above.
 DEFAULT_RELAYS = getattr(settings, "NOSTR_RELAYS", DEFAULT_RELAYS)
+
+# Global circle relay set: insider endpoints first (they answer in ~2-34ms and
+# win the race), then the public WAN fleet. GLOBAL_SETTLE_TIMEOUT exists solely
+# to give that WAN tail time to land, so the Global scope must actually carry it.
+GLOBAL_RELAYS = list(dict.fromkeys(list(DEFAULT_RELAYS) + list(PUBLIC_RELAYS)))
 
 # Local loopback bridge is pinned first in every fan-out so it is preferred.
 LOCAL_RELAY = "ws://127.0.0.1:9003"
@@ -3855,6 +3912,7 @@ class GalleryView(TemplateView):
         # public relays actually land in the decks instead of being cut off by
         # the local relay's ~2ms answer.
         settle_budget = _gallery_settle_budget(self.request)
+        relays = _relays_for_circle(_selected_circle(self.request), relays)
         notes = fetch_media_assets(authors=authors, limit=24, until=until, relay_urls=relays,
                                    settle_timeout=settle_budget)
 
@@ -4082,9 +4140,11 @@ def api_gallery(request):
 
     relays = get_relays_for_request(request)
     authors = [filter_pubkey] if filter_pubkey else None
-    # Same circle-aware settle policy as GalleryView so infinite scroll does not
-    # silently fall back to the local-only window on the global circle.
+    # Same circle-aware policy as GalleryView: the Global circle needs the public
+    # WAN fleet *and* the wide settle window, so infinite scroll cannot silently
+    # fall back to the local-only pair.
     settle_budget = _gallery_settle_budget(request)
+    relays = _relays_for_circle(_selected_circle(request), relays)
 
     notes = fetch_media_assets(authors=authors, limit=limit, until=until, relay_urls=relays,
                                settle_timeout=settle_budget)

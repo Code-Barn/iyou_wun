@@ -4586,3 +4586,102 @@ class SovereignCreatorsWidgetLinkTests(TestCase):
         self.assertIn("{% url 'profile' profile_id %}", src)
         self.assertIn('creator.handle|cut:"@"', src)
         self.assertNotIn('href="/@{{ creator.handle }}"', src)
+
+
+class CircleAwareRelaySetTests(TestCase):
+    """The Global circle must actually query the relays its settle window waits for.
+
+    Trimming the default fleet to the two insider endpoints made GLOBAL_RETLE
+    worthless on Global: relay.iyou.me delivers zero public events, so the Global
+    feed and gallery returned nothing at all while still burning 750ms. The WAN
+    fleet is therefore Global-only -- public coverage without taxing ordinary
+    iyou/sovereign traffic.
+    """
+
+    def test_default_fleet_is_lean_insider_only(self):
+        from apps.core.views import DEFAULT_RELAYS
+
+        self.assertEqual(DEFAULT_RELAYS, ["ws://127.0.0.1:9003", "wss://relay.iyou.me"])
+
+    def test_global_relays_are_insider_first_then_public(self):
+        from apps.core.views import DEFAULT_RELAYS, GLOBAL_RELAYS, PUBLIC_RELAYS
+
+        self.assertEqual(GLOBAL_RELAYS[: len(DEFAULT_RELAYS)], DEFAULT_RELAYS)
+        for wan in PUBLIC_RELAYS:
+            self.assertIn(wan, GLOBAL_RELAYS)
+        # Insider endpoints lead so they win the race against the WAN tail.
+        self.assertEqual(GLOBAL_RELAYS[0], "ws://127.0.0.1:9003")
+        # No duplicates.
+        self.assertEqual(len(GLOBAL_RELAYS), len(set(GLOBAL_RELAYS)))
+
+    def test_non_global_circles_get_the_lean_fleet(self):
+        from apps.core.views import _relays_for_circle
+
+        for circle in ("iyou", "sovereign", "", None):
+            self.assertEqual(_relays_for_circle(circle), _relays_for_circle("iyou"))
+
+    def test_global_circle_gets_the_wan_fleet(self):
+        from apps.core.views import DEFAULT_RELAYS, _relays_for_circle
+
+        self.assertEqual(_relays_for_circle("global"), _relays_for_circle("global"))
+        self.assertNotEqual(_relays_for_circle("global"), DEFAULT_RELAYS)
+        self.assertGreater(len(_relays_for_circle("global")), len(DEFAULT_RELAYS))
+
+    def test_explicit_relay_override_is_never_overridden_by_circle(self):
+        from apps.core.views import _relays_for_circle
+
+        override = ["wss://custom.example"]
+        self.assertEqual(_relays_for_circle("global", override), override)
+        self.assertEqual(_relays_for_circle("iyou", override), override)
+
+    def test_settle_window_and_relay_set_agree_for_global(self):
+        """The invariant that broke: 750ms settle window over an insider-only set."""
+        from apps.core.views import (
+            DEFAULT_RELAYS,
+            DEFAULT_SETTLE_TIMEOUT,
+            GLOBAL_RELAYS,
+            GLOBAL_SETTLE_TIMEOUT,
+        )
+
+        self.assertGreater(GLOBAL_SETTLE_TIMEOUT, DEFAULT_SETTLE_TIMEOUT)
+        self.assertGreater(
+            len(GLOBAL_RELAYS),
+            len(DEFAULT_RELAYS),
+            "Global must query more than the default fleet to justify its settle window",
+        )
+
+    def test_gallery_global_scope_queries_the_wan_fleet(self):
+        """End-to-end guard on the regression: relay_req must see public relays."""
+        from apps.core.views import PUBLIC_RELAYS
+
+        seen = {}
+
+        def fake_relay_req(filter_obj, **kwargs):
+            seen.update(kwargs)
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            resp = self.client.get(reverse("api_gallery") + "?circle=global")
+
+        self.assertEqual(resp.status_code, 200)
+        queried = seen.get("relay_urls") or []
+        for wan in PUBLIC_RELAYS:
+            self.assertIn(wan, queried, f"{wan} missing from the Global gallery query")
+
+    def test_gallery_default_scope_stays_insider_only(self):
+        from apps.core.views import DEFAULT_RELAYS, PUBLIC_RELAYS
+
+        seen = {}
+
+        def fake_relay_req(filter_obj, **kwargs):
+            seen.update(kwargs)
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            resp = self.client.get(reverse("api_gallery"))
+
+        self.assertEqual(resp.status_code, 200)
+        queried = seen.get("relay_urls") or []
+        self.assertEqual(queried, DEFAULT_RELAYS)
+        for wan in PUBLIC_RELAYS:
+            self.assertNotIn(wan, queried)

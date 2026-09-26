@@ -72,6 +72,25 @@ NOSTR_RELAYS = [
     "wss://relay.iyou.me",
 ]
 
+# Public WAN fleet, queried ONLY by the Global circle.
+#
+# The lean insider list above is the default for iyou/sovereign. Global scope is
+# different in kind: relay.iyou.me delivers zero events for public kinds, so with
+# only the insider fleet the Global feed and gallery have no public source at all
+# and GLOBAL_SETTLE_TIMEOUT spends 750ms waiting on a relay set that cannot answer.
+# These entries are what the widened settle window is actually waiting for. They
+# are kept out of the default fleet precisely so ordinary traffic never pays a
+# WAN round trip.
+NOSTR_PUBLIC_RELAYS = [
+    "wss://offchain.pub",
+    "wss://relay.damus.io",
+    "wss://relay.wellorder.net",
+    "wss://relay.snort.social",
+    "wss://nostr.mom",
+    "wss://nostr.oxtr.dev",
+    "wss://relay.primal.net",
+]
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True
 
