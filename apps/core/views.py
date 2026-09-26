@@ -2540,7 +2540,11 @@ GLOBAL_SETTLE_TIMEOUT = 0.75   # 750ms for Global feed to allow WAN relay arriva
 TOTAL_RELAY_CEILING = 1.0      # Hard upper limit across all waits
 # Max relays fanned out per query: matching worker count means every task starts
 # at t=0, so the executor drain (wedged relays) can never extend past the ceiling.
-MAX_RELAY_FANOUT = 8
+# Sized to the full NOSTR_RELAYS fleet: order_relays() gives DEFAULT_RELAYS a
+# MAX_RELAY_FANOUT-1 slot budget after the pinned local relay, so a smaller
+# ceiling would silently truncate the tail of the fleet (the ecosystem peer
+# relay) out of every default query rather than merely deprioritising it.
+MAX_RELAY_FANOUT = 9
 
 
 
@@ -2616,8 +2620,9 @@ def order_relays(relay_urls):
 
     LOCAL_RELAY is pinned at index 0, followed by the host-verified responsive
     fleet (settings.NOSTR_RELAYS — offchain.pub, damus, wellorder, snort, mom,
-    oxtr, primal), then the caller's own relays. Excluded relays are stripped
-    and the set is deduped while preserving order.
+    oxtr, primal, then the read-only ecosystem peer relay), then the caller's own
+    relays. Excluded relays are stripped and the set is deduped while preserving
+    order.
 
     The fleet is read from DEFAULT_RELAYS rather than hardcoded so the pinned
     order and the configured fleet can never drift apart.

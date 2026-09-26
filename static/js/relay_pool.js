@@ -61,7 +61,11 @@
             { url: "wss://relay.snort.social", read: true, write: true, isLocal: false, primary: false },
             { url: "wss://nostr.mom", read: true, write: true, isLocal: false, primary: false },
             { url: "wss://nostr.oxtr.dev", read: true, write: true, isLocal: false, primary: false },
-            { url: "wss://relay.primal.net", read: true, write: true, isLocal: false, primary: false }
+            { url: "wss://relay.primal.net", read: true, write: true, isLocal: false, primary: false },
+            // Ecosystem peer relay: first-party, handshakes reliably, but delivers
+            // zero events for public kinds. Read-only — writes to it are dropped
+            // server-side, so it must never be a publish target or the primary.
+            { url: "wss://relay.iyou.me", read: true, write: false, isLocal: false, primary: false }
         ];
         return fleet.filter(function (r) { return !isExcludedRelay(r.url); });
     }
@@ -452,10 +456,14 @@
      * Phase 6 — NIP-65 Weighted-Take Relay Selection (AUDIT-004).
      * Quality score steering every author-outbox selection decision:
      *   0.0  disabled / quarantined / mid-reconnect-cooldown relays are never picked
-     *   1.0  connected relays and the primary mesh relay (wss://relay.iyou.me)
+     *   1.0  connected relays and the primary mesh relay (wss://offchain.pub)
      *   0.9  responsive relays that have produced a measured probe latency
      *   0.8  public bootstrap defaults
      *   0.7  every other known relay (NIP-65 / custom entries)
+     *
+     * The ecosystem peer relay (wss://relay.iyou.me) is a bootstrap entry but not
+     * primary, so it scores on the 0.8 tier until it is measured online. It is
+     * read-only and never enters a publish target set.
      */
     RelayPool.prototype.getRelayQuality = function (relayUrl) {
         var norm = normalizeUrl(relayUrl);
@@ -1166,7 +1174,7 @@
 
     /**
      * Parallel Fault-Tolerant Double-Broadcasting
-     * A failure on primary relay (wss://relay.iyou.me) does NOT abort or block others.
+     * A failure on the primary relay (wss://offchain.pub) does NOT abort or block others.
      */
     RelayPool.prototype.broadcast = function (signedEvent, targetRelays, timeoutMs) {
         var self = this;

@@ -63,8 +63,11 @@ SHOW_L2_TOGGLE = env.bool("SHOW_L2_TOGGLE", default=True)
 #   wss://nostr.mom       ~444ms
 #   wss://nostr.oxtr.dev  ~456ms
 #   wss://relay.primal.net ~525ms  retention leader
-# Removed: wss://relay.nostr.band (consistent TCP connect timeout) and
-# wss://relay.iyou.me (handshakes but delivers zero events for public kinds).
+#   wss://relay.iyou.me    ecosystem peer — first-party relay. Reinstated as a
+#                           read-only peer: it handshakes reliably but delivers
+#                           zero events for public kinds, so it is queried for
+#                           coverage and is never a write target or the primary.
+# Removed: wss://relay.nostr.band (consistent TCP connect timeout).
 NOSTR_RELAYS = [
     "ws://127.0.0.1:9003",
     "wss://offchain.pub",
@@ -74,6 +77,7 @@ NOSTR_RELAYS = [
     "wss://nostr.mom",
     "wss://nostr.oxtr.dev",
     "wss://relay.primal.net",
+    "wss://relay.iyou.me",
 ]
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

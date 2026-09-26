@@ -3969,12 +3969,45 @@ class Phase45SessionAndRelayHardeningTests(TestCase):
             "wss://relay.primal.net",
         ):
             self.assertIn(responsive, DEFAULT_RELAYS)
-        # Removed: relay.nostr.band (TCP connect timeout) and relay.iyou.me
-        # (handshakes but delivers zero events for public kinds).
+        # Removed: relay.nostr.band (consistent TCP connect timeout).
         self.assertNotIn("wss://relay.nostr.band", DEFAULT_RELAYS)
-        self.assertNotIn("wss://relay.iyou.me", DEFAULT_RELAYS)
+        # Reinstated as a read-only ecosystem peer: it handshakes reliably but
+        # delivers zero events for public kinds, so it is queried for coverage
+        # and is never a write target or the primary. It is deliberately the
+        # tail of the fleet, and MAX_RELAY_FANOUT is sized so the fan-out budget
+        # does not truncate it out of the default query set.
+        self.assertIn("wss://relay.iyou.me", DEFAULT_RELAYS)
+        self.assertEqual(DEFAULT_RELAYS[-1], "wss://relay.iyou.me")
         for excluded in EXCLUDED_RELAYS:
             self.assertNotIn(excluded, DEFAULT_RELAYS)
+
+    def test_fanout_ceiling_covers_the_full_fleet(self):
+        """MAX_RELAY_FANOUT must be at least the fleet size.
+
+        order_relays() grants the fleet MAX_RELAY_FANOUT-1 slots after the
+        pinned local relay, so a ceiling smaller than the fleet silently drops
+        the tail relays (including the ecosystem peer) from every default
+        query rather than merely deprioritising them.
+        """
+        from apps.core.views import DEFAULT_RELAYS, MAX_RELAY_FANOUT, order_relays
+
+        self.assertGreaterEqual(MAX_RELAY_FANOUT, len(DEFAULT_RELAYS))
+        fanned = order_relays(DEFAULT_RELAYS)
+        for url in DEFAULT_RELAYS:
+            self.assertIn(url, fanned, f"{url} truncated by fan-out budget")
+        self.assertIn("wss://relay.iyou.me", fanned)
+
+    def test_fanout_preserves_caller_relays_with_full_fleet(self):
+        """A caller-supplied NIP-65 hint survives alongside the full fleet."""
+        from apps.core.views import DEFAULT_RELAYS, MAX_RELAY_FANOUT, order_relays
+
+        caller = ["wss://hint.example.com"]
+        fanned = order_relays(list(DEFAULT_RELAYS) + caller)
+        for url in caller:
+            self.assertIn(url, fanned)
+        self.assertIn("wss://relay.iyou.me", fanned)
+        # Budget accounting stays consistent: local + fleet + caller.
+        self.assertLessEqual(len(fanned), MAX_RELAY_FANOUT + len(caller))
 
 
 class Secp256k1PubkeyIngestionTests(TestCase):
