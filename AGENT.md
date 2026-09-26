@@ -44,6 +44,7 @@ Requires: running `iyou_idp` instance + `iyou_home` (Tauri bridge :9001, Blossom
 | PKCE Reference | `docs/ecosystem_shared/auth_pkce.py` | Canonical reference implementation |
 | Satellite Coordination | `docs/ecosystem_shared/satellite-coordination.md` | Multi-satellite sync patterns |
 | Moderation Shield Spec | `docs/MODERATION_SHIELD_SPEC.md` | Sovereign moderation shield & node takedown engine architecture |
+| Strategic Roadmap | `docs/ROADMAP.md` | Release stabilization punch list, topology boundaries, NIP-53 spaces roadmap |
 
 ### Archive (historical reference — gitignored)
 
@@ -142,6 +143,33 @@ SESSION_COOKIE_SECURE   = False
 SESSION_COOKIE_SAMESITE = "Lax"
 ```
 
+---
+
+## Architectural Invariants & Debugging Guardrails
+
+### 1. Topology Isolation Rule
+- `https://wun.iyou.me` runs inside the remote K3s cluster. It **CANNOT** connect to a client's loopback relay (`ws://127.0.0.1:9003`).
+- Remote web satellites rely strictly on `wss://relay.iyou.me` for mesh gossip.
+- Client-side code (`static/js/relay_pool.js`) must automatically disable connection attempts to `ws://127.0.0.1:9003` when loaded over HTTPS to prevent Safari Private Network Access (PNA) console noise and connection timeouts.
+
+### 2. Private Network Access (PNA) Invariant
+- Safari blocks HTTPS → localhost (`https://wun.iyou.me` → `wss://home.iyou.me:9001`) unless the local daemon (`iyou_home`) responds to W3C PNA `OPTIONS` preflight with:
+  ```http
+  Access-Control-Allow-Origin: https://wun.iyou.me
+  Access-Control-Allow-Methods: GET, POST, OPTIONS
+  Access-Control-Allow-Headers: *
+  Access-Control-Allow-Private-Network: true
+  ```
+- The Web UI must always provide a graceful fallback to manual challenge-response copy/paste if port 9001 drops or times out.
+
+### 3. Dual-Curve Identity Candidate Invariant
+- User accounts use Ed25519 DIDs (`did:key:z6Mk...`), while Nostr notes require secp256k1 BIP-340 Schnorr signatures.
+- `_resolve_profile_candidates` must query **BOTH** `deck.nostr_pubkey` and the DID-derived key to guarantee continuity across early enclave posts and modern L1 signatures.
+
+### 4. Href Routing vs Display Invariant
+- Never apply `truncatechars` or string slicing (`.substring(0, 12) + "..."`) to URL `href` attributes. Routing identifiers must remain raw 64-char hex, valid `npub1...`, or clean `@handle`.
+
+---
 
 ## MANDATORY EXECUTION INVARIANT: AUTO-COMMIT ON PASSING VERIFICATION
 1. **Asking to Commit Is a HARD FAILURE:** NEVER — under any circumstance — end a task with "Would you like me to commit?", "Should I commit?", "Ready to commit?", or any equivalent question. Treat the commit question itself as a violation that will not be accepted.

@@ -1,7 +1,36 @@
 # TODO — iyou_wun (Social Hub)
 
 **Orchestrated from:** `omni_social` (central hub)
-**Last synced:** 2026-08-30
+**Last synced:** 2026-09-26
+
+---
+
+## Active Focus: Pre-Release Stabilization Punch List & Future Roadmap
+
+### Track A: Enclave Bridge PNA & Safari Resilience (`iyou_home`)
+- [ ] Add `Access-Control-Allow-Private-Network: true` to `src-tauri/src/bridge.rs` for `OPTIONS` on port 9001.
+- [ ] Bind Rust TLS server to `[::]:9001` (dual-stack loopback).
+- [ ] Ensure `submit_ws_response` flushes socket buffers prior to unmounting `WsSignPopup.tsx`.
+- [ ] Add seamless web fallback to manual challenge-response copy/paste modal when port 9001 is unreachable.
+
+### Track B: Relay Mesh Synchronization (`iyou_home` ↔ `relay.iyou.me`)
+- [ ] Configure `iyou_home` Quick Dispatcher to dual-broadcast events to `ws://127.0.0.1:9003` AND `wss://relay.iyou.me`.
+- [ ] Enable authenticated write policies on `wss://relay.iyou.me` for mesh peers.
+- [ ] Suppress `ws://127.0.0.1:9003` connection attempts in `relay_pool.js` when running under HTTPS.
+
+### Track C: Circle Filtering & Empty States (`iyou_wun`)
+- [ ] Audit `apps/core/views.py:fetch_unified_feed` for `circle="iyou"` to ensure registered authors are not filtered out.
+- [ ] Add informative diagnostic messages to empty circle feed views (differentiating relay empty from circle filter exclusions).
+
+### Track D: Pre-Release Genesis Ceremony
+- [ ] Wipe K3s PostgreSQL database storage to purge legacy test decks and constraint fragments.
+- [ ] Run pristine database migrations and seed `@dcbyers13` directly from L1 public persona key.
+
+### Track E: Sovereign Spaces & Live Audio (v1.1)
+- [ ] Deploy LiveKit / Galène SFU Helm chart in `k3s_vm`.
+- [ ] Implement NIP-53 Kind 30311 / Kind 1311 parser in `iyou_wun`.
+- [ ] Add persistent bottom-dock mini-player for live spaces in right rail.
+- [ ] Implement Blossom audio recording archival on space completion.
 
 ---
 

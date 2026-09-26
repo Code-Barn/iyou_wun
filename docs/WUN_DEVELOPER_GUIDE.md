@@ -368,7 +368,12 @@ Media files are uploaded to the local Blossom server at `http://127.0.0.1:9002/<
 
 ### Gallery View
 
-The **Media Gallery** (`/gallery`) renders Kind 1063 events with server-side MIME categorization into tabbed decks — **All**, **Images** (CSS masonry grid), **Videos** (16:9 feed cards), **Audio** (inline players with scrubber), and **Other**. Counts are shown on each tab. Clicking an image opens a fullscreen lightbox with metadata sidebar (file name, MIME, sovereign status, NIP-52 timestamps) and keyboard navigation (←/→/Esc). Audio auto-pauses when navigating between tabs. Gallery is public-read (no login required).
+The **Media Gallery** (`/gallery`) provides rich media browsing across the sovereign mesh:
+- **Unified Multi-Modal Ingestion:** Ingests media across both dedicated NIP-94 Kind 1063 events and Kind 1 text notes with media attachments. Multi-attachment Kind 1 notes are flattened into discrete media entries without dropping caption context.
+- **Blossom SHA-256 Normalization:** Blossom media URLs (`http://127.0.0.1:9002/<sha256>`, `https://cdn.iyou.me/<sha256>`) have trailing parameters and extension fragments normalized to canonical SHA-256 hashes, enabling reliable content-addressed deduplication and multi-tier CDN caching.
+- **MIME Categorization Decks:** Categorized into tabbed decks — **All**, **Images** (CSS masonry grid), **Videos** (16:9 feed cards), **Audio** (inline players with scrubber), and **Other** with active item counts on each tab.
+- **3-Pane Theater Expand Toggle (`⛶ Expand` / `html.gallery-theater`):** Users can expand the gallery view beyond the centered column into a 3-pane immersive theater canvas, collapsing navigation rails while maintaining responsive breakpoints.
+- **Decoupled Lightbox Modal:** Clicking any visual media item opens a decoupled fullscreen lightbox with a metadata inspector sidebar (file name, MIME type, sovereign origin badge, NIP-52 timestamps) and keyboard shortcuts (`←`/`→`/`Esc`). Audio playback auto-pauses when switching tabs or activating videos. Gallery is public-read (no login required).
 
 **Files:** `apps/core/views.py` (GalleryView + `categorize_media()`), `templates/gallery.html`, `static/js/gallery_player.js`
 
@@ -431,13 +436,17 @@ A global, typed toast stack replaces ad-hoc inline feedback calls:
 
 **Files:** `static/js/relay_pool.js` (client), `apps/core/views.py` — `fetch_user_nip65_relays()` (server), `templates/feed.html` (health indicator)
 
-Relay infrastructure gained a **client-side pool** and **NIP-65 (Kind 10002) ingestion**:
+Relay infrastructure features a **client-side pool**, **NIP-65 (Kind 10002) ingestion**, and the **Sovereign Fleet Switchboard**:
 
-- **Connection pool:** Bootstrap set (`relay.iyou.me`, `nos.lol`, `relay.damus.io`, `relay.primal.net`, local `:9003`) plus persisted custom relays and previously-ingested NIP-65 relays, each with read/write flags, local/primary markers, `status`, `latencyMs`, and `lastProbe`.
-- **Health probing:** Every `45s` (and on boot) each relay is probed via a short-live WebSocket; the **Relay Mesh Health Indicator** shows `online/total`, pulsing green "Mesh Pool Active", amber "Mesh Degraded", or rose "Mesh Offline (Reconnecting...)".
-- **Parallel fault-tolerant double-broadcast:** `relayPool.broadcast(signedEvent, relays)` opens one WebSocket per relay, treats any `["OK", ...]` as success, and resolves `{localSuccess, globalSuccess, successfulRelays, failedRelays}` without letting a primary failure block others. `bridge_client.broadcastToRelays` delegates to it when present.
-- **NIP-65 ingestion:** `ingestNip65(event)` consumes Kind 10002 `["r", url, "read"|"write"]` tags into the pool and persists them (`wun_nip65_relays`). Server side, `fetch_user_nip65_relays(pubkey)` returns `{read, write, all}` from the most recent Kind 10002 event for bulk relay-aware queries.
-- **Backwards fallback:** `bridge_client` uses `window.relayPool.getRelays()` when the pool exists, else its legacy `localStorage` `wun_relays` path.
+- **9-Relay Fleet Catalog:** The ecosystem maintains a canonical 9-relay catalog spanning insider sovereign relays (`ws://127.0.0.1:9003`, `wss://relay.iyou.me`) and indexed/public WAN relays (`wss://relay.primal.net`, `wss://relay.nostr.band`, `wss://purplerelay.com`, `wss://nostr.mom`, `wss://nos.lol`, `wss://relay.damus.io`, `wss://offchain.pub`). Public WAN relays are **disabled by default** to protect user privacy, conserve bandwidth, and eliminate third-party connection noise.
+- **Server/Client Catalog Parity:** `relay_catalog()` in `apps/core/views.py` and `buildBootstrapRelays()` in `static/js/relay_pool.js` share identical defaults and schema (`{url, read, write, is_local, is_catalog, active}`). Custom user relays enroll into the live pool immediately and persist in `localStorage.wun_relays`.
+- **Circle-Driven Settle Timeouts:** Relay query settle deadlines are dynamically governed by the active circle (`_selected_circle`):
+  - **Sovereign / iyou Circle (`DEFAULT_SETTLE_TIMEOUT = 0.05s` / 50ms):** Queries only local and platform relays (`:9003` and `relay.iyou.me`), returning in ~2–50ms without paying WAN round trips.
+  - **Global Circle (`GLOBAL_SETTLE_TIMEOUT = 0.75s` / 750ms):** Extends settle window to capture late-arriving events from the distributed WAN fleet (e.g. `primal.net`, `nostr.band`).
+- **Traefik HTTP/1.1 ALPN Enforcement:** Configured on cluster ingress (`relay.iyou.me` and `wun.iyou.me`) to explicitly negotiate HTTP/1.1 ALPN for WebSocket handshakes. This prevents HTTP/2 framing mismatches, proxy buffering stalls, and silent socket disconnects on long-lived Nostr subscriptions.
+- **Health Probing:** Every `45s` (and on boot), active relays are probed via short-lived WebSockets; the **Relay Mesh Health Widget** displays `online/total`, latency metrics, and interactive diagnostics drawers.
+- **Parallel Fault-Tolerant Double-Broadcast:** `relayPool.broadcast(signedEvent, relays)` opens parallel WebSockets across active relays, treating any `["OK", ...]` response as success and resolving `{localSuccess, globalSuccess, successfulRelays, failedRelays}`.
+- **NIP-65 Ingestion:** `ingestNip65(event)` consumes Kind 10002 `["r", url, "read"|"write"]` tags into the pool. Server-side `fetch_user_nip65_relays(pubkey)` parses Kind 10002 events for bulk outbox routing.
 
 ---
 
@@ -624,8 +633,9 @@ The `proofValue` is a hex-encoded Ed25519 signature (matching iyou_poly's verifi
 **Files:** `templates/dashboard.html`, `templates/includes/_deck_manager.html`, `templates/includes/_relay_manager.html`, `static/js/bridge_client.js`, `static/js/link_deck_manager.js`
 
 The dashboard is structured as a unified command center extending `base.html` within a single responsive container:
-1. **Stateful URL-Hash Navigation**:
+1. **Stateful URL-Hash Navigation & Responsive Single-Row Tabs**:
    - Manages four stateful tab panels (`#profile`, `#deck`, `#settings`, `#account`) synced to `window.location.hash` and `localStorage.getItem('wun_dashboard_active_tab')`.
+   - Employs a 4-column responsive grid layout (`grid grid-cols-4 gap-2`) with equal-width tab buttons across viewports. This guarantees all four tabs fit cleanly in a single row, preventing horizontal clipping, awkward flex wrapping, and label truncation on smaller displays.
    - Uses `history.replaceState` to maintain smooth tab transitions without jump scrolling.
 2. **Reactive 2-Column Profile Editor (`#tab-profile`)**:
    - **Left Column**: Form inputs for Display Name, Avatar URL, Bio/Headline, Banner URL, NIP-05, and Lightning Address (LUD-16).
@@ -1031,6 +1041,135 @@ Phases 20–32 shipped the next wave of sovereign-mesh features across chat, soc
 - **Files:** `apps/core/views.py` (`api_persona_switch`), `apps/core/urls.py` (`api/auth/persona-switch/`), `apps/core/context_processors.py` (`user_identity`), `static/js/bridge_client.js` (`handlePersonaChanged`), `templates/includes/_standard_header.html`, `templates/dashboard.html`
 - On persona activation the bridge compares `profile.did` to header-injected `window.CURRENT_SESSION_DID`; divergence POSTs `/api/auth/persona-switch/`, provisions an isolated `UserLinkDeck` per DID, re-logs the Django session, dispatches `persona:session-reanchored`, and reloads everywhere except `/dashboard` (which re-renders deck identity in place).
 - Header `user_display_label` priority chain: deck `@handle` > `persona (L{n})` > `Primary Identity (L1)` > truncated-DID burner (`L2`).
+
+---
+
+## Current Subsystem Status Matrix
+
+| Subsystem | State / Health | Key Remaining Action |
+|-----------|----------------|----------------------|
+| **Identity & DIDs** | 🟢 Stable | Polymorphic resolution (`/@handle`, `/profile/<hex>`), dual-candidate querying. Wipe legacy test data on release. |
+| **K3s Project Relay** | 🟢 Operational | Traefik HTTP/1.1 ALPN, 30s heartbeats, persistent SQLite WAL. Enable write permissions for mesh nodes. |
+| **Desktop Enclave Bridge** | 🔴 Blocked by PNA | Port 9001 WebSocket listener. Add `Access-Control-Allow-Private-Network: true` header to OPTIONS pre-flight. |
+| **Relay Fleet Management** | 🟢 Stable | 9-relay catalog, public WAN disabled by default, circle-driven budgets. Suppress `127.0.0.1:9003` probing when on public HTTPS. |
+| **Media Gallery** | 🟢 Verified | Kind 1 + 1063 ingestion, 3-pane theater expand, decoupled lightbox. Add in-app Blossom audio stream player. |
+| **Feed Stream UI** | 🟢 Verified | Decoupled routing IDs, deduplicated sublabels, single-row dashboard tabs. Fix circle filter evaluation for `[ ⚡ iyou ]`. |
+
+---
+
+## §17: Network Topologies & The Safari PNA Sandbox Barrier
+
+The friction experienced across sovereign deployments stems from a fundamental boundary mismatch between three distinct execution topologies:
+
+### Topology Comparison Matrix
+
+| Topology | Network Context | Loopback Enclave (`:9003`) | Signing Bridge (`:9001`) | Mesh Relay (`relay.iyou.me`) |
+|----------|-----------------|-----------------------------|--------------------------|------------------------------|
+| **Local Dev** (Fully Functional) | Browser at `http://127.0.0.1:8001` | Connectable (`ws://127.0.0.1:9003`) | Connectable (`ws://127.0.0.1:9001`) | Optional secondary peer |
+| **Native Enclave Dispatch** (`iyou_home`) | Desktop Tauri App | Internal binding (`127.0.0.1:9003`) | Native Unix/TCP socket | WAN synchronization target |
+| **Remote Web Satellite** (The Sandbox Wall) | Browser at `https://wun.iyou.me` (K3s Pod) | **Blocked** (Loopback sandbox) | **Blocked by PNA** without headers | Primary single source of truth |
+
+### 1. The Local-Relay Isolation Wall (`127.0.0.1:9003`)
+- **The Issue:** `https://wun.iyou.me` runs inside the remote K3s cluster. Code executing in the user's browser over public HTTPS cannot reach the user's laptop loopback relay `ws://127.0.0.1:9003`. In the UI, `127.0.0.1:9003` is explicitly flagged as `Local Enclave (DISABLED)`.
+- **Root Cause of Missing Posts:** When a note was posted from `iyou_home`, the desktop client published exclusively to its local port 9003. Because that note was never bridged to `wss://relay.iyou.me`, the remote web satellite had no way of knowing the post existed.
+- **Remediation:**
+  1. **Dual-Broadcast Dispatch in `iyou_home`:** When `iyou_home` dispatches an event via the Quick Dispatcher, it must publish to both `ws://127.0.0.1:9003` AND `wss://relay.iyou.me` (plus any active outbox relays).
+  2. **HTTPS Context Guard in `relay_pool.js`:** When the web app is loaded over HTTPS, `relay_pool.js` automatically marks `127.0.0.1:9003` as unconnectable in the client pool without spamming retry errors or polluting the console.
+
+### 2. The Private Network Access (PNA) Wall (`wun.iyou.me` → `home.iyou.me:9001`)
+- **The Issue:** When Safari loads `https://wun.iyou.me` (public HTTPS), any fetch or WebSocket handshake directed to `wss://home.iyou.me:9001` (which resolves to `127.0.0.1`) triggers an automatic W3C Private Network Access pre-flight.
+- **Failure Symptoms:** Safari immediately drops the socket with errors like:
+  - `The network connection was lost`
+  - `Fetch API cannot load due to access control checks`
+  - The UI hangs indefinitely on *"Waiting for Signature..."* before the user can approve.
+- **Required Remediation:**
+  1. **PNA Pre-Flight Compliance:** Update `src-tauri/src/bridge.rs` so the HTTP/TLS router responds to `OPTIONS` on port 9001 with:
+     ```http
+     Access-Control-Allow-Origin: https://wun.iyou.me
+     Access-Control-Allow-Methods: GET, POST, OPTIONS
+     Access-Control-Allow-Headers: *
+     Access-Control-Allow-Private-Network: true
+     ```
+  2. **Dual-Stack Socket Binding:** Ensure the Rust TLS server binds to `[::]:9001` to prevent macOS IPv6/IPv4 loopback resolution stalls where Safari attempts `::1` before falling back.
+  3. **Signing Queue Flush:** Confirm `submit_ws_response` in Rust flushes the response buffer before unmounting `WsSignPopup.tsx` so Safari doesn't see a dropped connection right as the user approves.
+  4. **Manual Paste Fallback UI:** Ensure that if the WebSocket fails or times out, the web composer seamlessly opens the manual challenge/signature copy-paste modal rather than hanging.
+
+---
+
+## §18: Sovereign Spaces (Live Audio Mesh Specification)
+
+Phase 2 (v1.1) introduces **Sovereign Spaces** — a decentralized, censorship-resistant live audio broadcasting mesh built on open Nostr signaling and containerized WebRTC transport.
+
+### 1. Signaling Protocol (NIP-53)
+- **Room Lifecycle Management (Kind 30311 - Live Activity):**
+  - Room state transitions: `planned` → `live` → `ended`.
+  - Roles defined via `p` tags with markers: `["p", <pubkey>, <relay>, "Host"]`, `["p", <pubkey>, <relay>, "Speaker"]`.
+  - Tags include `d` (room identifier), `title`, `summary`, `starts`, and `streaming` (media ingress/egress URL).
+- **Synchronized Room Chat (Kind 1311):**
+  - Live in-room ephemeral chat messages anchored to the space via `["a", "30311:<host_pubkey>:<d_identifier>"]` tags.
+
+### 2. Media Transport (WebRTC SFU in `k3s_vm`)
+- **Architecture:** A containerized WebRTC Selective Forwarding Unit (LiveKit or Galène) deployed within the K3s cluster.
+- **Host Audio Ingress:** Broadcasters push audio over WHIP (WebRTC HTTP Ingress Protocol) with low CPU overhead.
+- **Listener Egress:**
+  - Interactive listeners receive ultra-low-latency audio via WHEP (WebRTC HTTP Egress Protocol).
+  - Scaled listeners fallback to an HTTP Live Streaming (HLS) stream (`.m3u8`).
+- **UI Mini-Player:** A persistent floating audio player dock in the right rail across `/feed` and `/gallery` so listeners can browse without interrupting audio.
+
+### 3. Blossom Archival & Audio Deck Hydration
+- When a space concludes, the SFU recording pipeline automatically transfers the recorded audio (`.m4a` / `.opus` / `.mp3`) to Blossom storage (`cdn.iyou.me`).
+- The space state updates to `status = "ended"` via a concluding Kind 30311 event tagged with `["recording", "https://cdn.iyou.me/<sha256>"]`.
+- The recording is automatically indexed and hydrated into the **Media Gallery Audio Deck** (`/gallery#tab-audio`) with waveform scrubbers.
+
+### 4. Trust Ladder & Public Firehose Firewall
+- **Default-Safe Community:** All new accounts strictly participate in the `[ ⚡ iyou ]` circle. External WAN relays remain disabled by default.
+- **Age-Bracket Enforcement:**
+  - **U14 / Dependent Accounts:** The Switchboard's external WAN relay toggles and the `[ 🌐 Global ]` circle tab are completely suppressed in the UI. Inbound communications are restricted to WoT distance $\le 1$.
+  - **Adults (18+):** The Sovereign Switchboard provides a deliberate safety interstitial explaining the risks of unmoderated WAN content before unlocking external relay toggles.
+
+### 5. Native Messaging & Chat Dock
+- **XMPP Session Exchange (`/api/chat/auth/`):** Ephemeral Prosody SASL tokens exchanged for active DID sessions, eliminating manual JID credential entry.
+- **NIP-17 Encrypted DM Fallback:** Seamless fallback to NIP-17 direct encrypted messaging routed through mesh relays if peer lacks an active XMPP session.
+
+---
+
+## §19: Genesis Database Reset Standard Operating Procedure (SOP)
+
+Prior to cutting v1.0, a clean database reset and genesis provisioning ceremony must be executed on the K3s cluster to purge accumulated test link decks, legacy keys, and constraint fragments.
+
+### Step 1: K3s PostgreSQL Volume Purge
+1. Scale down the application deployment to release database connections:
+   ```bash
+   kubectl scale deployment iyou-wun --replicas=0 -n iyou
+   ```
+2. Purge the PostgreSQL persistent subpath on the K3s cluster node:
+   ```bash
+   ssh root@k3s-node "rm -rf /var/lib/k3s-data/iyou-wun/postgres/*"
+   ```
+3. Restart PostgreSQL and scale `iyou-wun` back up:
+   ```bash
+   kubectl scale deployment iyou-wun --replicas=1 -n iyou
+   ```
+
+### Step 2: Fresh Migrations
+Run all migrations cleanly against the pristine PostgreSQL instance:
+```bash
+uv run python manage.py migrate
+```
+
+### Step 3: Genesis Sovereign Account Provisioning
+Provision the primary administrative sovereign identity (`@dcbyers13`) directly from the L1 public persona key:
+```bash
+uv run python manage.py seed_dev_identity \
+    --handle dcbyers13 \
+    --did did:key:z6MkuDi... \
+    --pubkey 04f98... \
+    --admin
+```
+This ensures strict 1-to-1 parity between:
+- Sovereign DID (`did:key:z6Mk...`)
+- L1 secp256k1 Nostr Pubkey
+- Canonical `UserLinkDeck` record (`@dcbyers13`, discriminator 0)
 
 ---
 
