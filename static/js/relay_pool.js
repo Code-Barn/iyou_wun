@@ -13,6 +13,31 @@
     "use strict";
 
     /**
+     * Relays proven dead or unusable from the browser fleet probe. Mirrors the
+     * server-side EXCLUDED_RELAYS set in apps/core/views.py so the client pool
+     * and the backend query fan-out agree on what is worth contacting.
+     *
+     * These must never be probed, subscribed, or persisted. Enforced at every
+     * pool entry point (bootstrap, localStorage re-seed, _addRelay, NIP-65
+     * ingest) and defensively at probeRelay().
+     */
+    const EXCLUDED_CLIENT_RELAYS = new Set([
+        "wss://purplerelay.com",
+        "wss://nos.lol",
+        "wss://relay.nostr.band"
+    ]);
+
+    /**
+     * True when a relay URL is on the exclusion list. Declared as a hoisted
+     * function (not a const arrow) because buildBootstrapRelays() runs at
+     * module init, before the const bindings above would otherwise be safe to
+     * read from in every engine.
+     */
+    function isExcludedRelay(url) {
+        return EXCLUDED_CLIENT_RELAYS.has(normalizeUrl(url));
+    }
+
+    /**
      * Build the bootstrap relay pool.
      * The sovereign local relay (ws://127.0.0.1:9003) is only included when
      * running on a local HTTP dev origin (http://127.0.0.1:* or http://localhost:*).
@@ -28,29 +53,17 @@
     }
 
     function buildBootstrapRelays() {
-        const baseRelays = [
-            "wss://relay.iyou.me",
-            "wss://relay.primal.net",
-            "wss://relay.nostr.band",
-            "wss://purplerelay.com",
-            "wss://nostr.mom",
-            "wss://nos.lol",
-            "wss://relay.damus.io"
+        const fleet = [
+            { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false },
+            { url: "wss://offchain.pub", read: true, write: true, isLocal: false, primary: true },
+            { url: "wss://relay.damus.io", read: true, write: true, isLocal: false, primary: false },
+            { url: "wss://relay.wellorder.net", read: true, write: true, isLocal: false, primary: false },
+            { url: "wss://relay.snort.social", read: true, write: true, isLocal: false, primary: false },
+            { url: "wss://nostr.mom", read: true, write: true, isLocal: false, primary: false },
+            { url: "wss://nostr.oxtr.dev", read: true, write: true, isLocal: false, primary: false },
+            { url: "wss://relay.primal.net", read: true, write: true, isLocal: false, primary: false }
         ];
-        var relays = baseRelays.map(function (url, idx) {
-            return {
-                url: url,
-                read: true,
-                write: true,
-                primary: idx === 0
-            };
-        });
-        // The sovereign local loopback relay is ALWAYS retained in the pool so the
-        // diagnostics drawer never loses the local enclave entry. On an HTTPS origin
-        // browsers block plain ws:// sockets (mixed content), so it simply renders
-        // as "Local Enclave (Desktop/WSS)" instead of being probed over the wire.
-        relays.push({ url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false });
-        return relays;
+        return fleet.filter(function (r) { return !isExcludedRelay(r.url); });
     }
 
     var BOOTSTRAP_RELAYS = buildBootstrapRelays();
@@ -115,6 +128,7 @@
         // 1. Load Bootstrap Defaults
         BOOTSTRAP_RELAYS.forEach(function (r) {
             var norm = normalizeUrl(r.url);
+            if (isExcludedRelay(r.url)) return;
             self.relays.set(norm, {
                 url: r.url,
                 read: r.read !== false,
@@ -141,6 +155,7 @@
                         customList.forEach(function (entry) {
                             var url = typeof entry === "string" ? entry : (entry && entry.url);
                             if (!url) return;
+                            if (isExcludedRelay(url)) return;
                             enabledMap[normalizeUrl(url)] = entry.enabled !== false;
                         });
                     }
@@ -153,10 +168,19 @@
             if (stored) {
                 var list = JSON.parse(stored);
                 if (Array.isArray(list)) {
+                    var keptList = [];
+                    var scrubbed = false;
                     list.forEach(function (entry) {
                         var url = typeof entry === "string" ? entry : (entry && entry.url);
                         if (!url) return;
                         var norm = normalizeUrl(url);
+                        // Scrub excluded relays out of the persisted list as we read
+                        // it, so a stale wun_relays entry can never re-seed the pool.
+                        if (isExcludedRelay(url)) {
+                            scrubbed = true;
+                            return;
+                        }
+                        keptList.push(entry);
                         if (!bootstrapNorms[norm] && !self.relays.has(norm)) {
                             var enabled = entry.enabled !== false;
                             if (enabledMap.hasOwnProperty(norm)) enabled = enabledMap[norm];
@@ -174,15 +198,33 @@
                             });
                         }
                     });
+                    if (scrubbed) {
+                        // Write the cleaned list back so the dead relays are
+                        // permanently purged from the browser profile, not just
+                        // ignored on this load.
+                        try {
+                            localStorage.setItem(STORAGE_KEY, JSON.stringify(keptList.map(function (e) {
+                                return typeof e === "string" ? e : e.url;
+                            })));
+                        } catch (e) { /* ignore */ }
+                    }
                 }
             }
 
             // A pure wun_custom_relays list (no wun_relays) still seeds the pool.
             if (enabledMap && Object.keys(enabledMap).length > 0) {
+                var keptCustom = [];
+                var scrubbedCustom = false;
                 customList.forEach(function (entry) {
                     var url = typeof entry === "string" ? entry : (entry && entry.url);
                     if (!url) return;
                     var norm = normalizeUrl(url);
+                    if (isExcludedRelay(url)) {
+                        scrubbedCustom = true;
+                        delete enabledMap[norm];
+                        return;
+                    }
+                    keptCustom.push(entry);
                     if (!bootstrapNorms[norm] && !self.relays.has(norm)) {
                         self.relays.set(norm, {
                             url: url,
@@ -198,6 +240,11 @@
                         });
                     }
                 });
+                if (scrubbedCustom) {
+                    try {
+                        localStorage.setItem(CUSTOM_STORAGE_KEY, JSON.stringify(keptCustom));
+                    } catch (e) { /* ignore */ }
+                }
             }
         } catch (e) { /* ignore */ }
 
@@ -207,7 +254,18 @@
             if (nip65Stored) {
                 var nip65Relays = JSON.parse(nip65Stored);
                 if (Array.isArray(nip65Relays)) {
-                    self.ingestNip65Tags(nip65Relays, false);
+                    var keptNip65 = nip65Relays.filter(function (entry) {
+                        var u = Array.isArray(entry) ? entry[1] : entry;
+                        return !isExcludedRelay(u);
+                    });
+                    if (keptNip65.length !== nip65Relays.length) {
+                        // NIP-65 outbox hints are a re-entry path for dead relays,
+                        // so scrub them alongside the pool lists.
+                        try {
+                            localStorage.setItem(NIP65_STORAGE_KEY, JSON.stringify(keptNip65));
+                        } catch (e) { /* ignore */ }
+                    }
+                    self.ingestNip65Tags(keptNip65, false);
                 }
             }
         } catch (e) { /* ignore */ }
@@ -638,6 +696,7 @@
     RelayPool.prototype._addRelay = function (url, opts) {
         opts = opts || {};
         var norm = normalizeUrl(url);
+        if (isExcludedRelay(url)) return;
         if (this.relays.has(norm)) return;
         this.relays.set(norm, {
             url: url,
@@ -721,6 +780,13 @@
         var norm = normalizeUrl(url);
         var record = this.relays.get(norm);
         if (!record) return Promise.resolve({ url: url, status: "offline", latencyMs: null });
+
+        // Excluded relays are never touched over the wire, even if one somehow
+        // reached the pool map (stale entry, manual console edit, NIP-65 hint).
+        if (isExcludedRelay(url)) {
+            this.relays.delete(norm);
+            return Promise.resolve({ url: url, status: "offline", latencyMs: null });
+        }
 
         // Disabled (switchboard toggle off) relays are never probed — demoted
         // until re-enabled. Prevents the periodic probe from flipping them back
@@ -1025,6 +1091,7 @@
         var promises = [];
         var self = this;
         this.relays.forEach(function (r) {
+            if (isExcludedRelay(r.url)) return;
             promises.push(self.probeRelay(r.url));
         });
         return Promise.all(promises).then(function (results) {
@@ -1047,6 +1114,9 @@
             if (!Array.isArray(tag) || tag[0] !== "r" || !tag[1]) return;
             var url = tag[1].trim();
             if (!url) return;
+            // A peer can advertise an excluded relay in its Kind 10002 outbox.
+            // Refuse it outright so it never joins the pool or gets persisted.
+            if (isExcludedRelay(url)) return;
             var mode = tag[2] ? String(tag[2]).toLowerCase() : null;
             var read = mode !== "write";
             var write = mode !== "read";
@@ -1364,7 +1434,7 @@
 
     /**
      * Render one row per pooled relay:
-     *        ●  nos.lol           [R][W]   42ms
+     *        ●  offchain.pub      [R][W]   42ms
      *        ●  127.0.0.1:9003    [Local]  8ms
      *   Status dot: emerald = online, amber = probing, rose = offline.
      */
