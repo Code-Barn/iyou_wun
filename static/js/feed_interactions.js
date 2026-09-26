@@ -525,13 +525,18 @@
 
         var date = new Date(event.created_at * 1000);
         var formattedDate = date.toLocaleString();
-        var npub = window.userNpub || (window.userPubkey ? window.userPubkey.substring(0, 12) + "..." : "You");
+        // Keep the routable identity and the display label distinct. `npub` must
+        // stay a real npub1... (or empty) so buildCardHtml can route on it; the
+        // truncated "3b665cc76c15..." form is a label only and must never be
+        // parked in a field that anything treats as an identifier.
+        var cleanNpub = window.userNpub || window.userPubkey || "";
+        var npubLabel = window.userNpub || (window.userPubkey ? window.userPubkey.substring(0, 12) + "..." : "You");
         var replyObj = {
             id: event.id,
             kind: event.kind || 1111,
-            pubkey: event.pubkey,
-            npub: npub,
-            author_name: npub,
+            pubkey: event.pubkey || window.userPubkey || "",
+            npub: cleanNpub,
+            author_name: npubLabel,
             content: event.content,
             created_at: event.created_at,
             parent_id: rootId,
@@ -759,6 +764,28 @@
         return '/static/img/mesh_avatar_default.svg';
     }
 
+    /**
+     * Resolve a routable author identifier, or "" when none is safe to route to.
+     *
+     * Only three shapes are accepted: a claimed handle, a real bech32 npub, or a
+     * full 64-char hex pubkey. Anything else -- notably the truncated
+     * "3b665cc76c15..." display label, which producers do put in `npub` fields --
+     * is rejected. Trusting the field blindly reintroduces the dead-link bug for
+     * every payload that carries a truncated label, not just the ones missing it.
+     */
+    function resolveAuthorRouteId(note, pubkey, authorHandle) {
+        if (authorHandle && /^[a-z0-9_-]{3,32}$/i.test(authorHandle)) {
+            return { id: authorHandle, kind: "handle" };
+        }
+        if (note && typeof note.npub === "string" && /^npub1[0-9a-z]+$/i.test(note.npub)) {
+            return { id: note.npub, kind: "npub" };
+        }
+        if (typeof pubkey === "string" && /^[0-9a-fA-F]{64}$/.test(pubkey)) {
+            return { id: pubkey.toLowerCase(), kind: "hex" };
+        }
+        return { id: "", kind: "none" };
+    }
+
     function buildCardHtml(note) {
         if (!note) return "";
         var isDevMode = (typeof window !== "undefined" && (new URLSearchParams(window.location.search).get("dev") === "1" || window.DEV_DIAGNOSTIC_MODE));
@@ -767,9 +794,24 @@
         }
         var noteId = note.id || "";
         var pubkey = note.pubkey || note.pubkey_hex || "";
-        var npub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "You");
-        var authorName = note.author_display_name || note.author_name || npub;
         var authorHandle = note.author_handle || note.handle || "";
+
+        // Routing identifier and display label are deliberately separate values.
+        // A truncated label ("3b665cc76c15...") is fine as text but is not a route:
+        // concatenating it into an href produced /profile/3b665cc76c15.../, which
+        // no resolver can match, so clicking an author landed on "Peer Not Found
+        // on Mesh". resolveAuthorRouteId only ever yields a handle, a real npub,
+        // or a full 64-char hex.
+        var route = resolveAuthorRouteId(note, pubkey, authorHandle);
+        var routingId = route.id;
+        var authorUrl = note.author_url || (route.kind === "handle"
+            ? "/@" + routingId + "/"
+            : (routingId ? "/profile/" + routingId + "/" : "#"));
+
+        // Display-only fallback. Never used for routing.
+        var displayNpub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "Anonymous");
+        var npub = displayNpub;
+        var authorName = note.author_display_name || note.author_name || displayNpub;
         // Strict de-duplication, mirroring the guard in
         // templates/includes/_thread_post.html: the subline is dropped unless
         // the handle is non-empty and strictly distinct from BOTH raw name
@@ -780,7 +822,6 @@
             authorHandle !== authorName &&
             authorHandle !== (note.author_display_name || "") &&
             authorHandle !== (note.author_name || "")) ? authorHandle : "";
-        var authorUrl = note.author_url || (authorHandle ? "/@" + authorHandle + "/" : "/profile/" + npub + "/");
         var authorAvatar = note.author_avatar || "";
         var authorDid = note.author_did || "";
         var nip05 = note.nip05 || "";
@@ -1115,8 +1156,12 @@
         // logged-in viewer. Metadata may be attached by the server bridge, or
         // we fall back to a short label derived from the event's own pubkey.
         var eventPubkey = event.pubkey_hex || event.pubkey || "";
-        var eventNpub = event.npub || (eventPubkey ? eventPubkey.substring(0, 12) + "..." : "");
-        var eventAuthorName = event.author_display_name || event.author_name || eventNpub || "";
+        // Same split as buildCardHtml: a routable npub (or empty) for the `npub`
+        // field, and a possibly-truncated label for the byline text. Park the
+        // label in `npub` and the card href resolves to a dead route.
+        var eventNpub = /^npub1[0-9a-z]+$/i.test(event.npub || "") ? event.npub : "";
+        var eventNpubLabel = event.npub || (eventPubkey ? eventPubkey.substring(0, 12) + "..." : "");
+        var eventAuthorName = event.author_display_name || event.author_name || eventNpubLabel || "";
         var eventAuthorAvatar = event.author_avatar || "";
         // Sovereign only when the event itself carries verified iyou metadata or
         // the author pubkey is a known ecosystem member — never blanket-true.
@@ -3351,13 +3396,20 @@
 
             const item = document.createElement("div");
             item.className = "flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/70 transition-colors";
+            // Only emit a profile link when the key is actually routable. A
+            // truncated or malformed pk would otherwise render a dead
+            // /profile/... link, and it was interpolated unescaped.
+            const pkRoute = /^[0-9a-fA-F]{64}$/.test(pk) ? pk : "";
+            const viewProfileHtml = pkRoute
+                ? '<a href="/profile/' + escapeAttr(pkRoute.toLowerCase()) + '" class="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-[10px] font-semibold shrink-0">[ View Profile ]</a>'
+                : '<span class="px-2 py-1 text-slate-300 dark:text-slate-600 rounded text-[10px] font-semibold shrink-0">[ View Profile ]</span>';
             item.innerHTML =
                 avatarHtml +
                 '<div class="flex-1 min-w-0">' +
                 '<div class="font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">' + name + '</div>' +
                 '<div class="text-[10px] text-slate-400 truncate">' + (handle || pk.slice(0, 12)) + '</div>' +
                 '</div>' +
-                '<a href="/profile/' + pk + '" class="px-2 py-1 bg-violet-600 hover:bg-violet-500 text-white rounded text-[10px] font-semibold shrink-0">[ View Profile ]</a>';
+                viewProfileHtml;
 
             list.appendChild(item);
         });

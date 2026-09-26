@@ -373,3 +373,178 @@ class PolymorphicProfileIdentifierTests(TestCase):
 
         self.assertEqual(carried, "hex")
         self.assertEqual(hex_pubkey, self.HEX_A)
+
+
+class InclusiveAuthorCandidateTests(TestCase):
+    """Dual-key author resolution: deck key AND DID-derived key are both queried.
+
+    During the early enclave transition the bridge published with the
+    DID-derived value in the event's ``author`` field, so every note written
+    before a deck synced a Nostr key is filed under that key. Dropping it from
+    the candidate set made those profiles read "Posts (0)", so both identities
+    stay in the query set with the clean secp256k1 deck key first.
+    """
+
+    DECK_KEY = "4072dc50d7c58ce839e8bbcd842b2357efc8634e538c19eb82e9e0e650e051d5"
+    ED25519_DERIVED = "e3209edcf5b8f82aa6db74747585f1ae642f9a2e5eb73b9a69697c051a23d97a"
+    ED25519_DID = "did:key:z" + b58encode(
+        bytes([0xED, 0x01]) + bytes.fromhex(ED25519_DERIVED)
+    )
+
+    def _deck(self, username, handle, nostr_pubkey=""):
+        from django.contrib.auth import get_user_model
+
+        from apps.core.models import UserLinkDeck
+
+        user = get_user_model().objects.create_user(username=username, password=None)
+        return UserLinkDeck.objects.create(
+            user=user, handle=handle, nostr_pubkey=nostr_pubkey
+        )
+
+    def _resolve(self, identifier):
+        from apps.core.views import _resolve_profile_candidates
+
+        return _resolve_profile_candidates(identifier)
+
+    def test_keyless_ed25519_deck_keeps_its_did_derived_candidate(self):
+        """The regression: a deck with no nostr_pubkey must still query its DID key."""
+        self._deck(self.ED25519_DID, "enclave_legacy", nostr_pubkey="")
+
+        _carried, _user, _deck, hex_pubkey, candidates = self._resolve("enclave_legacy")
+
+        self.assertIn(self.ED25519_DERIVED, candidates)
+        self.assertEqual(hex_pubkey, self.ED25519_DERIVED)
+
+    def test_both_identities_are_queried_with_deck_key_first(self):
+        self._deck(self.ED25519_DID, "dual_key", nostr_pubkey=self.DECK_KEY)
+
+        _carried, _user, _deck, hex_pubkey, candidates = self._resolve("dual_key")
+
+        self.assertEqual(candidates, [self.DECK_KEY, self.ED25519_DERIVED])
+        self.assertEqual(hex_pubkey, self.DECK_KEY)
+
+    def test_candidates_are_deduplicated(self):
+        """A bare-hex username resolves to the same value as a synced deck key."""
+        self._deck(self.DECK_KEY, "selfsame", nostr_pubkey=self.DECK_KEY)
+
+        _carried, _user, _deck, _hex_pubkey, candidates = self._resolve("selfsame")
+
+        self.assertEqual(candidates, [self.DECK_KEY])
+
+    def test_did_branch_also_returns_both_identities(self):
+        self._deck(self.ED25519_DID, "didbranch", nostr_pubkey=self.DECK_KEY)
+
+        _carried, _user, _deck, _hex_pubkey, candidates = self._resolve(self.ED25519_DID)
+
+        self.assertEqual(candidates, [self.DECK_KEY, self.ED25519_DERIVED])
+
+    def test_hex_branch_includes_its_own_key(self):
+        unknown_hex = "7" * 64
+        self._deck(self.ED25519_DID, "hexbranch", nostr_pubkey=self.DECK_KEY)
+
+        _carried, _user, _deck, hex_pubkey, candidates = self._resolve(unknown_hex)
+
+        self.assertEqual(hex_pubkey, unknown_hex)
+        self.assertEqual(candidates, [unknown_hex])
+
+    def test_hex_branch_matching_a_deck_returns_both_identities(self):
+        """A hex identifier that resolves to a user still unions in that user's keys."""
+        self._deck(self.ED25519_DID, "hexbranch", nostr_pubkey=self.DECK_KEY)
+
+        _carried, _user, _deck, _hex_pubkey, candidates = self._resolve(self.DECK_KEY)
+
+        self.assertIn(self.DECK_KEY, candidates)
+        self.assertIn(self.ED25519_DERIVED, candidates)
+
+    def test_malformed_deck_key_is_not_padded_into_a_candidate(self):
+        self._deck("did:iyou:0x" + "9" * 64, "badkey", nostr_pubkey="3b665cc76c15")
+
+        _carried, _user, _deck, _hex_pubkey, candidates = self._resolve("badkey")
+
+        self.assertNotIn("3b665cc76c15", candidates)
+        for candidate in candidates:
+            self.assertRegex(candidate, r"^[0-9a-f]{64}$")
+
+
+class ProfileNpubEmissionTests(TestCase):
+    """Profile hydration must hand the client a routable npub.
+
+    ``buildCardHtml`` routes the author link off the ``npub`` field. When
+    ``api_profile_notes`` omitted it, the client fell back to a truncated
+    ``3b665cc76c15...`` label and produced a dead /profile/3b665cc76c15.../
+    href.
+    """
+
+    HEX = "3b665cc76c15a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aa"
+
+    def test_hex_to_npub_rejects_malformed_input_without_dots(self):
+        from apps.core.views import hex_to_npub
+
+        for bad in ["3b665cc76c15", "", "zzz", None, 12345, "a" * 63]:
+            converted = hex_to_npub(bad)
+            self.assertEqual(converted, "", "expected empty for %r" % (bad,))
+            self.assertNotIn("...", converted)
+
+    def test_hex_to_npub_encodes_a_full_key(self):
+        from apps.core.views import hex_to_npub
+
+        converted = hex_to_npub(self.HEX)
+
+        self.assertTrue(converted.startswith("npub1"))
+        self.assertNotIn("...", converted)
+
+    def test_api_profile_notes_emits_npub_for_every_note(self):
+        from django.contrib.auth import get_user_model
+
+        from apps.core.models import UserLinkDeck
+
+        user = get_user_model().objects.create_user(
+            username="did:iyou:0x" + "4" * 64, password=None
+        )
+        UserLinkDeck.objects.create(
+            user=user, handle="npubemitter", nostr_pubkey=self.HEX
+        )
+        payload = [
+            {
+                "id": "e1" * 32,
+                "pubkey": self.HEX,
+                "content": "hello",
+                "created_at": 1700000000,
+                "kind": 1,
+                "tags": [["t", "x"]],
+            }
+        ]
+
+        with patch("apps.core.views.relay_req", return_value=payload):
+            response = self.client.get("/api/profile/npubemitter/notes/?limit=50")
+
+        self.assertEqual(response.status_code, 200)
+        notes = response.json()["notes"]
+        self.assertEqual(len(notes), 1)
+        self.assertTrue(notes[0]["npub"].startswith("npub1"))
+        self.assertNotIn("...", notes[0]["npub"])
+
+    def test_keyless_deck_returns_empty_200_instead_of_400(self):
+        """A deck-only profile must render its empty state, not a stranded skeleton."""
+        from django.contrib.auth import get_user_model
+
+        from apps.core.models import UserLinkDeck
+
+        user = get_user_model().objects.create_user(username="plain_username", password=None)
+        UserLinkDeck.objects.create(user=user, handle="deckonlypage", nostr_pubkey="")
+
+        def explode(*args, **kwargs):
+            raise AssertionError("no relay query should fire for a deck-only profile")
+
+        with patch("apps.core.views.relay_req", side_effect=explode):
+            response = self.client.get("/api/profile/deckonlypage/notes/?limit=50")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["notes"], [])
+        self.assertTrue(body["deck_only"])
+
+    def test_unknown_identifier_still_400s(self):
+        response = self.client.get("/api/profile/nosuchhandle999/notes/?limit=50")
+
+        self.assertEqual(response.status_code, 400)

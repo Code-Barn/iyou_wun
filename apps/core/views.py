@@ -500,6 +500,83 @@ def _reset_find_user_by_pubkey_cache():
     _find_user_by_pubkey._cache = {}
 
 
+def _did_author_key_for_relays(did):
+    """Return the DID-derived pubkey for relay author queries, or "".
+
+    Inclusive by design. ``did:key:z6Mk...`` is an Ed25519 multibase DID whose
+    32 bytes are *not* a secp256k1 x-only point (verified: they fail the
+    curve equation), so a strict protocol reading would exclude it. The enclave
+    nonetheless publishes with the DID-derived value as the author field and
+    ``author_did`` maps it back to the owning ``did:key:z6Mk...``, so every note
+    written during the early enclave transition is stored under exactly that key.
+
+    Excluding it would make those historical notes unreachable and re-create the
+    "Posts (0)" symptom on keyless decks, so it is retained as a candidate. A
+    conformant public relay simply returns no events for it, which costs one
+    extra filter entry and hides nothing.
+
+    Recognised forms:
+      * a bare 64-char hex key,
+      * ``did:iyou:0x<64-hex>`` -- the enclave's native DID,
+      * ``did:key:z6Mk...`` -- Ed25519 DID, included for enclave continuity.
+    """
+    if not did or not isinstance(did, str):
+        return ""
+    d = did.strip()
+    if re.fullmatch(r"[0-9a-fA-F]{64}", d):
+        return d.lower()
+    if d.startswith("did:iyou:0x"):
+        hex_part = d.split("did:iyou:0x", 1)[1].strip()
+        if re.fullmatch(r"[0-9a-fA-F]{64}", hex_part):
+            return hex_part.lower()
+    if d.startswith("did:key:z"):
+        derived = did_to_pubkey(d) or ""
+        return derived.lower() if re.fullmatch(r"[0-9a-fA-F]{64}", derived) else ""
+    return ""
+
+
+def _deck_nostr_hex(deck):
+    """Return a deck's configured Nostr pubkey as 64-char hex, or "".
+
+    A deck may hold either a raw hex key or an enclave-synced npub. Only a
+    genuinely 64-char hex result is returned; a malformed value is treated as
+    unconfigured rather than being padded into a key that signed nothing.
+    """
+    if not deck:
+        return ""
+    raw_key = (deck.nostr_pubkey or "").strip()
+    if re.fullmatch(r"[0-9a-fA-F]{64}", raw_key):
+        return raw_key.lower()
+    if raw_key.lower().startswith("npub1"):
+        try:
+            converted = npub_to_hex(raw_key) or ""
+        except Exception:
+            return ""
+        return converted.lower() if re.fullmatch(r"[0-9a-fA-F]{64}", converted) else ""
+    return ""
+
+
+def _author_candidates_for_deck(deck, username):
+    """Ordered, de-duplicated relay author candidates for a deck + its user.
+
+    Both identities are queried, deck key first:
+
+      1. ``deck.nostr_pubkey`` -- the clean secp256k1 key, preferred because a
+         conformant public relay will actually match it.
+      2. the DID-derived key -- covers the early enclave transition, where notes
+         were published under the DID-derived author value and no deck key was
+         ever configured.
+
+    Returning both means a profile keeps its historical posts while a freshly
+    synced deck key takes over as the canonical signer.
+    """
+    ordered = []
+    for candidate in (_deck_nostr_hex(deck), _did_author_key_for_relays(username or "")):
+        if candidate and candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
+
+
 def _resolve_profile_candidates(identifier):
     """Resolve profile target & author-candidate keys, accommodating dual identity.
 
@@ -535,11 +612,9 @@ def _resolve_profile_candidates(identifier):
             owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
             hex_pubkey = did_to_pubkey(owner_user.username)
             carried = "did"
-            candidates = list(filter(None, [
-                (owner_deck.nostr_pubkey if owner_deck else "") or "",
-                hex_pubkey,
-                identifier.strip().lower() if re.fullmatch(r"[0-9a-fA-F]{64}", identifier) else "",
-            ]))
+            # Inclusive: deck key + DID-derived key, so notes published during
+            # the early enclave transition stay reachable.
+            candidates = _author_candidates_for_deck(owner_deck, owner_user.username)
             return carried, owner_user, owner_deck, hex_pubkey, candidates
 
     if re.fullmatch(r"[0-9a-fA-F]{64}", identifier):
@@ -549,11 +624,10 @@ def _resolve_profile_candidates(identifier):
         if found_user:
             owner_user = found_user
             owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
-            candidates = list(filter(None, [
-                (owner_deck.nostr_pubkey if owner_deck else "") or "",
-                did_to_pubkey(owner_user.username),
-                hex_pubkey,
-            ]))
+            candidates = _author_candidates_for_deck(owner_deck, owner_user.username)
+            # A bare hex identifier is always its own author.
+            if hex_pubkey not in candidates:
+                candidates.append(hex_pubkey)
         else:
             candidates = [hex_pubkey]
         return carried, owner_user, owner_deck, hex_pubkey, candidates
@@ -580,17 +654,12 @@ def _resolve_profile_candidates(identifier):
             owner_deck = deck
             owner_user = deck.user
             carried = "handle"
-            # A deck may hold either a raw hex key or an enclave-synced npub.
-            raw_key = (deck.nostr_pubkey or "").strip()
-            if re.fullmatch(r"[0-9a-fA-F]{64}", raw_key):
-                deck_hex = raw_key.lower()
-            else:
-                deck_hex = npub_to_hex(raw_key) or ""
-            did_hex = did_to_pubkey(deck.user.username) or "" if deck.user_id else ""
-            # Prefer the enclave-synced Nostr key; fall back to the DID-derived key
-            # so a deck that has never synced still hydrates from relays.
-            hex_pubkey = deck_hex or did_hex
-            candidates = list(filter(None, [deck_hex, did_hex, hex_pubkey]))
+            # Inclusive: a deck that never synced a Nostr key still resolves its
+            # historical posts, which the enclave filed under the DID-derived
+            # author value. A synced deck key takes precedence as the canonical
+            # identity for the page.
+            candidates = _author_candidates_for_deck(deck, deck.user.username if deck.user_id else "")
+            hex_pubkey = candidates[0] if candidates else ""
             return carried, owner_user, owner_deck, hex_pubkey, candidates
 
     # npub or NIP-05: resolve via the universal identifier resolver.
@@ -1692,6 +1761,12 @@ def api_profile_notes(request, identifier):
 
     _carried, _owner_user, _owner_deck, hex_pubkey, author_candidates = _resolve_profile_candidates(identifier)
     if not hex_pubkey or not author_candidates:
+        # A claimed Link Deck with no Nostr key is a valid identity with zero
+        # posts, not a bad request. Return an empty 200 so the profile renders
+        # its empty state instead of leaving the hydration skeleton stranded.
+        # 400 is reserved for identifiers that resolve to nothing at all.
+        if _owner_deck and not hex_pubkey:
+            return JsonResponse({"notes": [], "has_more": False, "deck_only": True})
         return JsonResponse({"notes": [], "has_more": False, "error": "Invalid identifier"}, status=400)
 
     hex_pubkey = str(hex_pubkey).strip().lower()
@@ -1807,6 +1882,12 @@ def api_profile_notes(request, identifier):
             "id": e.get("id", ""),
             "pubkey": event_pubkey,
             "pubkey_hex": event_pubkey,
+            # This payload is consumed by appendNoteToFeed -> buildCardHtml,
+            # which routes the author link off this field. Without it the client
+            # fell back to a truncated "3b665cc76c15..." label and produced
+            # /profile/3b665cc76c15.../, a dead route. hex_to_npub is defined in
+            # this module (not apps.core.nip10).
+            "npub": hex_to_npub(event_pubkey) if event_pubkey else "",
             "created_at": e.get("created_at", 0),
             "created_at_epoch": e.get("created_at", 0),
             "content": e.get("content", ""),
@@ -4826,15 +4907,26 @@ def api_deck_verify_confirm(request):
 
 
 def hex_to_npub(hex_pubkey):
-    """Convert hex pubkey to NIP-19 npub format."""
+    """Convert hex pubkey to NIP-19 npub format.
+
+    Returns "" for anything that is not exactly 64 hex chars. It deliberately
+    does NOT fall back to a truncated "3b665cc76c15..." label: callers put this
+    value in ``npub`` fields that the client treats as routable identifiers, and
+    a dotted label there produced dead /profile/3b665cc76c15.../ links. Use an
+    explicit display formatter when a short label is wanted.
+    """
+    if not hex_pubkey or not isinstance(hex_pubkey, str):
+        return ""
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", hex_pubkey.strip()):
+        return ""
     try:
         # Convert hex to bytes
-        data = bytes.fromhex(hex_pubkey)
+        data = bytes.fromhex(hex_pubkey.strip())
         # Encode using bech32
         converted = bech32.bech32_encode("npub", bech32.convertbits(data, 8, 5))
         return converted
     except Exception:
-        return hex_pubkey[:12] + "..."  # Fallback to truncated hex
+        return ""
 
 
 def did_to_pubkey(did):
