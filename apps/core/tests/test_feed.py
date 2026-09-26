@@ -2089,3 +2089,35 @@ class AuthorSublineRenderTests(TestCase):
 
         self.assertIn("Zork Sifter", html)
         self.assertNotIn(self.SUBLINE_SPAN, html)
+
+    def test_subline_hidden_when_handle_equals_author_name_and_display_name_blank(self):
+        """The unknown-author gap: display_name is blank, so the primary line
+        falls back to author_name -- and the handle repeats that exact string.
+
+        Before the guard, this rendered "alice @alice" in the header for every
+        author whose Kind 0 profile carries a name but no deck display name.
+        """
+        html = self._render(author_display_name="", author_name="alice", author_handle="alice")
+
+        # The primary still resolves to the author name ...
+        self.assertIn("alice", html)
+        # ... but the header subline must not repeat it. Asserted on the subline
+        # span: the kebab moderation menu (Mute @alice / Block @alice) is a
+        # separate fallback chain, out of scope here.
+        self.assertNotIn(self.SUBLINE_SPAN, html)
+
+    def test_primary_falls_back_to_author_name_when_display_name_blank(self):
+        """Guarding the subline must not suppress the primary identity line."""
+        html = self._render(author_display_name="", author_name="alice", author_handle="alice")
+
+        self.assertIn("alice", html)
+        self.assertNotIn("primary_identity_9e7db757", html)
+
+    def test_subline_shown_when_handle_distinct_from_both_name_fields(self):
+        html = self._render(
+            author_display_name="Zork", author_name="Zork Raw", author_handle="zorkhandle"
+        )
+
+        self.assertIn("Zork", html)
+        self.assertIn(self.SUBLINE_SPAN, html)
+        self.assertIn("@zorkhandle", html)

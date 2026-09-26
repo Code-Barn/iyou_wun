@@ -63,7 +63,14 @@
         <a href="{% if note.author_url %}{{ note.author_url }}{% else %}{% url 'profile' npub=note.npub %}{% endif %}" class="font-bold text-slate-900 dark:text-slate-100 hover:underline text-sm truncate font-mono">
           {% if note.author_display_name %}{{ note.author_display_name }}{% else %}{{ note.author_name|default:note.npub|truncatechars:14 }}{% endif %}
         </a>
-        {% if note.author_handle and note.author_handle != note.author_display_name %}
+        {# Sublabel is only meaningful when the handle says something the primary
+           line has not already said. The primary renders
+           author_display_name -> author_name -> npub, so the handle must be
+           strictly distinct from *both* raw name fields as well as the resolved
+           value, otherwise an unknown author whose display_name is empty
+           repeats the same string in the title and the subline. Mirrored by the
+           authorSubLabel guard in static/js/feed_interactions.js buildCardHtml. #}
+        {% if note.author_handle and note.author_handle != note.author_display_name and note.author_handle != note.author_name %}
           <span class="text-xs text-slate-400 font-mono truncate hidden sm:inline">
             @{{ note.author_handle|truncatechars:12 }}
           </span>

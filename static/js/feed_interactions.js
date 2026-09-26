@@ -770,7 +770,16 @@
         var npub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "You");
         var authorName = note.author_display_name || note.author_name || npub;
         var authorHandle = note.author_handle || note.handle || "";
-        var authorSubLabel = (authorHandle && authorHandle !== authorName) ? authorHandle : "";
+        // Strict de-duplication, mirroring the guard in
+        // templates/includes/_thread_post.html: the subline is dropped unless
+        // the handle is non-empty and strictly distinct from BOTH raw name
+        // fields as well as the resolved primary. Comparing only against the
+        // resolved authorName lets an unknown author with an empty
+        // display_name print the same string in the title and the subline.
+        var authorSubLabel = (authorHandle &&
+            authorHandle !== authorName &&
+            authorHandle !== (note.author_display_name || "") &&
+            authorHandle !== (note.author_name || "")) ? authorHandle : "";
         var authorUrl = note.author_url || (authorHandle ? "/@" + authorHandle + "/" : "/profile/" + npub + "/");
         var authorAvatar = note.author_avatar || "";
         var authorDid = note.author_did || "";
