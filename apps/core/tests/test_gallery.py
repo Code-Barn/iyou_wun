@@ -824,3 +824,97 @@ class FetchMediaAssetsUnifiedIngestionTest(TestCase):
         # distinct events are two distinct posts and both stay visible.
         self.assertEqual(len(items), 2)
         self.assertEqual({i["file_url"] for i in items}, {url})
+
+
+class GalleryTemplateCommentSyntaxTest(TestCase):
+    """Django's {# #} comment form is single-line only.
+
+    A multi-line {# ... #} block is not consumed by the template lexer and is
+    emitted verbatim into the response, which leaked raw template syntax into
+    the sticky ribbon and <head>. These tests pin the rendered output clean.
+    """
+
+    def test_no_raw_comment_syntax_in_rendered_gallery(self):
+        with patch("apps.core.views.fetch_media_assets", return_value=[]):
+            resp = self.client.get(reverse("gallery"))
+
+        self.assertEqual(resp.status_code, 200)
+        html = resp.content.decode()
+        leaked = [ln for ln in html.splitlines() if "{#" in ln or "#}" in ln]
+        self.assertEqual(leaked, [], "template comment syntax leaked: %r" % leaked[:3])
+        # {% comment %} markers must not survive as literal text either.
+        self.assertNotIn("{% comment %}", html)
+        self.assertNotIn("{% endcomment %}", html)
+
+    def test_template_source_has_no_multiline_hash_comments(self):
+        """Structural guard: catches the mistake at the source, not the symptom."""
+        from django.template.loader import get_template
+
+        source = get_template("gallery.html").template.source
+        self.assertNotIn("{#", source, "gallery.html must not use {# #} comments; use {% comment %}")
+
+
+class GallerySettleBudgetTest(TestCase):
+    """The global circle must reserve the WAN settle window for media queries.
+
+    The default 50ms window is sized for the local loopback answering in ~2ms;
+    on the global circle it returns before public relays have replied, so the
+    Global gallery renders from the local relay alone with no WAN media.
+    """
+
+    def _capture(self, query=""):
+        from apps.core.views import (
+            DEFAULT_SETTLE_TIMEOUT,
+            GLOBAL_SETTLE_TIMEOUT,
+        )
+
+        seen = {}
+
+        def fake_relay_req(filter_obj, **kwargs):
+            seen.update(kwargs)
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            resp = self.client.get(reverse("gallery") + query)
+        self.assertEqual(resp.status_code, 200)
+        return seen, GLOBAL_SETTLE_TIMEOUT, DEFAULT_SETTLE_TIMEOUT
+
+    def test_default_scope_uses_fast_settle(self):
+        seen, global_settle, default_settle = self._capture()
+        self.assertEqual(seen.get("settle_timeout"), default_settle)
+        self.assertNotEqual(default_settle, global_settle)
+
+    def test_global_circle_uses_wan_settle(self):
+        seen, global_settle, _ = self._capture("?circle=global")
+        self.assertEqual(seen.get("settle_timeout"), global_settle)
+
+    def test_mode_param_alias_also_selects_global(self):
+        seen, global_settle, _ = self._capture("?mode=global")
+        self.assertEqual(seen.get("settle_timeout"), global_settle)
+
+    def test_explicit_iyou_circle_uses_fast_settle(self):
+        seen, _, default_settle = self._capture("?circle=iyou")
+        self.assertEqual(seen.get("settle_timeout"), default_settle)
+
+    def test_api_gallery_threads_settle_budget(self):
+        seen = {}
+
+        def fake_relay_req(filter_obj, **kwargs):
+            seen.update(kwargs)
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=fake_relay_req):
+            resp = self.client.get(reverse("api_gallery") + "?circle=global")
+        self.assertEqual(resp.status_code, 200)
+        from apps.core.views import GLOBAL_SETTLE_TIMEOUT
+        self.assertEqual(seen.get("settle_timeout"), GLOBAL_SETTLE_TIMEOUT)
+
+    def test_fetch_media_assets_defaults_to_none(self):
+        """Omitting the argument must stay backward compatible with relay_req."""
+        import inspect
+
+        from apps.core.views import fetch_media_assets
+
+        sig = inspect.signature(fetch_media_assets)
+        self.assertIn("settle_timeout", sig.parameters)
+        self.assertIsNone(sig.parameters["settle_timeout"].default)

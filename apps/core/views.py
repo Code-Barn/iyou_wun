@@ -2137,7 +2137,30 @@ def _extract_display_title(content, summary="", alt_text=""):
     return ""
 
 
-def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
+def _gallery_settle_budget(request):
+    """Mode-aware relay settle window for gallery media queries.
+
+    Mirrors the feed's policy (see FeedView.get_context_data): the global circle
+    reserves GLOBAL_SETTLE_TIMEOUT so WAN relays can deliver media, while
+    iyou/sovereign keep the fast DEFAULT_SETTLE_TIMEOUT return. The dependent
+    bracket guard is applied first so a U14 session cannot widen its own race
+    window by passing ?circle=global.
+    """
+    from .context import get_dependent_context
+    from apps.feed.selectors import is_feed_circle_allowed
+
+    dep_ctx = get_dependent_context(request)
+    circle_param = request.GET.get("circle")
+    mode_param = request.GET.get("mode")
+    selected_circle = (circle_param or mode_param or "iyou").lower()
+
+    if dep_ctx.get("is_dependent") and not is_feed_circle_allowed(selected_circle, dep_ctx):
+        selected_circle = "iyou"
+
+    return GLOBAL_SETTLE_TIMEOUT if selected_circle == "global" else DEFAULT_SETTLE_TIMEOUT
+
+
+def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None, settle_timeout=None):
     """Fetch media cards from Kind 1063 file headers *and* Kind 1 text notes.
 
     Most Nostr media is never published as a dedicated NIP-94 file-header event:
@@ -2152,6 +2175,12 @@ def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
     without headroom, Kind 1 volume dominates the mixed result set and the
     truncation to `limit` starves the image tab of the very items Kind 1 was
     added to surface.
+
+    `settle_timeout` is forwarded to the media query so the caller can widen the
+    race window for WAN relays. The default 50ms window is sized for the local
+    loopback answering in ~2ms; on the global circle that same window returns
+    before primal/damus/oxtr have replied, so the Global gallery renders from
+    the local relay alone and shows no WAN media at all.
     """
     from .nip10 import extract_media_from_note
 
@@ -2164,7 +2193,7 @@ def fetch_media_assets(authors=None, limit=50, until=None, relay_urls=None):
         except (ValueError, TypeError):
             pass
 
-    raw_events = relay_req(filter_obj, relay_urls=relay_urls)
+    raw_events = relay_req(filter_obj, relay_urls=relay_urls, settle_timeout=settle_timeout)
     if not raw_events:
         return []
 
@@ -3790,7 +3819,12 @@ class GalleryView(TemplateView):
         media_type = self.request.GET.get("type", "all")
         until = self.request.GET.get("until")
         authors = [filter_pubkey] if filter_pubkey else None
-        notes = fetch_media_assets(authors=authors, limit=24, until=until, relay_urls=relays)
+        # Global gallery reserves the WAN settle window so images/videos from
+        # public relays actually land in the decks instead of being cut off by
+        # the local relay's ~2ms answer.
+        settle_budget = _gallery_settle_budget(self.request)
+        notes = fetch_media_assets(authors=authors, limit=24, until=until, relay_urls=relays,
+                                   settle_timeout=settle_budget)
 
         # Identity Translation Service enrichment: every gallery item carries the
         # canonical deck-backed display name / handle / membership flags.
@@ -4016,8 +4050,12 @@ def api_gallery(request):
 
     relays = get_relays_for_request(request)
     authors = [filter_pubkey] if filter_pubkey else None
+    # Same circle-aware settle policy as GalleryView so infinite scroll does not
+    # silently fall back to the local-only window on the global circle.
+    settle_budget = _gallery_settle_budget(request)
 
-    notes = fetch_media_assets(authors=authors, limit=limit, until=until, relay_urls=relays)
+    notes = fetch_media_assets(authors=authors, limit=limit, until=until, relay_urls=relays,
+                               settle_timeout=settle_budget)
 
     if media_type in ("images", "image"):
         filtered_notes = [n for n in notes if n.get("media_type") == "image"]
