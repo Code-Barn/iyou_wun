@@ -329,3 +329,103 @@ class DisabledRelayIsolationTests(TestCase):
             "typeof entry === \"string\") {", body,
             "a bare-string entry must not be read as an enabled preference",
         )
+
+
+class DashboardTabBarLayoutTests(TestCase):
+    """The dashboard tab bar must not clip or side-scroll at a 640px column.
+
+    The four labels used to sit in a flex wrapper with overflow-x-auto, so once
+    the center column was bounded to 640px they clipped and demanded a horizontal
+    scroll. An equal-width 4-column grid with per-label truncation keeps them in a
+    single row, which is a layout contract worth pinning.
+    """
+
+    TABS = ["profile", "deck", "settings", "account"]
+
+    def setUp(self):
+        with open(
+            os.path.join(REPO_ROOT, "templates", "dashboard.html"), "r", encoding="utf-8"
+        ) as fh:
+            source = fh.read()
+        self.source = source
+        # Class assertions must read markup, not prose: the tab bar's own
+        # explanatory comment names the flex/overflow classes it replaced.
+        self.markup = re.sub(r"<!--.*?-->", "", source, flags=re.DOTALL)
+
+    def test_tab_bar_is_an_equal_width_four_column_grid(self):
+        start = self.source.index("<!-- Tab Bar Switcher")
+        wrapper = re.search(r'<div class="(grid grid-cols-4[^"]*)"', self.source[start:])
+
+        self.assertIsNotNone(wrapper, "tab bar wrapper must be a grid-cols-4 container")
+        classes = wrapper.group(1)
+        self.assertIn("grid-cols-4", classes)
+        self.assertIn("w-full", classes)
+        self.assertIn("mb-6", classes)
+
+    def test_tab_bar_does_not_scroll_sideways(self):
+        start = self.markup.index("grid grid-cols-4")
+        end = self.markup.index("</div>", self.markup.index('data-tab="account"'))
+        bar = self.markup[start:end]
+
+        self.assertNotIn(
+            "overflow-x-auto", bar,
+            "the tab bar must fit its row, not scroll horizontally",
+        )
+        # A bare shrink-0 was what let the old flex row outgrow its column and
+        # clip. Match the whole class so the friction badge's deliberate
+        # flex-shrink-0 (which must not squash) is not flagged.
+        self.assertIsNone(
+            re.search(r"(?<![\w-])shrink-0", bar),
+            "a bare shrink-0 lets a tab outgrow its grid cell and clip",
+        )
+
+    def test_every_tab_button_fills_its_grid_cell(self):
+        for tab in self.TABS:
+            with self.subTest(tab=tab):
+                btn = re.search(
+                    r'<button type="button" class="(tab-btn[^"]*)"[^>]*data-tab="%s"' % tab,
+                    self.source,
+                )
+                self.assertIsNotNone(btn, "missing tab button for %s" % tab)
+                classes = btn.group(1)
+                for required in ("w-full", "flex", "items-center", "justify-center",
+                                 "whitespace-nowrap", "overflow-hidden"):
+                    self.assertIn(required, classes, "%s tab must carry %r" % (tab, required))
+
+    def test_verbose_label_halves_are_responsive_and_truncating(self):
+        # One truncating label wrapper per tab, and one verbose half that only
+        # appears at md and up, so the narrowest cells stay short.
+        self.assertEqual(self.source.count('class="truncate min-w-0"'), 4)
+        self.assertEqual(self.source.count('class="hidden md:inline"'), 4)
+        for verbose in ("Sovereign ", " Manager", " &amp; Switchboard", " &amp; Keys"):
+            self.assertIn(
+                '<span class="hidden md:inline">%s</span>' % verbose, self.source,
+                "missing responsive span for %r" % verbose,
+            )
+
+    def test_switch_tab_active_state_hooks_survive_the_grid(self):
+        """switchTab() in bridge_client.js toggles these classes on .tab-btn."""
+        for tab in self.TABS:
+            with self.subTest(tab=tab):
+                btn = re.search(
+                    r'<button type="button" class="(tab-btn[^"]*)"[^>]*data-tab="%s"' % tab,
+                    self.source,
+                )
+                classes = btn.group(1)
+                self.assertIn("tab-btn", classes)
+                self.assertIn("border-b-2", classes)
+                self.assertIn("switchTab('%s')" % tab, self.source)
+
+        buttons = re.findall(r'<button type="button" class="(tab-btn[^"]*)"', self.source)
+        self.assertEqual(len(buttons), 4)
+        # The default tab carries the active palette; the rest the inactive one.
+        self.assertIn("border-violet-600", buttons[0])
+        self.assertIn("text-violet-600", buttons[0])
+        for classes in buttons[1:]:
+            self.assertIn("border-transparent", classes)
+            self.assertIn("text-slate-500", classes)
+
+    def test_all_four_tabs_still_target_real_panels(self):
+        for tab in self.TABS:
+            with self.subTest(tab=tab):
+                self.assertIn('id="tab-%s"' % tab, self.source)

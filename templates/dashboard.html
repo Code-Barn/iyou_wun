@@ -35,21 +35,28 @@
       </a>
     </div>
 
-    <!-- Tab Bar Switcher -->
-    <div class="flex items-center gap-1 sm:gap-2 px-5 border-b border-slate-200 dark:border-slate-800 text-xs font-mono bg-white dark:bg-slate-900 overflow-x-auto no-scrollbar py-1">
-      <button type="button" class="tab-btn shrink-0 px-3 py-2 rounded-lg transition-colors border-b-2 border-violet-600 text-violet-600 dark:text-violet-400 font-medium whitespace-nowrap" data-tab="profile" onclick="switchTab('profile')">
-        👤 Sovereign Profile
+    <!-- Tab Bar Switcher
+         Equal-width 4-column grid. The previous flex + overflow-x-auto wrapper
+         clipped the four labels and demanded side-scrolling once the center
+         column was bounded to 640px. Each label truncates inside its own cell
+         and drops its verbose half below md, so the row never overflows.
+         switchTab() in bridge_client.js keys off .tab-btn plus the
+         border-violet-600 / border-transparent / text-slate-500 classes, so those
+         stay on the buttons. -->
+    <div class="grid grid-cols-4 gap-1 sm:gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 w-full mb-6">
+      <button type="button" class="tab-btn w-full flex items-center justify-center gap-1 sm:gap-2 px-1 sm:px-3 py-2 text-xs font-semibold rounded-xl transition text-center whitespace-nowrap overflow-hidden border-b-2 border-violet-600 text-violet-600 dark:text-violet-400" data-tab="profile" onclick="switchTab('profile')">
+        <span>👤</span><span class="truncate min-w-0"><span class="hidden md:inline">Sovereign </span>Profile</span>
       </button>
-      <button type="button" class="tab-btn shrink-0 px-3 py-2 rounded-lg transition-colors border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 font-medium whitespace-nowrap" data-tab="deck" onclick="switchTab('deck')">
-        🔗 Link Deck Manager
+      <button type="button" class="tab-btn w-full flex items-center justify-center gap-1 sm:gap-2 px-1 sm:px-3 py-2 text-xs font-semibold rounded-xl transition text-center whitespace-nowrap overflow-hidden border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200" data-tab="deck" onclick="switchTab('deck')">
+        <span>🔗</span><span class="truncate min-w-0">Link Deck<span class="hidden md:inline"> Manager</span></span>
       </button>
-      <button type="button" class="tab-btn shrink-0 px-3 py-2 rounded-lg transition-colors border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 font-medium whitespace-nowrap" data-tab="settings" onclick="switchTab('settings')">
-        ⚙️ Relays & Switchboard
+      <button type="button" class="tab-btn w-full flex items-center justify-center gap-1 sm:gap-2 px-1 sm:px-3 py-2 text-xs font-semibold rounded-xl transition text-center whitespace-nowrap overflow-hidden border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200" data-tab="settings" onclick="switchTab('settings')">
+        <span>⚙️</span><span class="truncate min-w-0">Relays<span class="hidden md:inline"> &amp; Switchboard</span></span>
       </button>
-      <button type="button" class="tab-btn shrink-0 px-3 py-2 rounded-lg transition-colors border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 font-medium whitespace-nowrap inline-flex items-center gap-1.5" data-tab="account" onclick="switchTab('account')">
-        <span>🛡️ Account & Key Info</span>
+      <button type="button" class="tab-btn w-full flex items-center justify-center gap-1 sm:gap-2 px-1 sm:px-3 py-2 text-xs font-semibold rounded-xl transition text-center whitespace-nowrap overflow-hidden border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200" data-tab="account" onclick="switchTab('account')">
+        <span>🛡️</span><span class="truncate min-w-0">Account<span class="hidden md:inline"> &amp; Keys</span></span>
         {% if active_frictions %}
-        <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold">{{ active_frictions|length }}</span>
+        <span class="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-white font-bold flex-shrink-0">{{ active_frictions|length }}</span>
         {% endif %}
       </button>
     </div>

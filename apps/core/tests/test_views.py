@@ -16,6 +16,7 @@
 import hashlib
 import json
 import logging
+import re
 import ssl
 import time
 import urllib.request
@@ -614,7 +615,18 @@ class DashboardProfileTest(TestCase):
         user = User.objects.create_user(username="did:key:z6Mkdashprofile")
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Sovereign Profile")
+        # The tab bar is a 4-column grid, so the label is deliberately split
+        # across a responsive <span> ("Sovereign " | "Profile"). Assert the tab
+        # structurally and on its tag-stripped text rather than on a contiguous
+        # run of raw HTML.
+        self.assertContains(response, 'data-tab="profile"')
+        self.assertContains(response, 'id="tab-profile"')
+        button = re.search(
+            r'<button[^>]*data-tab="profile".*?</button>', response.content.decode(), re.DOTALL
+        )
+        self.assertIsNotNone(button, "profile tab button is missing")
+        label = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", "", button.group(0))).strip()
+        self.assertIn("Sovereign Profile", label)
 
     def test_dashboard_renders_relay_switchboard_toggles(self):
         user = User.objects.create_user(username="did:key:z6Mkdashrelay")
