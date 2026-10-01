@@ -58,7 +58,7 @@
       {% else %}
         <!-- Brandmark Descriptor Pill (Unauthenticated Session) -->
         <div id="brand-descriptor-pill"
-             class="inline-flex items-center px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-800/80 text-[10px] font-mono font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 shrink-0 select-none">
+             class="hidden sm:inline-flex items-center px-2 py-0.5 rounded-full border border-slate-200 dark:border-slate-800 bg-slate-100/80 dark:bg-slate-800/80 text-[10px] font-mono font-medium uppercase tracking-wider text-slate-500 dark:text-slate-400 shrink-0 select-none">
           SOCIAL HUB
         </div>
       {% endif %}
@@ -77,21 +77,22 @@
         {% include "includes/_persona_enclave.html" %}
 
         <!-- Direct Actions -->
-        <a href="{% url 'dashboard' %}" class="hidden md:inline-flex text-xs text-slate-400 hover:text-violet-500 dark:hover:text-violet-400 transition font-mono" title="Edit Profile & Settings">
+        {% url 'dashboard' as local_dashboard_url %}
+        <a href="{% if local_dashboard_url %}{{ local_dashboard_url }}{% else %}https://wun.iyou.me/dashboard{% endif %}" class="hidden md:inline-flex text-xs text-slate-500 dark:text-slate-400 hover:text-violet-600 dark:hover:text-violet-400 transition font-mono" title="Edit Profile & Settings">
           [ ⚙️ Edit ]
         </a>
-        <a href="{% url 'oidc_logout' %}" class="hidden md:inline-flex text-xs font-mono text-slate-400 hover:text-rose-400 transition ml-1">
+        <a href="{% url 'oidc_logout' %}" class="hidden md:inline-flex text-xs font-mono text-slate-500 dark:text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 transition ml-1">
           Sign Out
         </a>
       {% else %}
         <!-- Logged-Out Block: Live Poly Structure -->
-        <div class="flex items-center gap-2 text-xs">
-          <div class="flex items-center gap-2 px-3 py-1.5 rounded-full border border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300">
-            <span class="w-2.5 h-2.5 rounded-full bg-amber-500 shrink-0"></span>
-            <span class="italic text-xs text-slate-600 dark:text-slate-400">Sovereign Key Required</span>
+        <div class="flex items-center gap-1.5 sm:gap-2 text-xs shrink-0">
+          <div class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-full border border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20 text-amber-800 dark:text-amber-300 shrink-0">
+            <span class="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-amber-500 shrink-0"></span>
+            <span class="hidden sm:inline italic text-xs text-slate-600 dark:text-slate-400">Sovereign Key Required</span>
           </div>
-          <a href="{% url 'oidc_authentication_init' %}" class="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-medium text-xs shadow-sm transition-all flex items-center gap-1.5">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <a href="{% url 'oidc_authentication_init' %}" class="px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-medium text-xs shadow-sm transition-all flex items-center gap-1 sm:gap-1.5 shrink-0">
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
             </svg>
             <span>Authenticate</span>
@@ -113,7 +114,7 @@
       {% endif %}
 
       <!-- Grey Outline Theme Switcher (Strictly Neutral Slate) -->
-      <button id="theme-toggle" type="button" class="p-2 rounded-lg text-slate-400 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors focus:outline-none shrink-0" aria-label="Toggle theme">
+      <button id="theme-toggle" type="button" class="p-2 rounded-lg text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/80 transition-colors focus:outline-none shrink-0" aria-label="Toggle theme">
         <svg id="icon-sun" class="w-4 h-4 block dark:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"/>
         </svg>
