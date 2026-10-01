@@ -129,6 +129,8 @@
       window.userPubkey = window.userPubkey || "{{ user_pubkey_hex|default:'' }}";
       window.userNpub = window.userNpub || "{{ user_npub|default:'' }}";
       window.CURRENT_SESSION_DID = window.CURRENT_SESSION_DID || "{{ current_session_did|escapejs }}";
+      window.GEOGRAPHIC_SCOPE = "{{ GEOGRAPHIC_SCOPE|default:''|escapejs }}";
+      window.JURISDICTION_LEVEL = "{{ JURISDICTION_LEVEL|default:''|escapejs }}";
       window.DEPENDENT_CONTEXT = window.DEPENDENT_CONTEXT || {
         is_dependent: {{ is_dependent|yesno:"true,false" }},
         bracket: "{{ dependent_bracket|default:'ADULT' }}",

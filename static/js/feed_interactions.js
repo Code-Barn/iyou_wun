@@ -111,6 +111,9 @@
         if (!tags.some(function (t) { return t[0] === "t" && t[1] === "iyou"; })) {
             tags.push(["t", "iyou"]);
         }
+        if (window.GEOGRAPHIC_SCOPE) {
+            tags.push(["geo", window.GEOGRAPHIC_SCOPE]);
+        }
         var kind = (attachedMedia && stagedMedia.length === 0 && !originalText) ? 1063 : 1;
         var event = {
             kind: kind,
@@ -923,6 +926,62 @@
         var contentAndMediaHtml = (displayContent ? clampedContent(escapeHtml(displayContent)) : (noteContent && (!mediaAttachments || !mediaAttachments.length) ? clampedContent(escapeHtml(noteContent)) : ''));
         contentAndMediaHtml += mediaHtml;
 
+        var pollHtml = "";
+        if ((note.kind === 30023 || note.kind === "30023") && note.poll_options && note.poll_options.length > 0) {
+            var votes = Array.isArray(note.votes) ? note.votes : [];
+            var totalVotes = votes.length;
+            var voteCounts = {};
+            note.poll_options.forEach(function (opt) { voteCounts[opt] = 0; });
+            votes.forEach(function (v) {
+                var sel = "";
+                if (v && v.vote) {
+                    sel = v.vote;
+                } else if (v && v.content) {
+                    try {
+                        var parsed = JSON.parse(v.content);
+                        if (parsed && parsed.selection) sel = parsed.selection;
+                    } catch (e) {
+                        sel = v.content;
+                    }
+                }
+                if (sel && voteCounts.hasOwnProperty(sel)) {
+                    voteCounts[sel]++;
+                }
+            });
+
+            pollHtml = '<div class="mt-3 p-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/20 dark:bg-amber-950/20">' +
+                '<form class="poll-vote-form space-y-2.5" data-poll-id="' + escapeAttr(noteId) + '" data-poll-pubkey="' + escapeAttr(pubkey) + '" data-poll-dtag="' + escapeAttr(note.poll_d_tag || '') + '">' +
+                '<div class="text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-center justify-between">' +
+                '<span>📊 Civic Governance Poll</span>' +
+                '<span class="text-[10px] font-mono text-slate-500">' + totalVotes + ' ' + (totalVotes === 1 ? 'vote' : 'votes') + '</span>' +
+                '</div>' +
+                '<div class="space-y-2">';
+
+            note.poll_options.forEach(function (opt) {
+                var count = voteCounts[opt] || 0;
+                var pct = totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0;
+                pollHtml += '<label class="relative flex items-center justify-between p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/70 hover:bg-amber-50/50 dark:hover:bg-amber-950/40 cursor-pointer overflow-hidden transition-colors text-xs">' +
+                    '<div class="absolute inset-y-0 left-0 bg-amber-200/40 dark:bg-amber-900/30 transition-all pointer-events-none" style="width: ' + pct + '%;"></div>' +
+                    '<div class="relative z-10 flex items-center gap-2.5 text-slate-800 dark:text-slate-200 font-medium">' +
+                    '<input type="radio" name="selection" value="' + escapeAttr(opt) + '" class="accent-amber-600 focus:ring-amber-500" />' +
+                    '<span>' + escapeHtml(opt) + '</span>' +
+                    '</div>' +
+                    '<div class="relative z-10 flex items-center gap-2 font-mono text-[11px] text-slate-500 dark:text-slate-400">' +
+                    '<span>' + count + '</span>' +
+                    '<span class="font-bold text-amber-700 dark:text-amber-400">' + pct + '%</span>' +
+                    '</div>' +
+                    '</label>';
+            });
+
+            pollHtml += '</div>' +
+                '<div class="flex items-center justify-between pt-1">' +
+                '<button type="submit" class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-mono font-medium transition shadow-xs">Cast Vote</button>' +
+                '</div>' +
+                '</form>' +
+                '</div>';
+        }
+        contentAndMediaHtml += pollHtml;
+
         var ICON_REPLY = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>';
         var ICON_REPOST = '<svg class="w-3.5 h-3.5 transition-transform duration-500 group-hover/repost:rotate-180" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="m17 2 4 4-4 4"></path><path d="M3 11v-1a4 4 0 0 1 4-4h14"></path><path d="m7 22-4-4 4-4"></path><path d="M21 13v1a4 4 0 0 1-4 4H3"></path></svg>';
         var ICON_HEART = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>';
@@ -1001,7 +1060,10 @@
                 '</div>';
         }
 
-        return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '" data-lang="' + escapeAttr(note.lang || 'en') + '">' +
+        var pollCardAttrs = (note.kind === 30023 || note.kind === "30023") ?
+            (' data-poll-id="' + escapeAttr(noteId) + '" data-poll-pubkey="' + escapeAttr(pubkey) + '" data-poll-dtag="' + escapeAttr(note.poll_d_tag || '') + '"') : '';
+
+        return '<div class="flex items-start gap-3.5 sm:gap-4 relative group" data-note-card-id="' + escapeAttr(noteId) + '"' + pollCardAttrs + ' data-lang="' + escapeAttr(note.lang || 'en') + '">' +
             '<div class="flex-shrink-0"><a href="' + escapeAttr(authorUrl) + '">' + avatarHtml + '</a></div>' +
             '<div class="flex-1 min-w-0">' +
             '<div class="flex items-center justify-between gap-2 mb-1.5">' +
@@ -2396,10 +2458,12 @@
         var tags = [];
         if (pubkey && dtag) {
             tags.push(["a", "30023:" + pubkey + ":" + dtag]);
-        } else {
-            tags.push(["e", pollId]);
         }
+        tags.push(["e", pollId]);
         tags.push(["vote", selectedValue]);
+        if (window.GEOGRAPHIC_SCOPE) {
+            tags.push(["geo", window.GEOGRAPHIC_SCOPE]);
+        }
 
         var event = {
             kind: 1112,
@@ -2472,6 +2536,9 @@
             ["fidelity_min", String(fidelity)]
         ];
         options.forEach(function (opt) { tags.push(["option", opt]); });
+        if (window.GEOGRAPHIC_SCOPE) {
+            tags.push(["geo", window.GEOGRAPHIC_SCOPE]);
+        }
         if (scope === "regional") {
             tags.push(["geohash", "global"]);
         } else if (scope === "family") {

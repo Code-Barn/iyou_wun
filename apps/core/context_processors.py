@@ -112,4 +112,12 @@ def user_identity(request):
     return context
 
 
+def geographic_context(request):
+    return {
+        "GEOGRAPHIC_SCOPE": getattr(request, "geographic_scope", "") or "",
+        "JURISDICTION_LEVEL": getattr(request, "jurisdiction_level", "") or "",
+    }
+
+
+
 

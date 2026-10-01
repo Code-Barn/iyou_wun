@@ -988,6 +988,7 @@ class FeedView(TemplateView):
                     deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT,
                     dev_mode=dev_mode,
                     settle_timeout=settle_budget,
+                    request=self.request,
                 )
             elif circle in ("following", "network") and user_pubkey:
                 contacts = fetch_contact_pubkeys(
@@ -996,22 +997,22 @@ class FeedView(TemplateView):
                 if contacts:
                     query_relays = aggregate_author_outbox_relays(contacts, relays)
                     feed_data = fetch_unified_feed(
-                        authors=contacts, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
+                        authors=contacts, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget, request=self.request
                     )
                 else:
                     query_relays = aggregate_author_outbox_relays(CURATED_AUTHORS, relays)
                     feed_data = fetch_unified_feed(
-                        authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
+                        authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget, request=self.request
                     )
             elif circle in ("following", "network") and not user_pubkey:
                 query_relays = aggregate_author_outbox_relays(CURATED_AUTHORS, relays)
                 feed_data = fetch_unified_feed(
-                    authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
+                    authors=CURATED_AUTHORS, relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget, request=self.request
                 )
             else:
                 query_relays = relays
                 feed_data = fetch_unified_feed(
-                    relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget
+                    relay_urls=query_relays, deadline=time.time() + INITIAL_FEED_SHELL_TIMEOUT, dev_mode=dev_mode, settle_timeout=settle_budget, request=self.request
                 )
 
             notes = feed_data["roots"]
@@ -1417,13 +1418,18 @@ def api_feed(request):
         except (ValueError, TypeError):
             until_ts = None
 
-    filter_obj = {"kinds": [1, 1063, 1111, 30023], "limit": limit}
+    filter_obj = {"kinds": [1, 1063, 1111, 1112, 30023], "limit": limit}
     if until_ts is not None:
         filter_obj["until"] = until_ts - 1
 
     if tag:
         clean_tag = tag.lstrip("#")
         filter_obj["#t"] = [clean_tag]
+
+    if getattr(request, "geographic_scope", None):
+        scope_tokens = getattr(request, "scope_tokens", ())
+        permitted_scopes = [".".join(scope_tokens[i:]) for i in range(len(scope_tokens))]
+        filter_obj["#geo"] = permitted_scopes
 
     feed_deadline = time.time() + 4.0
     # Mode-aware settle: the Global feed reserves the long WAN settle window so
@@ -3625,10 +3631,10 @@ def _merge_events_by_id(*event_batches):
     return merged
 
 
-def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None, dev_mode=False, settle_timeout=None):
+def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, deadline=None, tags=None, dev_mode=False, settle_timeout=None, request=None):
     """Fetch multi-kind events from relay and resolve Kind 0 profiles.
 
-    Phase 1: Fetch kinds [1, 1063, 1111, 30023] with optional authors filter.
+    Phase 1: Fetch kinds [1, 1063, 1111, 1112, 30023] with optional authors/geo filter.
     Phase 2: Fetch Kind 0 metadata for all unique pubkeys discovered.
     Returns a structured feed with author_name/author_avatar populated.
 
@@ -3645,9 +3651,14 @@ def fetch_unified_feed(authors=None, limit=50, relay_urls=None, timeout=10, dead
     if authors is not None and not authors and not tags:
         return {"roots": [], "replies": {}, "total_replies": 0, "profiles": {}}
 
-    filter_obj = {"kinds": [1, 1063, 1111, 30023], "limit": limit}
+    filter_obj = {"kinds": [1, 1063, 1111, 1112, 30023], "limit": limit}
     if authors:
         filter_obj["authors"] = authors
+
+    if getattr(request, "geographic_scope", None):
+        scope_tokens = getattr(request, "scope_tokens", ())
+        permitted_scopes = [".".join(scope_tokens[i:]) for i in range(len(scope_tokens))]
+        filter_obj["#geo"] = permitted_scopes
 
     raw_events = relay_req(filter_obj, relay_urls=relay_urls, timeout=timeout, deadline=deadline, settle_timeout=settle_timeout)
 

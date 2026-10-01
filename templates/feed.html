@@ -416,6 +416,8 @@
     window.userPubkey = "{{ user_pubkey }}";
     window.userNpub = "{{ user_npub }}";
     window.userDid = "{{ user_did }}";
+    window.GEOGRAPHIC_SCOPE = "{{ GEOGRAPHIC_SCOPE|default:''|escapejs }}";
+    window.JURISDICTION_LEVEL = "{{ JURISDICTION_LEVEL|default:''|escapejs }}";
     window.DEV_DIAGNOSTIC_MODE = {% if request.GET.dev == '1' or dev_mode %}true{% else %}false{% endif %};
 </script>
 <script src="{% static 'js/feed_interactions.js' %}"

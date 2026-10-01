@@ -44,7 +44,11 @@ SECRET_KEY = env.str("WUN_SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env.bool("WUN_DEBUG", default=False)
 
-ALLOWED_HOSTS = env.list("WUN_ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+WUN_BASE_DOMAIN = env("WUN_BASE_DOMAIN", default="wun.iyou.me")
+ALLOWED_HOSTS = env.list(
+    "WUN_ALLOWED_HOSTS",
+    default=[f".{WUN_BASE_DOMAIN}", "localhost", "127.0.0.1", ".localhost"],
+)
 
 # Layer 2 (in-page app toolbar ribbon) visibility feature flag. Satellites that
 # have not yet shipped an #app-l2-ribbon render #l2-toggle-header-btn hidden.
@@ -112,10 +116,14 @@ CSRF_COOKIE_NAME = f"{APP_NAME_PREFIX}_csrftoken"
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SECURE = False  # False for local HTTP development
-SESSION_COOKIE_DOMAIN = None
+SESSION_COOKIE_DOMAIN = None if DEBUG else f".{WUN_BASE_DOMAIN}"
+CSRF_COOKIE_DOMAIN = None if DEBUG else f".{WUN_BASE_DOMAIN}"
 SESSION_SAVE_EVERY_REQUEST = False
 CSRF_COOKIE_SECURE = False
-SESSION_TRUSTED_ORIGINS = [f"https://{APP_NAME_PREFIX}.iyou.me"]
+CSRF_TRUSTED_ORIGINS = [
+    f"https://{WUN_BASE_DOMAIN}",
+    f"https://*.{WUN_BASE_DOMAIN}",
+]
 
 
 # Application definition
@@ -158,6 +166,7 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "apps.core.middleware.GeographicRoutingMiddleware",
     "django.middleware.locale.LocaleMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -182,6 +191,7 @@ TEMPLATES = [
                 "apps.core.context_processors.satellite_urls",
                 "apps.core.context_processors.user_identity",
                 "apps.core.context_processors.bookmark_ids",
+                "apps.core.context_processors.geographic_context",
             ],
         },
 
