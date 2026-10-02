@@ -171,6 +171,19 @@
         }
     }
 
+    // ---------- Poly Ingestion Endpoint Helper ----------
+
+    function getPolyIngestUrl() {
+        var host = (typeof window !== "undefined" && window.location && window.location.hostname) ? window.location.hostname.toLowerCase() : "";
+        var isDev = !host || host === "localhost" || host === "127.0.0.1" || host.endsWith(".localhost") || host.endsWith(".testserver");
+        if (isDev) {
+            return "http://127.0.0.1:8002/api/nostr/ingest/";
+        }
+        var polyDomain = (typeof window !== "undefined" && window.POLY_BASE_DOMAIN) ? window.POLY_BASE_DOMAIN : "poly.iyou.me";
+        var scopePrefix = (typeof window !== "undefined" && window.GEOGRAPHIC_SCOPE) ? (window.GEOGRAPHIC_SCOPE + ".") : "";
+        return "https://" + scopePrefix + polyDomain + "/api/nostr/ingest/";
+    }
+
     // ---------- Broadcast Callback ----------
 
     function handleSignedEvent(pendingEvent, signedEvent) {
@@ -201,7 +214,7 @@
             bridgeClient.isProcessing = false;
             if (replyBtn) { replyBtn.disabled = false; replyBtn.textContent = "Reply"; }
         } else if (pendingVote) {
-            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
+            fetch(getPolyIngestUrl(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(signedEvent)
@@ -226,7 +239,7 @@
             bridgeClient.pendingEvent = null;
             bridgeClient.isProcessing = false;
         } else if (pendingPoll) {
-            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
+            fetch(getPolyIngestUrl(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(signedEvent)
@@ -270,7 +283,7 @@
             bridgeClient.pendingEvent = null;
             bridgeClient.isProcessing = false;
         } else if (pendingNomination) {
-            fetch("http://127.0.0.1:8002/api/nostr/ingest/", {
+            fetch(getPolyIngestUrl(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(signedEvent)
@@ -973,11 +986,26 @@
                     '</label>';
             });
 
+            var targetIdentifier = note.poll_docket_id || note.poll_d_tag || note.id;
+            if (!note.poll_docket_id && note.tags && Array.isArray(note.tags)) {
+                var docTag = note.tags.find(function (t) { return t && (t[0] === "docket" || t[0] === "poly_id"); });
+                if (docTag && docTag[1]) targetIdentifier = docTag[1];
+            }
+            var polyDomain = (typeof window !== "undefined" && window.POLY_BASE_DOMAIN) ? window.POLY_BASE_DOMAIN : 'poly.iyou.me';
+            var scopePrefix = (typeof window !== "undefined" && window.GEOGRAPHIC_SCOPE) ? (window.GEOGRAPHIC_SCOPE + '.') : '';
+            var polyAuditUrl = 'https://' + scopePrefix + polyDomain + '/dockets/' + encodeURIComponent(targetIdentifier) + '/';
+
             pollHtml += '</div>' +
                 '<div class="flex items-center justify-between pt-1">' +
                 '<button type="submit" class="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-mono font-medium transition shadow-xs">Cast Vote</button>' +
                 '</div>' +
                 '</form>' +
+                '<div class="mt-2.5 pt-2 border-t border-amber-200/50 dark:border-amber-900/40 flex items-center justify-between">' +
+                '<a href="' + escapeAttr(polyAuditUrl) + '" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs font-mono font-medium text-purple-600 dark:text-purple-400 hover:underline mt-2">' +
+                '<span>Inspect Ballot & Merkle Audit in Poly</span> ' +
+                '<span class="text-[10px]">↗</span>' +
+                '</a>' +
+                '</div>' +
                 '</div>';
         }
         contentAndMediaHtml += pollHtml;

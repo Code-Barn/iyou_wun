@@ -131,6 +131,7 @@
       window.CURRENT_SESSION_DID = window.CURRENT_SESSION_DID || "{{ current_session_did|escapejs }}";
       window.GEOGRAPHIC_SCOPE = "{{ GEOGRAPHIC_SCOPE|default:''|escapejs }}";
       window.JURISDICTION_LEVEL = "{{ JURISDICTION_LEVEL|default:''|escapejs }}";
+      window.POLY_BASE_DOMAIN = "{{ POLY_BASE_DOMAIN|default:'poly.iyou.me'|escapejs }}";
       window.DEPENDENT_CONTEXT = window.DEPENDENT_CONTEXT || {
         is_dependent: {{ is_dependent|yesno:"true,false" }},
         bracket: "{{ dependent_bracket|default:'ADULT' }}",

@@ -31,6 +31,7 @@ def satellite_urls(request):
         "BLOSSOM_SERVER_URL": getattr(settings, "BLOSSOM_SERVER_URL", "http://127.0.0.1:9002"),
         "blossom_cdn_url": getattr(settings, "BLOSSOM_CDN_URL", "https://cdn.iyou.me"),
         "BLOSSOM_CDN_URL": getattr(settings, "BLOSSOM_CDN_URL", "https://cdn.iyou.me"),
+        "POLY_BASE_DOMAIN": getattr(settings, "POLY_BASE_DOMAIN", "poly.iyou.me"),
     }
 
 
@@ -116,6 +117,7 @@ def geographic_context(request):
     return {
         "GEOGRAPHIC_SCOPE": getattr(request, "geographic_scope", "") or "",
         "JURISDICTION_LEVEL": getattr(request, "jurisdiction_level", "") or "",
+        "POLY_BASE_DOMAIN": getattr(settings, "POLY_BASE_DOMAIN", "poly.iyou.me"),
     }
 
 

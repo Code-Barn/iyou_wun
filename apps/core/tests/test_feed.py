@@ -298,6 +298,63 @@ class ProcessIntoFeedTest(TestCase):
         self.assertEqual(roots[0]["poll_scope_org"], "iyou")
         self.assertEqual(roots[0]["poll_closes_at"], "20261201")
 
+    def test_kind_30023_extracts_poll_docket_id(self):
+        events_docket = {
+            "poll": make_event("poll1", 30023, content="Docket poll?", tags=[
+                ["option", "Yes"],
+                ["docket", "dkc-ordinance-2026-09"],
+            ])
+        }
+        roots1 = self._roots(events_docket)
+        self.assertEqual(roots1[0]["poll_docket_id"], "dkc-ordinance-2026-09")
+
+        events_poly = {
+            "poll": make_event("poll2", 30023, content="Poly id poll?", tags=[
+                ["option", "Yes"],
+                ["poly_id", "poly-referendum-42"],
+            ])
+        }
+        roots2 = self._roots(events_poly)
+        self.assertEqual(roots2[0]["poll_docket_id"], "poly-referendum-42")
+
+    def test_kind_30023_renders_poly_audit_link(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+
+        rf = RequestFactory()
+        events = {
+            "poll": make_event("poll_eid_123", 30023, content="Shall ordinance 101 pass?", tags=[
+                ["option", "Aye"],
+                ["option", "Nay"],
+                ["docket", "docket-ordinance-101"],
+            ])
+        }
+        note = self._roots(events)[0]
+
+        # 1. With active geographic scope
+        req_geo = rf.get("/")
+        req_geo.user = AnonymousUser()
+        req_geo.geographic_scope = "dkc.il.us"
+        html_geo = render_to_string("includes/_thread_post.html", {
+            "note": note,
+            "request": req_geo,
+            "POLY_BASE_DOMAIN": "poly.iyou.me",
+        }, request=req_geo)
+        self.assertIn("Inspect Ballot & Merkle Audit in Poly", html_geo)
+        self.assertIn("https://dkc.il.us.poly.iyou.me/dockets/docket-ordinance-101/", html_geo)
+
+        # 2. Without geographic scope (global mesh)
+        req_global = rf.get("/")
+        req_global.user = AnonymousUser()
+        req_global.geographic_scope = ""
+        html_global = render_to_string("includes/_thread_post.html", {
+            "note": note,
+            "request": req_global,
+            "POLY_BASE_DOMAIN": "poly.iyou.me",
+        }, request=req_global)
+        self.assertIn("https://poly.iyou.me/dockets/docket-ordinance-101/", html_global)
+
     def test_kind_1112_vote_grouped_under_parent_poll(self):
         events = {
             "poll": make_event("poll", 30023, content="Test poll?", tags=[["option", "A"]]),

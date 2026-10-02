@@ -305,8 +305,9 @@
     {% endif %}
 
     <!-- Kind 30023 Poll Rendering (if present) -->
-    {% if note.kind == 30023 and note.poll_options %}
+    {% if note.kind == 30023 %}
     <div class="mt-3">
+      {% if note.poll_options %}
       {% if user_pubkey %}
       <form class="poll-vote-form" data-poll-id="{{ note.id }}">
         {% csrf_token %}
@@ -328,6 +329,18 @@
           <span>{{ option }}</span>
         </div>
         {% endfor %}
+      </div>
+      {% endif %}
+      {% endif %}
+      {% if note.kind == 30023 %}
+      <div class="mt-2.5 pt-2 border-t border-slate-100 dark:border-slate-800/60 flex items-center justify-between">
+        <a href="https://{% if request.geographic_scope %}{{ request.geographic_scope }}.{% endif %}{{ POLY_BASE_DOMAIN }}/dockets/{{ note.poll_docket_id|default:note.poll_d_tag|default:note.id }}/"
+           target="_blank"
+           rel="noopener noreferrer"
+           class="inline-flex items-center gap-1.5 text-xs font-mono font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300">
+          <span>Inspect Ballot & Merkle Audit in Poly</span>
+          <span class="text-[10px]">↗</span>
+        </a>
       </div>
       {% endif %}
     </div>

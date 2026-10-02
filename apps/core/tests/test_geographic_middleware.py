@@ -21,6 +21,7 @@ class GeographicFeedQueryTestCase(TestCase):
         ctx = geographic_context(request)
         self.assertEqual(ctx["GEOGRAPHIC_SCOPE"], "dkc.il.us")
         self.assertEqual(ctx["JURISDICTION_LEVEL"], "county")
+        self.assertEqual(ctx["POLY_BASE_DOMAIN"], "poly.iyou.me")
 
     def test_api_feed_geo_filter_and_kind_1112(self):
         from django.contrib.auth.models import AnonymousUser

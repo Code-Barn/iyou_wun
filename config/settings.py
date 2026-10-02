@@ -359,6 +359,7 @@ BLOSSOM_CDN_URL = env.str("BLOSSOM_CDN_URL", default="https://cdn.iyou.me")
 # iyou Base Domain — apex used to derive the public `chat.`/`xmpp.` subdomains
 # served to HS/tls visitors so browsers never receive mixed-content loopback URLs.
 BASE_DOMAIN = env.str("BASE_DOMAIN", default="iyou.me")
+POLY_BASE_DOMAIN = env.str("POLY_BASE_DOMAIN", default=f"poly.{BASE_DOMAIN}")
 
 # XMPP Chat Server — defaults used by context processor; ChatView resolves the
 # actual endpoint per request scheme (loopback ws:// is only safe over HTTP).
