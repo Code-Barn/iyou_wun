@@ -1416,14 +1416,16 @@
         // not drop the very notes it just fetched — otherwise an untagged author
         // renders an empty panel behind a "Posts (0)" tab. Match on the profile
         // target carried by the panel's data-identifier, not on a blanket bypass.
-        const isProfileView = /^\/profile\//.test(window.location.pathname);
+        const isProfileView = /^\/(profile|u)\//.test(window.location.pathname);
         const profileTarget = isProfileView
             ? String((container.getAttribute && container.getAttribute('data-identifier')) || '').toLowerCase()
             : '';
         const noteAuthorKey = String(note.pubkey_hex || note.pubkey || '').toLowerCase();
-        const isProfileAuthor = isProfileView && !!profileTarget && noteAuthorKey === profileTarget;
+        const noteAuthorDid = String(note.author_did || '').toLowerCase();
+        const isProfileAuthor = isProfileView && !!profileTarget && (noteAuthorKey === profileTarget || noteAuthorDid === profileTarget);
+        const isCivicProposal = note.kind === 30023 || note.kind === "30023";
 
-        if (!isDevMode && activeCircle === 'iyou' && !matchesIyou && !isProfileAuthor) {
+        if (!isDevMode && activeCircle === 'iyou' && !matchesIyou && !isProfileAuthor && !isCivicProposal) {
             return; // Drop non-iyou notes only in standard mode
         }
 

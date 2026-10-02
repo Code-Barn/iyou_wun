@@ -71,8 +71,10 @@ SHOW_L2_TOGGLE = env.bool("SHOW_L2_TOGGLE", default=True)
 # first-party traffic; circle-aware settle budgets in apps/core/views.py already
 # widen the window for the Global scope, which is where public coverage belongs.
 # Re-add individual public relays at the top of the list to opt back in.
+LOCAL_RELAY_URL = env.str("LOCAL_RELAY_URL", default="ws://127.0.0.1:9003")
+
 NOSTR_RELAYS = [
-    "ws://127.0.0.1:9003",
+    LOCAL_RELAY_URL,
     "wss://relay.iyou.me",
 ]
 

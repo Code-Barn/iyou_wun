@@ -1818,6 +1818,9 @@ def api_profile_notes(request, identifier):
     # Set a 2.0s deadline for the relay request to avoid blocking
     deadline = time.time() + 2.0
     relays = get_relays_for_request(request)
+    local_relay = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
+    if local_relay and local_relay not in relays:
+        relays = list(relays) + [local_relay]
     
     try:
         raw_events = relay_req(filter_obj, relay_urls=relays, deadline=deadline)
@@ -1826,7 +1829,7 @@ def api_profile_notes(request, identifier):
         raw_events = {}
     
     # Process and deduplicate events
-    from .nip10 import is_renderable_note
+    from .nip10 import is_renderable_note, _enrich_root
     deduped_events = {}
     if isinstance(raw_events, dict):
         for eid, e in raw_events.items():
@@ -1906,7 +1909,7 @@ def api_profile_notes(request, identifier):
             "author_name": profile.get("name") or profile.get("display_name") or "",
             "author_avatar": profile.get("picture") or "",
             "author_did": author_did,
-            "is_iyou_native": bool(in_envelope or author_did),
+            "is_iyou_native": bool(in_envelope or author_did or e.get("kind") == 30023),
             "is_sovereign": bool(author_did),
             "display_content": e.get("content", ""),
             "media_attachments": [],
@@ -1914,6 +1917,9 @@ def api_profile_notes(request, identifier):
             "reply_count": 0,
             "like_count": 0,
         }
+        if e.get("kind") == 30023:
+            _enrich_root(note, 30023, {event_pubkey: profile}, lambda ts: ts)
+            note["is_proposal"] = True
         notes.append(note)
     
     from .context import get_dependent_context
@@ -2093,10 +2099,25 @@ def resolve_universal_identifier(identifier):
 
 
 def fetch_profile_data(hex_pubkey, relay_urls=None):
-    """Fetch Kind 0 profile metadata for a pubkey across relays, picking latest, sanitizing URLs, and resolving local UserLinkDeck."""
-    from .nip10 import sanitize_media_url
+    """Fetch Kind 0 profile metadata, authored posts (1, 1063, 30023), and replies (1111) for a pubkey across relays, picking latest, sanitizing URLs, and resolving local UserLinkDeck."""
+    from .nip10 import sanitize_media_url, is_renderable_note, _enrich_root
+    from datetime import datetime
 
-    # 1. Resolve local UserLinkDeck baseline if available
+    def _ts_to_dt(ts):
+        if isinstance(ts, datetime):
+            return ts
+        try:
+            return datetime.fromtimestamp(int(ts or 0))
+        except (ValueError, TypeError, OverflowError):
+            return datetime.fromtimestamp(0)
+
+    # 1. Resolve local loopback relay alongside remote/mesh relay pool
+    local_relay = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
+    effective_relays = list(relay_urls) if relay_urls else list(DEFAULT_RELAYS)
+    if local_relay and local_relay not in effective_relays:
+        effective_relays.append(local_relay)
+
+    # 2. Resolve local UserLinkDeck baseline if available
     local_deck = None
     if hex_pubkey:
         for deck in UserLinkDeck.objects.select_related("user").all():
@@ -2108,9 +2129,13 @@ def fetch_profile_data(hex_pubkey, relay_urls=None):
                 local_deck = deck
                 break
 
-    profile = {}
+    profile = {
+        "posts": [],
+        "replies": [],
+        "post_count": 0,
+    }
     if local_deck:
-        profile = {
+        profile.update({
             "name": getattr(local_deck, "display_name", "") or local_deck.handle or "",
             "display_name": getattr(local_deck, "display_name", "") or "",
             "about": local_deck.headline or "",
@@ -2118,38 +2143,86 @@ def fetch_profile_data(hex_pubkey, relay_urls=None):
             "banner": sanitize_media_url(getattr(local_deck, "banner_url", "")) if getattr(local_deck, "banner_url", "") else "",
             "nip05": getattr(local_deck, "nip05", "") or "",
             "lud16": getattr(local_deck, "lud16", "") or "",
-        }
+        })
 
-    # 2. Query relays for Kind 0 metadata events
-    events = relay_req({"kinds": [0], "authors": [hex_pubkey], "limit": 5}, relay_urls=relay_urls) if hex_pubkey else {}
-    if not events:
+    pubkey_hex = str(hex_pubkey).strip().lower() if hex_pubkey else ""
+    if not pubkey_hex:
         return profile
 
-    raw_list = list(events.values()) if isinstance(events, dict) else (events if isinstance(events, list) else [])
-    k0_events = [e for e in raw_list if e.get("kind") == 0]
-    candidate_list = k0_events if k0_events else raw_list
-    latest_event = max(candidate_list, key=lambda e: e.get("created_at", 0)) if candidate_list else {}
+    # 3. Query relays for Kind 0 metadata events
+    events = relay_req({"kinds": [0], "authors": [pubkey_hex], "limit": 5}, relay_urls=effective_relays)
+    if events:
+        raw_list = list(events.values()) if isinstance(events, dict) else (events if isinstance(events, list) else [])
+        k0_events = [e for e in raw_list if isinstance(e, dict) and e.get("kind") == 0]
+        candidate_list = k0_events if k0_events else raw_list
+        latest_event = max(candidate_list, key=lambda e: e.get("created_at", 0)) if candidate_list else {}
 
-    try:
-        content = json.loads(latest_event.get("content", "{}"))
-    except (json.JSONDecodeError, TypeError):
-        content = {}
+        try:
+            content = json.loads(latest_event.get("content", "{}"))
+        except (json.JSONDecodeError, TypeError):
+            content = {}
 
-    if content:
-        name = content.get("display_name") or content.get("name", "")
-        if name or not profile.get("name"):
-            profile["name"] = name or profile.get("name", "")
-            profile["display_name"] = content.get("display_name") or name or profile.get("display_name", "")
-        if content.get("about"):
-            profile["about"] = content.get("about")
-        if content.get("picture"):
-            profile["picture"] = sanitize_media_url(content.get("picture"))
-        if content.get("banner"):
-            profile["banner"] = sanitize_media_url(content.get("banner"))
-        if content.get("nip05"):
-            profile["nip05"] = content.get("nip05")
-        if content.get("lud16"):
-            profile["lud16"] = content.get("lud16")
+        if content:
+            name = content.get("display_name") or content.get("name", "")
+            if name or not profile.get("name"):
+                profile["name"] = name or profile.get("name", "")
+                profile["display_name"] = content.get("display_name") or name or profile.get("display_name", "")
+            if content.get("about"):
+                profile["about"] = content.get("about")
+            if content.get("picture"):
+                profile["picture"] = sanitize_media_url(content.get("picture"))
+            if content.get("banner"):
+                profile["banner"] = sanitize_media_url(content.get("banner"))
+            if content.get("nip05"):
+                profile["nip05"] = content.get("nip05")
+            if content.get("lud16"):
+                profile["lud16"] = content.get("lud16")
+
+    # 4. Query authored posts (Kind 1, 1063, 30023)
+    filter_obj = {
+        "authors": [pubkey_hex],
+        "kinds": [1, 1063, 30023],
+        "limit": 50,
+    }
+    raw_posts = relay_req(filter_obj, relay_urls=effective_relays)
+
+    # 5. Query authored replies (Kind 1111)
+    replies_filter = {
+        "authors": [pubkey_hex],
+        "kinds": [1111],
+        "limit": 50,
+    }
+    raw_replies = relay_req(replies_filter, relay_urls=effective_relays)
+
+    # 6. Deduplicate & sort posts descending by created_at
+    post_list = list(raw_posts.values()) if isinstance(raw_posts, dict) else (raw_posts if isinstance(raw_posts, list) else [])
+    deduped_posts = {}
+    for e in post_list:
+        if isinstance(e, dict):
+            eid = e.get("id")
+            if eid and eid not in deduped_posts and is_renderable_note(e):
+                deduped_posts[eid] = e
+    sorted_posts = sorted(deduped_posts.values(), key=lambda x: x.get("created_at", 0), reverse=True)
+    enriched_posts = []
+    for p in sorted_posts:
+        enriched = _enrich_root(p, p.get("kind", 1), {pubkey_hex: profile}, _ts_to_dt)
+        if p.get("kind") == 30023:
+            enriched["is_proposal"] = True
+        enriched_posts.append(enriched)
+    profile["posts"] = enriched_posts
+    profile["post_count"] = len(enriched_posts)
+
+    # 7. Deduplicate & sort replies descending by created_at
+    reply_list = list(raw_replies.values()) if isinstance(raw_replies, dict) else (raw_replies if isinstance(raw_replies, list) else [])
+    deduped_replies = {}
+    for e in reply_list:
+        if isinstance(e, dict):
+            eid = e.get("id")
+            if eid and eid not in deduped_replies and is_renderable_note(e):
+                deduped_replies[eid] = e
+    sorted_replies = sorted(deduped_replies.values(), key=lambda x: x.get("created_at", 0), reverse=True)
+    enriched_replies = [_enrich_root(r, r.get("kind", 1111), {pubkey_hex: profile}, _ts_to_dt) for r in sorted_replies]
+    profile["replies"] = enriched_replies
 
     return profile
 

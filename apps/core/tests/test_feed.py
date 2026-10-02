@@ -19,7 +19,7 @@ from unittest.mock import patch
 from django.test import TestCase
 from django.urls import reverse
 
-from ..views import attach_quoted_notes, process_into_feed
+from ..views import attach_quoted_notes, process_into_feed, fetch_profile_data
 from .helpers import make_event, VALID_PUBKEY_HEX
 
 
@@ -2341,3 +2341,65 @@ class AuthorSublineRenderTests(TestCase):
         self.assertIn("Zork", html)
         self.assertIn(self.SUBLINE_SPAN, html)
         self.assertIn("@zorkhandle", html)
+
+
+class FetchProfileDataCivicPollsTest(TestCase):
+    def setUp(self):
+        self.pubkey = VALID_PUBKEY_HEX
+
+    @patch("apps.core.views.relay_req")
+    def test_fetch_profile_data_queries_kind_30023_and_populates_posts(self, mock_relay_req):
+        """fetch_profile_data queries Kind 30023 events and populates them into profile['posts']."""
+        from django.conf import settings
+
+        poll_event = make_event(
+            "poll_civic_30023",
+            30023,
+            pubkey=self.pubkey,
+            tags=[
+                ["d", "docket-ordinance-42"],
+                ["title", "Civic Ordinance 42 Proposal"],
+                ["option", "Approve"],
+                ["option", "Reject"],
+                ["geo", "dkc.il.us"],
+            ],
+            content="",
+        )
+
+        def side_effect(filter_obj, relay_urls=None):
+            kinds = filter_obj.get("kinds", [])
+            # Assert local relay is in relay_urls
+            local_relay = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
+            if local_relay and relay_urls:
+                self.assertIn(local_relay, relay_urls)
+
+            if 0 in kinds:
+                return {}
+            if 30023 in kinds:
+                # Assert 30023 is queried alongside 1 and 1063
+                self.assertIn(1, kinds)
+                self.assertIn(1063, kinds)
+                self.assertIn(30023, kinds)
+                return {"poll_civic_30023": poll_event}
+            if 1111 in kinds:
+                return {}
+            return {}
+
+        mock_relay_req.side_effect = side_effect
+
+        profile = fetch_profile_data(self.pubkey)
+
+        # Assert relay_req was called with 30023
+        self.assertTrue(
+            any(30023 in call_args[0][0].get("kinds", []) for call_args in mock_relay_req.call_args_list)
+        )
+
+        # Assert author who created only Kind 30023 polls has posts populated
+        self.assertGreater(profile["post_count"], 0)
+        self.assertEqual(len(profile["posts"]), 1)
+        post = profile["posts"][0]
+        self.assertEqual(post["id"], "poll_civic_30023")
+        self.assertEqual(post["kind"], 30023)
+        self.assertTrue(post.get("is_proposal"))
+        self.assertEqual(post.get("poll_options"), ["Approve", "Reject"])
+

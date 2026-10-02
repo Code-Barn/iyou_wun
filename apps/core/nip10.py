@@ -227,16 +227,18 @@ def is_renderable_note(event: dict) -> bool:
                 return True
         return False
 
-    # Kind 30023 poll definitions (NIP-69 / Paper of Record) may carry empty content
-    # if question and options are encoded purely in tags or pre-enriched attributes.
     if kind == 30023 or event.get("kind") == 30023:
         from .views import get_tag_value
-        has_title = bool(event.get("title") or get_tag_value(tags, "title"))
+        has_title = bool(
+            event.get("title")
+            or get_tag_value(tags, "title")
+            or any(isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] in ("title", "d", "docket", "summary") and str(t[1]).strip() for t in tags)
+        )
         has_options = bool(
             event.get("poll_options")
-            or any(isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] == "option" for t in tags)
+            or any(isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] == "option" and str(t[1]).strip() for t in tags)
         )
-        if has_title or has_options:
+        if has_title or has_options or bool(content and str(content).strip()):
             return True
 
     # Suppress P2P mesh discovery tags and multiaddr beacons
