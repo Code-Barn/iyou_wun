@@ -221,27 +221,37 @@
             bridgeClient.isProcessing = false;
             if (replyBtn) { replyBtn.disabled = false; replyBtn.textContent = "Reply"; }
         } else if (pendingVote) {
+            var currentVote = pendingVote;
             fetch(getPolyIngestUrl(), {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(signedEvent)
             })
             .then(function (r) {
-                var btn = pendingVote.btn;
+                var btn = currentVote.btn;
                 if (r.ok) {
-                    btn.textContent = "Vote Cast";
-                    btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
-                    btn.classList.add("bg-green-500", "cursor-default");
-                    pendingVote.form.querySelectorAll("input").forEach(function (i) { i.disabled = true; });
+                    if (btn) {
+                        btn.textContent = "Vote Cast";
+                        btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
+                        btn.classList.add("bg-green-500", "cursor-default");
+                    }
+                    if (currentVote.form) {
+                        currentVote.form.querySelectorAll("input").forEach(function (i) { i.disabled = true; });
+                    }
                 } else {
-                    btn.textContent = "Error \u2014 try again";
-                    btn.disabled = false;
+                    if (btn) {
+                        btn.textContent = "Error \u2014 try again";
+                        btn.disabled = false;
+                    }
                 }
             })
             .catch(function () {
-                pendingVote.btn.textContent = "Network Error";
-                pendingVote.btn.disabled = false;
+                if (currentVote.btn) {
+                    currentVote.btn.textContent = "Network Error";
+                    currentVote.btn.disabled = false;
+                }
             });
+            bridgeClient.broadcastToRelays(signedEvent);
             pendingVote = null;
             bridgeClient.pendingEvent = null;
             bridgeClient.isProcessing = false;
@@ -972,8 +982,10 @@
                 }
             });
 
+            var pollFidelity = note.poll_fidelity_min || 1;
+            var pollScope = note.poll_scope_geohash || note.poll_geo || "";
             pollHtml = '<div class="mt-3 p-3 rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/20 dark:bg-amber-950/20">' +
-                '<form class="poll-vote-form space-y-2.5" data-poll-id="' + escapeAttr(noteId) + '" data-poll-pubkey="' + escapeAttr(pubkey) + '" data-poll-dtag="' + escapeAttr(note.poll_d_tag || '') + '">' +
+                '<form class="poll-vote-form space-y-2.5" data-poll-id="' + escapeAttr(noteId) + '" data-poll-pubkey="' + escapeAttr(pubkey) + '" data-poll-dtag="' + escapeAttr(note.poll_d_tag || '') + '" data-poll-fidelity="' + escapeAttr(pollFidelity) + '" data-poll-scope="' + escapeAttr(pollScope) + '">' +
                 '<div class="text-xs font-semibold text-amber-900 dark:text-amber-200 flex items-center justify-between">' +
                 '<span>📊 Civic Governance Poll</span>' +
                 '<span class="text-[10px] font-mono text-slate-500">' + totalVotes + ' ' + (totalVotes === 1 ? 'vote' : 'votes') + '</span>' +
@@ -2470,29 +2482,116 @@
         if (isHidden) dropdown.classList.remove("hidden");
     }
 
-    async function castPollVote(pollId, selectOptionIndex) {
+    async function castPollVote(pollId, selectOptionOrIndex) {
         var card = document.querySelector('[data-poll-id="' + pollId + '"]');
         if (!card) return;
-        var options = card.querySelectorAll("input[name='selection']");
-        if (!options || selectOptionIndex < 0 || selectOptionIndex >= options.length) return;
-        var selectedInput = options[selectOptionIndex];
-        if (!selectedInput) return;
-        var selectedValue = selectedInput.value;
+        var form = card.querySelector(".poll-vote-form") || (card.classList.contains("poll-vote-form") ? card : null);
+        var selectedValue = "";
+        if (typeof selectOptionOrIndex === "string") {
+            selectedValue = selectOptionOrIndex;
+        } else {
+            var options = card.querySelectorAll("input[name='selection']");
+            if (options && selectOptionOrIndex >= 0 && selectOptionOrIndex < options.length) {
+                var selectedInput = options[selectOptionOrIndex];
+                if (selectedInput) selectedValue = selectedInput.value;
+            }
+        }
+        if (!selectedValue) {
+            var checkedInput = card.querySelector("input[name='selection']:checked");
+            if (checkedInput) selectedValue = checkedInput.value;
+        }
+        if (!selectedValue) return;
+
         var pk;
         try { pk = await bridgeClient.getEffectivePubkey(); }
         catch (e) { showToast(e.message, true); return; }
 
-        var pubkey = card.getAttribute("data-poll-pubkey") || "";
-        var dtag = card.getAttribute("data-poll-dtag") || "";
-        var form = card.querySelector(".poll-vote-form");
+        var pubkey = card.getAttribute("data-poll-pubkey") || (form && form.getAttribute("data-poll-pubkey")) || "";
+        var dtag = card.getAttribute("data-poll-dtag") || (form && form.getAttribute("data-poll-dtag")) || "";
         var btn = form ? form.querySelector("button[type='submit']") : null;
+        if (btn) { btn.disabled = true; btn.textContent = "Signing..."; }
+
+        // 1. Retrieve the poll card's data-poll-fidelity and data-poll-scope
+        var fidelityAttr = (form && form.getAttribute("data-poll-fidelity")) || card.getAttribute("data-poll-fidelity") || "1";
+        var fidelityMin = parseInt(fidelityAttr, 10) || 1;
+        var scopeAttr = (form && form.getAttribute("data-poll-scope")) || card.getAttribute("data-poll-scope") || (typeof window !== "undefined" ? window.GEOGRAPHIC_SCOPE : "") || "";
+
+        // 2. Check active persona level (window.activeProfile.level)
+        var activeProfile = (typeof window !== "undefined" && window.activeProfile) ? window.activeProfile : null;
+        var activeLevel = activeProfile ? (activeProfile.level || activeProfile.derivation_index || 1) : 1;
+        var targetProfileId = activeProfile ? (activeProfile.profile_id || activeProfile.id || null) : null;
+
+        if (activeLevel === 1 && (fidelityMin >= 2 || scopeAttr)) {
+            var personas = (typeof window !== "undefined" && Array.isArray(window.enclavePersonas)) ? window.enclavePersonas : [];
+            var l2Persona = personas.find(function (p) {
+                return p && (p.level === 2 || p.derivation_index === 2);
+            });
+            if (l2Persona && typeof window.confirm === "function") {
+                var shouldSwitch = window.confirm(
+                    "You are voting with your Primary L1 persona. Would you like to switch to L2 Civic Burner persona (" +
+                    (l2Persona.name || l2Persona.label || "Civic Burner") + ") to preserve identity isolation?"
+                );
+                if (shouldSwitch) {
+                    targetProfileId = l2Persona.profile_id || l2Persona.id;
+                    if (typeof window.switchPersona === "function") {
+                        window.switchPersona(targetProfileId);
+                        showToast("Switching to L2 persona: " + (l2Persona.name || "Civic Burner"));
+                        await new Promise(function (res) { setTimeout(res, 350); });
+                    }
+                }
+            }
+        }
+
         var timestamp = Math.floor(Date.now() / 1000);
-        var voteEnvelope = {
+
+        // 3. Request inner signature via bridgeClient.omniSignRequest
+        var innerResult = null;
+        try {
+            if (typeof bridgeClient.omniSignRequest === "function") {
+                innerResult = await bridgeClient.omniSignRequest({
+                    protocol: "POLY_V2",
+                    poll_id: pollId,
+                    option_id: selectedValue,
+                    timestamp: timestamp,
+                    profile_id: targetProfileId
+                });
+            }
+        } catch (signErr) {
+            console.warn("[Poll] OmniSign request failed, falling back to local DID:", signErr);
+        }
+
+        var activeDid = (typeof window !== "undefined" && window.activeProfile && window.activeProfile.did) || (typeof window !== "undefined" ? window.CURRENT_SESSION_DID : "") || "";
+        var innerDid = (innerResult && innerResult.voter_did) ? innerResult.voter_did : activeDid;
+        var innerSig = (innerResult && innerResult.signature) ? innerResult.signature : "";
+
+        // 4. If fidelity >= 2, call bridgeClient.polyCredentialRequest to obtain credential_proof
+        var credentialProof = null;
+        if (fidelityMin >= 2 && typeof bridgeClient.polyCredentialRequest === "function") {
+            try {
+                credentialProof = await bridgeClient.polyCredentialRequest({
+                    scope: scopeAttr,
+                    credential_type: "CivicResidency",
+                    challenge: "poly_challenge_" + timestamp + "_" + pollId
+                });
+            } catch (credErr) {
+                console.warn("[Poll] Tier >= 2 credential presentation request failed:", credErr);
+            }
+        }
+
+        // 5. Package inner payload
+        var innerPayload = {
             poll_id: pollId,
-            selection: selectedValue,
-            timestamp: timestamp
+            option_id: selectedValue,
+            selections: [selectedValue],
+            timestamp: timestamp,
+            voter_did: innerDid,
+            signature: innerSig,
+            fidelity_tier: fidelityMin >= 2 ? fidelityMin : 1,
+            weight: 1.0,
+            credential_proof: credentialProof || null
         };
 
+        // 6. Construct outer Kind 1112 event
         var tags = [];
         if (pubkey && dtag) {
             tags.push(["a", "30023:" + pubkey + ":" + dtag]);
@@ -2505,13 +2604,13 @@
 
         var event = {
             kind: 1112,
-            content: JSON.stringify(voteEnvelope),
+            content: JSON.stringify(innerPayload),
             pubkey: pk,
             created_at: timestamp,
             tags: tags
         };
 
-        if (btn) { btn.disabled = true; btn.textContent = "Signing..."; }
+        // 7. Sign outer event via bridgeClient.signEvent(event) (BIP-340 Schnorr)
         pendingVote = { pollId: pollId, selection: selectedValue, timestamp: timestamp, form: form, btn: btn };
         bridgeClient.signEvent(event);
     }

@@ -252,6 +252,8 @@
         this._personaQueryActive = false;      // waiting on an enclave persona list response
         this._isSwitchingPersona = false;      // in-flight mutex lock for /api/auth/persona-switch/
         this._lastSwitchedProfileId = null;    // frame deduplication cache
+        this._omniSignResolvers = [];          // pending OMNI_SIGN_REQUEST resolvers
+        this._credResolvers = [];              // pending POLY_CREDENTIAL_REQUEST resolvers
         this._initLifecycle();
     }
 
@@ -928,6 +930,52 @@
                 }
             }
 
+            if (message.type === "OMNI_SIGN_RESPONSE") {
+                var env = message.envelope || message;
+                var did = "";
+                if (env && env.tags && Array.isArray(env.tags)) {
+                    var pTag = env.tags.find(function (t) { return t && t[0] === "p"; });
+                    if (pTag && pTag[1]) did = pTag[1];
+                }
+                var activeDid = (typeof window !== "undefined" && window.activeProfile && window.activeProfile.did) || "";
+                var omniResult = {
+                    voter_did: env.voter_did || env.did || did || activeDid,
+                    signature: env.sig || env.signature || env.voter_ed25519_signature || "",
+                    content: env.content || "",
+                    envelope: env
+                };
+                if (this._omniSignResolvers && this._omniSignResolvers.length) {
+                    var item = this._omniSignResolvers.shift();
+                    if (item.timer) clearTimeout(item.timer);
+                    item.resolve(omniResult);
+                }
+                return;
+            }
+
+            if (message.type === "POLY_CREDENTIAL_PRESENTATION" || message.type === "POLY_CREDENTIAL_RESPONSE") {
+                var credResult = message.vp || message.presentation || message.credential_proof || message;
+                if (this._credResolvers && this._credResolvers.length) {
+                    var item = this._credResolvers.shift();
+                    if (item.timer) clearTimeout(item.timer);
+                    item.resolve(credResult);
+                }
+                return;
+            }
+
+            if (message.status === "error" || (message.type && message.type.toLowerCase().indexOf("error") !== -1)) {
+                var reason = message.reason || message.error || "Bridge request failed";
+                if (this._omniSignResolvers && this._omniSignResolvers.length) {
+                    var item = this._omniSignResolvers.shift();
+                    if (item.timer) clearTimeout(item.timer);
+                    item.reject(new Error(reason));
+                }
+                if (this._credResolvers && this._credResolvers.length) {
+                    var item = this._credResolvers.shift();
+                    if (item.timer) clearTimeout(item.timer);
+                    item.reject(new Error(reason));
+                }
+            }
+
         } catch (err) {
             console.error("Error handling Tauri message:", err);
             showToast("Error processing bridge response.", true);
@@ -973,6 +1021,135 @@
             }
         }, SIGN_TIMEOUT_MS);
         return promise;
+    };
+
+    /**
+     * Request sovereign Ed25519 signature over canonical Poly ballot (RFC-8785).
+     * Dispatches OMNI_SIGN_REQUEST over Port 9001 bridge.
+     */
+    TauriBridgeClient.prototype.omniSignRequest = function (params) {
+        params = params || {};
+        var self = this;
+        var protocol = params.protocol || "POLY_V2";
+        var pollId = String(params.poll_id || params.pollId || "");
+        var optionId = String(params.option_id || params.optionId || "");
+        var timestamp = params.timestamp || Math.floor(Date.now() / 1000);
+        var profileId = params.profile_id || params.profileId || null;
+
+        var requestFrame = {
+            type: "OMNI_SIGN_REQUEST",
+            protocol: protocol,
+            poll_id: pollId,
+            option_id: optionId,
+            timestamp: timestamp,
+            profile_id: profileId,
+            payload: {
+                poll_id: pollId,
+                option_id: optionId,
+                timestamp: timestamp
+            }
+        };
+
+        return new Promise(function (resolve, reject) {
+            self._omniSignResolvers = self._omniSignResolvers || [];
+
+            var timer = setTimeout(function () {
+                var idx = self._omniSignResolvers.findIndex(function (r) { return r.timer === timer; });
+                if (idx !== -1) {
+                    self._omniSignResolvers.splice(idx, 1);
+                }
+                reject(new Error("Enclave bridge OMNI_SIGN_REQUEST timed out."));
+            }, SIGN_TIMEOUT_MS);
+
+            self._omniSignResolvers.push({
+                resolve: resolve,
+                reject: reject,
+                timer: timer
+            });
+
+            if (!self.socket || self.socket.readyState !== WebSocket.OPEN) {
+                self.connect();
+            }
+
+            var checkSocket = setInterval(function () {
+                if (self.socket && self.socket.readyState === WebSocket.OPEN) {
+                    clearInterval(checkSocket);
+                    try {
+                        self.socket.send(JSON.stringify(requestFrame));
+                    } catch (err) {
+                        clearInterval(checkSocket);
+                        clearTimeout(timer);
+                        var idx = self._omniSignResolvers.findIndex(function (r) { return r.timer === timer; });
+                        if (idx !== -1) self._omniSignResolvers.splice(idx, 1);
+                        reject(err);
+                    }
+                }
+            }, SOCKET_POLL_INTERVAL);
+
+            setTimeout(function () {
+                clearInterval(checkSocket);
+            }, 6000);
+        });
+    };
+
+    /**
+     * Request W3C Verifiable Presentation matching geographic scope and credential type.
+     * Dispatches POLY_CREDENTIAL_REQUEST over Port 9001 bridge.
+     */
+    TauriBridgeClient.prototype.polyCredentialRequest = function (params) {
+        params = params || {};
+        var self = this;
+        var scope = params.scope || (typeof window !== "undefined" ? window.GEOGRAPHIC_SCOPE : "") || "";
+        var credType = params.credential_type || params.required_credential_type || "CivicResidency";
+        var challenge = params.challenge || ("poly_challenge_" + Date.now());
+
+        var requestFrame = {
+            type: "POLY_CREDENTIAL_REQUEST",
+            required_credential_type: credType,
+            challenge: challenge,
+            scope: scope
+        };
+
+        return new Promise(function (resolve, reject) {
+            self._credResolvers = self._credResolvers || [];
+
+            var timer = setTimeout(function () {
+                var idx = self._credResolvers.findIndex(function (r) { return r.timer === timer; });
+                if (idx !== -1) {
+                    self._credResolvers.splice(idx, 1);
+                }
+                reject(new Error("Enclave bridge POLY_CREDENTIAL_REQUEST timed out."));
+            }, SIGN_TIMEOUT_MS);
+
+            self._credResolvers.push({
+                resolve: resolve,
+                reject: reject,
+                timer: timer
+            });
+
+            if (!self.socket || self.socket.readyState !== WebSocket.OPEN) {
+                self.connect();
+            }
+
+            var checkSocket = setInterval(function () {
+                if (self.socket && self.socket.readyState === WebSocket.OPEN) {
+                    clearInterval(checkSocket);
+                    try {
+                        self.socket.send(JSON.stringify(requestFrame));
+                    } catch (err) {
+                        clearInterval(checkSocket);
+                        clearTimeout(timer);
+                        var idx = self._credResolvers.findIndex(function (r) { return r.timer === timer; });
+                        if (idx !== -1) self._credResolvers.splice(idx, 1);
+                        reject(err);
+                    }
+                }
+            }, SOCKET_POLL_INTERVAL);
+
+            setTimeout(function () {
+                clearInterval(checkSocket);
+            }, 6000);
+        });
     };
 
     /**

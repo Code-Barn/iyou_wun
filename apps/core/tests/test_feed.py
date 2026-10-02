@@ -355,6 +355,50 @@ class ProcessIntoFeedTest(TestCase):
         }, request=req_global)
         self.assertIn("https://poly.iyou.me/dockets/docket-ordinance-101/", html_global)
 
+    def test_kind_30023_extracts_fidelity_min(self):
+        events = {
+            "poll": make_event("poll_fid", 30023, content="Civic Poll", tags=[
+                ["option", "Yes"],
+                ["option", "No"],
+                ["fidelity_min", "2"],
+                ["geo", "dkc.il.us"],
+            ])
+        }
+        roots = self._roots(events)
+        self.assertEqual(roots[0]["poll_fidelity_min"], 2)
+        self.assertEqual(roots[0]["poll_scope_geohash"], "dkc.il.us")
+
+    def test_kind_30023_renders_poll_vote_form_fidelity_and_scope_attributes(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.template.loader import render_to_string
+        from django.test import RequestFactory
+
+        rf = RequestFactory()
+        events = {
+            "poll": make_event("poll_gated", 30023, content="Gated Municipal Measure", tags=[
+                ["option", "Approve"],
+                ["option", "Reject"],
+                ["fidelity_min", "2"],
+                ["geohash", "dp3wm"],
+            ])
+        }
+        note = self._roots(events)[0]
+
+        req = rf.get("/")
+        req.user = AnonymousUser()
+        req.geographic_scope = "dkc.il.us"
+
+        html = render_to_string("includes/_thread_post.html", {
+            "note": note,
+            "request": req,
+            "user_pubkey": "a" * 64,
+            "POLY_BASE_DOMAIN": "poly.iyou.me",
+        }, request=req)
+
+        self.assertIn('class="poll-vote-form', html)
+        self.assertIn('data-poll-fidelity="2"', html)
+        self.assertIn('data-poll-scope="dp3wm"', html)
+
     def test_is_renderable_note_kind_30023_empty_content(self):
         from apps.core.nip10 import is_renderable_note
 

@@ -1075,9 +1075,17 @@ def _enrich_root(e, kind, profiles, ts_fn, root_id="", parent_id="", reply_to_pu
         note["poll_options"] = [t[1] for t in tags if t and t[0] == "option" and len(t) > 1]
         note["poll_d_tag"] = get_tag_value(tags, "d")
         note["poll_docket_id"] = get_tag_value(tags, "docket") or get_tag_value(tags, "poly_id")
-        note["poll_scope_geohash"] = get_tag_value(tags, "geohash")
+        note["poll_scope_geohash"] = get_tag_value(tags, "geohash") or get_tag_value(tags, "geo") or get_tag_value(tags, "scope")
         note["poll_scope_org"] = get_tag_value(tags, "org")
         note["poll_closes_at"] = get_tag_value(tags, "expires")
+        fidelity_val = get_tag_value(tags, "fidelity_min") or get_tag_value(tags, "fidelity")
+        if fidelity_val:
+            try:
+                note["poll_fidelity_min"] = int(fidelity_val)
+            except (ValueError, TypeError):
+                note["poll_fidelity_min"] = 1
+        else:
+            note["poll_fidelity_min"] = 1
 
     return decorate_author_identity(extract_media_from_note(note))
 

@@ -313,7 +313,7 @@
         <span class="text-[10px] font-mono text-slate-500">{{ note.votes|length|default:note.total_votes|default:0 }} {% if note.votes|length == 1 or note.total_votes == 1 %}vote{% else %}votes{% endif %}</span>
       </div>
       {% if user_pubkey %}
-      <form class="poll-vote-form space-y-2.5" data-poll-id="{{ note.id }}" data-poll-pubkey="{{ note.pubkey }}" data-poll-dtag="{{ note.poll_d_tag|default:'' }}">
+      <form class="poll-vote-form space-y-2.5" data-poll-id="{{ note.id }}" data-poll-pubkey="{{ note.pubkey }}" data-poll-dtag="{{ note.poll_d_tag|default:'' }}" data-poll-fidelity="{{ note.poll_fidelity_min|default:1 }}" data-poll-scope="{{ note.poll_scope_geohash|default:'' }}">
         {% csrf_token %}
         <div class="space-y-2">
           {% if note.vote_distribution %}
