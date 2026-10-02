@@ -25,37 +25,85 @@
           <span class="text-slate-700 dark:text-slate-400">/</span>
           <a href="https://name.iyou.me" data-app-slug="name" class="text-teal-400 hover:text-teal-300 dark:text-teal-700 dark:hover:text-teal-600">name</a>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://hive.iyou.me" data-app-slug="hive" class="text-orange-400 hover:text-orange-300 dark:text-orange-700 dark:hover:text-orange-600">hive</a>
+          <a href="https://hive.iyou.me" data-app-slug="hive" class="text-orange-400 hover:text-orange-300 dark:text-orange-700 dark:hover:text-orange-600 inline-flex items-center">
+            <span>hive</span>
+            <span class="ml-1 text-[9px] font-sans font-semibold px-1 py-0.2 rounded bg-orange-500/20 text-orange-400 dark:bg-orange-500/30 dark:text-orange-600 border border-orange-500/30 leading-tight">beta</span>
+          </a>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://ride.iyou.me" data-app-slug="ride" class="text-lime-400 hover:text-lime-300 dark:text-lime-700 dark:hover:text-lime-600">ride</a>
+          <button type="button" onclick="openEcosystemModal('ride', event)" data-app-slug="ride" class="opacity-50 hover:opacity-90 text-slate-400 hover:text-slate-200 dark:text-slate-500 dark:hover:text-slate-700 transition cursor-pointer select-none inline-flex items-center gap-1 font-mono">
+            <span>ride</span>
+            <span class="text-[9px] text-slate-500 dark:text-slate-400 font-mono">[wip]</span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://dctech.iyou.me" data-app-slug="dctech" class="text-indigo-400 hover:text-indigo-300 dark:text-indigo-700 dark:hover:text-indigo-600">dctech</a>
+          <button type="button" onclick="openEcosystemModal('dctech', event)" data-app-slug="dctech" class="opacity-50 hover:opacity-90 text-slate-400 hover:text-slate-200 dark:text-slate-500 dark:hover:text-slate-700 transition cursor-pointer select-none inline-flex items-center gap-1 font-mono">
+            <span>dctech</span>
+            <span class="text-[9px] text-slate-500 dark:text-slate-400 font-mono">[wip]</span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://safe.iyou.me" data-app-slug="safe" class="text-rose-400 hover:text-rose-300 dark:text-rose-700 dark:hover:text-rose-600">safe</a>
+          <button type="button" onclick="openEcosystemModal('safe', event)" data-app-slug="safe" class="opacity-50 hover:opacity-90 text-slate-400 hover:text-slate-200 dark:text-slate-500 dark:hover:text-slate-700 transition cursor-pointer select-none inline-flex items-center gap-1 font-mono">
+            <span>safe</span>
+            <span class="text-[9px] text-slate-500 dark:text-slate-400 font-mono">[wip]</span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://talk.iyou.me" data-app-slug="talk" class="text-cyan-400 hover:text-cyan-300 dark:text-cyan-700 dark:hover:text-cyan-600">talk</a>
+          <button type="button" onclick="openEcosystemModal('talk', event)" data-app-slug="talk" class="text-cyan-400 hover:text-cyan-300 dark:text-cyan-600 dark:hover:text-cyan-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>talk</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://clar.iyou.me" data-app-slug="clar" class="text-emerald-400 hover:text-emerald-300 dark:text-emerald-700 dark:hover:text-emerald-600">clar</a>
+          <button type="button" onclick="openEcosystemModal('clar', event)" data-app-slug="clar" class="text-emerald-400 hover:text-emerald-300 dark:text-emerald-600 dark:hover:text-emerald-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>clar</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://play.iyou.me" data-app-slug="play" class="text-amber-400 hover:text-amber-300 dark:text-amber-700 dark:hover:text-amber-600">play</a>
+          <button type="button" onclick="openEcosystemModal('play', event)" data-app-slug="play" class="text-amber-400 hover:text-amber-300 dark:text-amber-600 dark:hover:text-amber-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>play</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://blog.iyou.me" data-app-slug="blog" class="text-sky-400 hover:text-sky-300 dark:text-sky-700 dark:hover:text-sky-600">blog</a>
+          <button type="button" onclick="openEcosystemModal('blog', event)" data-app-slug="blog" class="text-sky-400 hover:text-sky-300 dark:text-sky-600 dark:hover:text-sky-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>blog</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://help.iyou.me" data-app-slug="help" class="text-red-400 hover:text-red-300 dark:text-red-700 dark:hover:text-red-600">help</a>
+          <button type="button" onclick="openEcosystemModal('help', event)" data-app-slug="help" class="text-red-400 hover:text-red-300 dark:text-red-600 dark:hover:text-red-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>help</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://draw.iyou.me" data-app-slug="draw" class="text-fuchsia-400 hover:text-fuchsia-300 dark:text-fuchsia-700 dark:hover:text-fuchsia-600">draw</a>
+          <a href="https://draw.iyou.me" data-app-slug="draw" class="text-fuchsia-400 hover:text-fuchsia-300 dark:text-fuchsia-700 dark:hover:text-fuchsia-600 inline-flex items-center">
+            <span>draw</span>
+            <span class="ml-1 text-[9px] font-sans font-semibold px-1 py-0.2 rounded bg-fuchsia-500/20 text-fuchsia-400 dark:bg-fuchsia-500/30 dark:text-fuchsia-600 border border-fuchsia-500/30 leading-tight">beta</span>
+          </a>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://life.iyou.me" data-app-slug="life" class="text-sky-400 hover:text-sky-300 dark:text-sky-700 dark:hover:text-sky-600">life</a>
+          <button type="button" onclick="openEcosystemModal('life', event)" data-app-slug="life" class="opacity-50 hover:opacity-90 text-slate-400 hover:text-slate-200 dark:text-slate-500 dark:hover:text-slate-700 transition cursor-pointer select-none inline-flex items-center gap-1 font-mono">
+            <span>life</span>
+            <span class="text-[9px] text-slate-500 dark:text-slate-400 font-mono">[wip]</span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://walk.iyou.me" data-app-slug="walk" class="text-green-400 hover:text-green-300 dark:text-green-700 dark:hover:text-green-600">walk</a>
+          <button type="button" onclick="openEcosystemModal('walk', event)" data-app-slug="walk" class="text-green-400 hover:text-green-300 dark:text-green-600 dark:hover:text-green-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>walk</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://stay.iyou.me" data-app-slug="stay" class="text-yellow-400 hover:text-yellow-300 dark:text-yellow-700 dark:hover:text-yellow-600">stay</a>
+          <button type="button" onclick="openEcosystemModal('stay', event)" data-app-slug="stay" class="opacity-50 hover:opacity-90 text-slate-400 hover:text-slate-200 dark:text-slate-500 dark:hover:text-slate-700 transition cursor-pointer select-none inline-flex items-center gap-1 font-mono">
+            <span>stay</span>
+            <span class="text-[9px] text-slate-500 dark:text-slate-400 font-mono">[wip]</span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://dev.iyou.me" data-app-slug="dev" class="text-zinc-400 hover:text-zinc-300 dark:text-zinc-600 dark:hover:text-zinc-900">dev</a>
+          <button type="button" onclick="openEcosystemModal('dev', event)" data-app-slug="dev" class="text-zinc-400 hover:text-zinc-300 dark:text-zinc-600 dark:hover:text-zinc-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>dev</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://spot.iyou.me" data-app-slug="spot" class="text-pink-400 hover:text-pink-300 dark:text-pink-700 dark:hover:text-pink-600">spot</a>
+          <button type="button" onclick="openEcosystemModal('spot', event)" data-app-slug="spot" class="opacity-50 hover:opacity-90 text-slate-400 hover:text-slate-200 dark:text-slate-500 dark:hover:text-slate-700 transition cursor-pointer select-none inline-flex items-center gap-1 font-mono">
+            <span>spot</span>
+            <span class="text-[9px] text-slate-500 dark:text-slate-400 font-mono">[wip]</span>
+          </button>
           <span class="text-slate-700 dark:text-slate-400">/</span>
-          <a href="https://baba.iyou.me" data-app-slug="baba" class="text-blue-400 hover:text-blue-300 dark:text-blue-700 dark:hover:text-blue-600">baba</a>
+          <button type="button" onclick="openEcosystemModal('baba', event)" data-app-slug="baba" class="text-blue-400 hover:text-blue-300 dark:text-blue-600 dark:hover:text-blue-500 transition cursor-pointer inline-flex items-center gap-1 group font-mono">
+            <span>baba</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse group-hover:scale-125 transition-transform"></span>
+          </button>
     </div>
   </div>
 
@@ -63,9 +111,176 @@
   <div class="h-2 w-full bg-violet-600 dark:bg-violet-500 cursor-pointer flex justify-center items-center select-none" onclick="toggleEcosystemBar(event)">
     <div class="w-8 h-1 bg-violet-200 dark:bg-violet-900 rounded-full opacity-80"></div>
   </div>
+
+  <!-- Sovereign Contributor & Intercept Modal (Layer 0) -->
+  <div id="ecosystem-intercept-modal"
+       class="hidden fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm transition-opacity duration-200"
+       onclick="handleModalBackdropClick(event)">
+    <div class="relative w-full max-w-md rounded-2xl border border-slate-700/60 dark:border-slate-300/60 bg-[#0B0F19] text-slate-100 dark:bg-white dark:text-slate-900 shadow-2xl p-6 font-mono text-xs"
+         onclick="event.stopPropagation()">
+      <!-- Modal Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800 dark:border-slate-200">
+        <div class="flex items-center gap-2">
+          <span id="eco-modal-accent-pip" class="w-2.5 h-2.5 rounded-full bg-violet-500"></span>
+          <span class="font-bold text-sm tracking-wide text-slate-200 dark:text-slate-900">
+            iyou_<span id="eco-modal-slug" class="font-extrabold text-violet-400">slug</span>
+          </span>
+          <span id="eco-modal-badge" class="px-1.5 py-0.5 rounded text-[10px] uppercase font-bold tracking-wider">
+            STATUS
+          </span>
+        </div>
+        <button type="button"
+                id="close-eco-modal-btn"
+                onclick="closeEcosystemModal(event)"
+                class="text-slate-400 hover:text-white dark:text-slate-500 dark:hover:text-slate-900 p-1 transition text-sm">
+          ✕
+        </button>
+      </div>
+
+      <!-- Modal Body -->
+      <div class="py-4 space-y-3">
+        <div id="eco-modal-headline" class="text-xs font-semibold text-violet-400 dark:text-violet-600 uppercase tracking-wider">
+          Under Sovereign Construction
+        </div>
+        <p id="eco-modal-mission" class="text-slate-300 dark:text-slate-600 leading-relaxed font-sans text-xs">
+          Mission statement.
+        </p>
+        <div class="p-2.5 rounded-lg bg-slate-900/80 dark:bg-slate-100 border border-slate-800 dark:border-slate-200 text-[11px] text-slate-400 dark:text-slate-600 font-mono space-y-1">
+          <div><strong class="text-slate-300 dark:text-slate-700">Status:</strong> <span id="eco-modal-status-text">Seeking Co-Developers</span></div>
+          <div><strong class="text-slate-300 dark:text-slate-700">Stack:</strong> <span id="eco-modal-stack-text">Django 5.2 / Rust / SQLite</span></div>
+        </div>
+      </div>
+
+      <!-- Actions Footer -->
+      <div class="pt-3 border-t border-slate-800 dark:border-slate-200 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <a id="eco-modal-repo-link"
+             href="https://github.com/iyou-mesh"
+             target="_blank"
+             rel="noreferrer"
+             class="flex-1 text-center py-2 px-3 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-medium transition text-xs shadow-sm">
+            GitHub Repository ↗
+          </a>
+          <a href="https://github.com/iyou-mesh/omni_social/blob/main/docs/DEVELOPER_TRANSLATION_MANUAL.md"
+             target="_blank"
+             rel="noreferrer"
+             class="py-2 px-3 rounded-lg border border-slate-700 dark:border-slate-300 text-slate-300 dark:text-slate-700 hover:bg-slate-800 dark:hover:bg-slate-100 transition text-xs text-center">
+            Guide
+          </a>
+        </div>
+
+        <!-- Admin Bypass Section -->
+        <div id="eco-modal-admin-container" class="mt-1 pt-2 border-t border-slate-800/60 dark:border-slate-200/60 flex items-center justify-between text-[11px]">
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
+  window.IS_STAFF_ADMIN = {% if user.is_staff or request.user.is_staff %}true{% else %}false{% endif %};
+  const ECOSYSTEM_REGISTRY = {"idp": {"slug": "idp", "url": "https://iyou.me", "status": "ACTIVE", "repo": "https://github.com/iyou-mesh/iyou_idp", "stack": "Django 6.0 / Rust did_rust / PostgreSQL / Redis", "mission": "Root Identity Provider & Sovereign Authentication", "color": "purple"}, "wun": {"slug": "wun", "url": "https://wun.iyou.me", "status": "ACTIVE", "repo": "https://github.com/iyou-mesh/iyou_wun", "stack": "Django 5.2 / Nostr NIP-01/10/65 / XMPP", "mission": "Social Hub & Sovereign Profile Space", "color": "violet"}, "poly": {"slug": "poly", "url": "https://poly.iyou.me", "status": "ACTIVE", "repo": "https://github.com/iyou-mesh/iyou_poly", "stack": "Django 6.0 / Pure-Python poly_engine / SSE", "mission": "Stateless Consensus Engine & Governance Ledger", "color": "purple"}, "name": {"slug": "name", "url": "https://name.iyou.me", "status": "ACTIVE", "repo": "https://github.com/iyou-mesh/iyou_name", "stack": "Django 6.0 / PyO3 Rust Chart Kernel / Wand", "mission": "Kinship Graph & Lineage Provenance Ledger", "color": "teal"}, "hive": {"slug": "hive", "url": "https://hive.iyou.me", "status": "BETA", "repo": "https://github.com/iyou-mesh/iyou_hive", "stack": "React 18 SPA / Vite / Django REST / LanceDB", "mission": "Communal Vaults & Legal Proofs", "color": "orange"}, "ride": {"slug": "ride", "url": "https://ride.iyou.me", "status": "DEV_WIP", "repo": "https://github.com/iyou-mesh/iyou_ride", "stack": "Django 5.2 / BIP-340 Schnorr / SSE", "mission": "Sovereign Transport & Auction Dispatch", "color": "lime"}, "dctech": {"slug": "dctech", "url": "https://dctech.iyou.me", "status": "DEV_WIP", "repo": "https://github.com/iyou-mesh/dc_tech_website", "stack": "Django 6.0 / WhiteNoise / Defensive Cyber-Grit", "mission": "Corporate Portal & Security Hardening", "color": "indigo"}, "safe": {"slug": "safe", "url": "https://safe.iyou.me", "status": "DEV_WIP", "repo": "https://github.com/iyou-mesh/iyou_safe", "stack": "Django 5.2 / Ed25519 / Crisis Triage", "mission": "Key Escrow & Emergency Recovery", "color": "rose"}, "talk": {"slug": "talk", "url": "https://talk.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_talk", "stack": "Django 5.2 / Prosody XMPP / Jitsi Meet", "mission": "P2P Encrypted Comms & Peer Support", "color": "cyan"}, "clar": {"slug": "clar", "url": "https://clar.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_clar", "stack": "Django 5.2 / SQLite / Attestation Ledger", "mission": "Verification & Auditing Ledger", "color": "emerald"}, "play": {"slug": "play", "url": "https://play.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_play", "stack": "Django 5.2 / Geohash / Athletic Coordination", "mission": "Athletics Master & Sovereign Events", "color": "amber"}, "blog": {"slug": "blog", "url": "https://blog.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_blog", "stack": "Django 6.0 / Blossom / Kind 30023 Markdown", "mission": "Censorship-Resistant Sovereign Publishing", "color": "sky"}, "help": {"slug": "help", "url": "https://help.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_help", "stack": "Django 6.0 / WhiteNoise / Diagnostic Reports", "mission": "Help, Documentation & User Guidance", "color": "red"}, "draw": {"slug": "draw", "url": "https://draw.iyou.me", "status": "BETA", "repo": "https://github.com/iyou-mesh/iyou_draw", "stack": "Django 5.2 / Konva Canvas / Blossom Media", "mission": "Visual Creation Studio", "color": "fuchsia"}, "life": {"slug": "life", "url": "https://life.iyou.me", "status": "DEV_WIP", "repo": "https://github.com/iyou-mesh/iyou_life", "stack": "Django 5.2 / Legacy Archive / SQLite", "mission": "Memorial & Sovereign Legacy Archive", "color": "sky"}, "walk": {"slug": "walk", "url": "https://walk.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_walk", "stack": "Django 5.2 / Pedestrian Mesh / Geohash", "mission": "Pedestrian Navigation & Sovereign Mesh", "color": "green"}, "stay": {"slug": "stay", "url": "https://stay.iyou.me", "status": "DEV_WIP", "repo": "https://github.com/iyou-mesh/iyou_stay", "stack": "Django 5.2 / Sovereign Spaces / SQLite", "mission": "Hospitality & Sovereign Spaces", "color": "yellow"}, "dev": {"slug": "dev", "url": "https://dev.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_dev", "stack": "Django 5.2 / Developer Portal / API Hub", "mission": "Mesh Operations & Developer Portal", "color": "zinc"}, "spot": {"slug": "spot", "url": "https://spot.iyou.me", "status": "DEV_WIP", "repo": "https://github.com/iyou-mesh/iyou_spot", "stack": "Django 5.2 / Discovery / Geolocation", "mission": "Local Geolocation & Community Discovery", "color": "pink"}, "baba": {"slug": "baba", "url": "https://baba.iyou.me", "status": "INCUBATING", "repo": "https://github.com/iyou-mesh/iyou_baba", "stack": "Django 5.2 / Sticker Vault & Foundry", "mission": "Sovereign Sticker Vault & Curation Foundry", "color": "blue"}};
+
+  function openEcosystemModal(slug, e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const meta = ECOSYSTEM_REGISTRY[slug];
+    if (!meta) return;
+
+    const modal = document.getElementById('ecosystem-intercept-modal');
+    if (!modal) return;
+
+    document.getElementById('eco-modal-slug').textContent = slug;
+    document.getElementById('eco-modal-mission').textContent = meta.mission;
+    document.getElementById('eco-modal-repo-link').href = meta.repo;
+    document.getElementById('eco-modal-stack-text').textContent = meta.stack;
+
+    const isIncubating = meta.status === 'INCUBATING';
+    const headline = document.getElementById('eco-modal-headline');
+    const badge = document.getElementById('eco-modal-badge');
+    const statusText = document.getElementById('eco-modal-status-text');
+
+    if (isIncubating) {
+      headline.textContent = 'Seeking Sovereign Co-Developers';
+      badge.textContent = 'INCUBATING';
+      badge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/20 text-teal-400 dark:bg-teal-500/30 dark:text-teal-600 border border-teal-500/30';
+      statusText.textContent = 'Incubating • Seeking Co-Developers';
+    } else {
+      headline.textContent = 'Under Sovereign Construction';
+      badge.textContent = 'DEV_WIP';
+      badge.className = 'px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 dark:bg-amber-500/30 dark:text-amber-600 border border-amber-500/30';
+      statusText.textContent = 'Under Active Sovereign Construction';
+    }
+
+    let targetUrl = meta.url;
+    try {
+      const host = window.location.hostname.toLowerCase();
+      const match = host.match(/^([a-z0-9-]+(?:\.[a-z0-9-]+)*)\.(?:[a-z0-9_-]+)\.iyou\.me$/);
+      if (match) {
+        const scope = match[1];
+        const reserved = ['api', 'admin', 'ws', 'relay', 'localhost', '127.0.0.1', 'auth', 'media', 'static', 'blossom'];
+        if (!reserved.includes(scope) && slug !== 'idp' && slug !== 'dev') {
+          targetUrl = 'https://' + scope + '.' + slug + '.iyou.me/';
+        }
+      }
+    } catch (err) {}
+
+    const adminContainer = document.getElementById('eco-modal-admin-container');
+    if (adminContainer) {
+      if (window.IS_STAFF_ADMIN) {
+        adminContainer.innerHTML = `
+          <span class="text-emerald-500 font-semibold flex items-center gap-1">
+            <span>●</span> Staff / Admin Key Verified
+          </span>
+          <a href="${targetUrl}" class="text-violet-400 hover:text-violet-300 dark:text-violet-600 underline font-bold">
+            Admin Bypass: Enter Node ↗
+          </a>
+        `;
+      } else {
+        adminContainer.innerHTML = `
+          <span class="text-slate-500 dark:text-slate-400 italic">Admin Key required for early access</span>
+          <a href="https://iyou.me/" class="text-slate-400 hover:text-slate-200 dark:text-slate-600 dark:hover:text-slate-900 underline font-bold">
+            Authenticate 🔑
+          </a>
+        `;
+      }
+    }
+
+    const bar = document.getElementById('sovereign-ecosystem-topbar');
+    if (bar) {
+      bar.style.transform = 'none';
+    }
+    modal.classList.remove('hidden');
+  }
+
+  function closeEcosystemModal(e) {
+    if (e) e.stopPropagation();
+    const modal = document.getElementById('ecosystem-intercept-modal');
+    if (modal) modal.classList.add('hidden');
+    const bar = document.getElementById('sovereign-ecosystem-topbar');
+    if (bar) {
+      bar.style.transform = '';
+    }
+  }
+
+  function handleModalBackdropClick(e) {
+    if (e.target.id === 'ecosystem-intercept-modal') {
+      closeEcosystemModal();
+    }
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' || e.key === 'Esc') {
+      closeEcosystemModal();
+    }
+  });
+
+  window.openEcosystemModal = openEcosystemModal;
+  window.closeEcosystemModal = closeEcosystemModal;
+  window.handleModalBackdropClick = handleModalBackdropClick;
+
   function openEcosystemBar() {
     const bar = document.getElementById('sovereign-ecosystem-topbar');
     if (!bar) return;
@@ -75,6 +290,8 @@
 
   function closeEcosystemBar(e) {
     if (e) e.stopPropagation();
+    const modal = document.getElementById('ecosystem-intercept-modal');
+    if (modal && !modal.classList.contains('hidden')) return;
     const bar = document.getElementById('sovereign-ecosystem-topbar');
     if (!bar) return;
     bar.classList.remove('translate-y-0');
