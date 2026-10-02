@@ -355,6 +355,125 @@ class ProcessIntoFeedTest(TestCase):
         }, request=req_global)
         self.assertIn("https://poly.iyou.me/dockets/docket-ordinance-101/", html_global)
 
+    def test_is_renderable_note_kind_30023_empty_content(self):
+        from apps.core.nip10 import is_renderable_note
+
+        # 1. Kind 30023 with empty content but title tag -> True
+        event_title = {
+            "kind": 30023,
+            "content": "   ",
+            "tags": [["title", "Civic Ordinance 101"], ["option", "Yes"], ["option", "No"]],
+        }
+        self.assertTrue(is_renderable_note(event_title))
+
+        # 2. Kind 30023 with empty content and poll_options -> True
+        event_options = {
+            "kind": 30023,
+            "content": "",
+            "poll_options": ["Option A", "Option B"],
+        }
+        self.assertTrue(is_renderable_note(event_options))
+
+        # 3. Kind 30023 with empty content and option tags -> True
+        event_opt_tags = {
+            "kind": 30023,
+            "content": "",
+            "tags": [["option", "Approve"]],
+        }
+        self.assertTrue(is_renderable_note(event_opt_tags))
+
+        # 4. Kind 30023 with empty content and neither title nor options -> False
+        event_blank = {
+            "kind": 30023,
+            "content": "",
+            "tags": [],
+        }
+        self.assertFalse(is_renderable_note(event_blank))
+
+    def test_fetch_thread_fetches_kind_1112_and_populates_votes(self):
+        from apps.core.views import fetch_thread
+
+        poll_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        voter1_pk = "32e1827635450ebb3c5a7d12c1f8e7b2b514439ac10a67eef3d9fd9c5c68e245"
+        voter2_pk = "0000000000000000000000000000000000000000000000000000000000000002"
+        commenter_pk = "1111111111111111111111111111111111111111111111111111111111111111"
+
+        poll_event = make_event("civic_poll_hero", 30023, pubkey=poll_pk, content="County library bond?", tags=[
+            ["title", "County Library Bond"],
+            ["option", "Yes"],
+            ["option", "No"],
+            ["d", "docket-library-bond"],
+            ["docket", "dkc-ordinance-2026-09"],
+        ])
+        comment_event = make_event("comment_1", 1111, pubkey=commenter_pk, content="I support this", tags=[
+            ["e", "civic_poll_hero", "", "root"],
+            ["p", poll_pk, "", "reply"],
+        ])
+        vote1 = make_event("vote_1", 1112, pubkey=voter1_pk, content='{"selection": "Yes"}', tags=[
+            ["e", "civic_poll_hero"],
+            ["vote", "Yes"],
+        ])
+        vote2 = make_event("vote_2", 1112, pubkey=voter2_pk, content='{"selection": "Yes"}', tags=[
+            ["e", "civic_poll_hero"],
+            ["vote", "Yes"],
+        ])
+
+        recorded_queries = []
+        def mock_relay_req(filter_obj, **kwargs):
+            recorded_queries.append(filter_obj)
+            if filter_obj.get("ids") == ["civic_poll_hero"]:
+                return {"civic_poll_hero": poll_event}
+            if "#e" in filter_obj and "civic_poll_hero" in filter_obj["#e"]:
+                if 1112 in filter_obj.get("kinds", []):
+                    return {
+                        "comment_1": comment_event,
+                        "vote_1": vote1,
+                        "vote_2": vote2,
+                    }
+                return {}
+            return {}
+
+        with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
+            result = fetch_thread("civic_poll_hero")
+
+        descendant_queries = [q for q in recorded_queries if "#e" in q and 1112 in q.get("kinds", [])]
+        self.assertTrue(len(descendant_queries) >= 1)
+        self.assertIn(1112, descendant_queries[0]["kinds"])
+
+        hero = result["thread_root"]
+        self.assertIsNotNone(hero)
+        self.assertEqual(hero["id"], "civic_poll_hero")
+        self.assertEqual(len(hero.get("votes", [])), 2)
+        self.assertEqual(hero.get("total_votes"), 2)
+        self.assertEqual(hero.get("vote_counts", {}).get("Yes"), 2)
+        self.assertEqual(len(hero.get("replies", [])), 1)
+        self.assertEqual(hero["replies"][0]["id"], "comment_1")
+
+    def test_parse_nip10_tags_and_tree_fallback_a_tag(self):
+        from apps.core.nip10 import parse_nip10_tags, build_thread_tree
+
+        a_tag = ["a", "30023:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:docket-abc"]
+        root_id, parent_id, marker, mention_ids, reply_to_pk = parse_nip10_tags([a_tag])
+        self.assertEqual(root_id, "30023:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:docket-abc")
+        self.assertEqual(parent_id, "30023:3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d:docket-abc")
+
+        poll_pk = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        events = {
+            "poll_root": make_event("poll_root", 30023, pubkey=poll_pk, content="Park tax referendum?", tags=[
+                ["d", "docket-abc"],
+                ["option", "Support"],
+                ["option", "Oppose"],
+            ]),
+            "comment_a": make_event("comment_a", 1111, content="Strongly support!", tags=[
+                a_tag,
+            ]),
+        }
+        tree = build_thread_tree(events)
+        self.assertEqual(len(tree["roots"]), 1)
+        self.assertEqual(tree["roots"][0]["id"], "poll_root")
+        self.assertEqual(len(tree["roots"][0]["replies"]), 1)
+        self.assertEqual(tree["roots"][0]["replies"][0]["id"], "comment_a")
+
     def test_kind_1112_vote_grouped_under_parent_poll(self):
         events = {
             "poll": make_event("poll", 30023, content="Test poll?", tags=[["option", "A"]]),

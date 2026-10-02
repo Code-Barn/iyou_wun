@@ -2687,9 +2687,25 @@ def fetch_thread(thread_id, relay_urls=None, deadline=None):
     if root_id and root_id != thread_id:
         query_ids.append(root_id)
 
-    descendants_raw = relay_req({"#e": query_ids, "kinds": [1, 1111], "limit": 100}, relay_urls=relay_urls, deadline=deadline)
+    descendants_raw = relay_req({"#e": query_ids, "kinds": [1, 1111, 1112], "limit": 200}, relay_urls=relay_urls, deadline=deadline)
 
-    combined = {**pool, **descendants_raw}
+    # Separate Kind 1112 votes from pool & descendants_raw
+    votes_raw = []
+    text_descendants = {}
+    for eid, e in (descendants_raw or {}).items():
+        if e.get("kind") == 1112 or str(e.get("kind")) == "1112":
+            votes_raw.append(e)
+        else:
+            text_descendants[eid] = e
+
+    filtered_pool = {}
+    for eid, e in pool.items():
+        if e.get("kind") == 1112 or str(e.get("kind")) == "1112":
+            votes_raw.append(e)
+        else:
+            filtered_pool[eid] = e
+
+    combined = {**filtered_pool, **text_descendants}
 
     # Filter out non-renderable events (empty notes, P2P discovery beacons)
     from .nip10 import is_renderable_note
@@ -2735,6 +2751,49 @@ def fetch_thread(thread_id, relay_urls=None, deadline=None):
     thread_root = all_enriched.get(thread_id)
     if not thread_root:
         return {"thread_root": None, "ancestors": [], "roots": [], "replies": {}, "total_replies": 0}
+
+    # Attach and tally Kind 1112 votes on thread_root
+    thread_votes = []
+    for v_raw in votes_raw:
+        v_tags = v_raw.get("tags", [])
+        v_parent = get_tag_value(v_tags, "e")
+        if v_parent == thread_id or not v_parent or v_parent in query_ids:
+            vote_item = {
+                "id": v_raw.get("id", ""),
+                "kind": 1112,
+                "pubkey": v_raw.get("pubkey", ""),
+                "content": v_raw.get("content", ""),
+                "created_at": datetime.fromtimestamp(v_raw.get("created_at") or 0),
+                "vote": get_tag_value(v_tags, "vote"),
+                "tags": v_tags,
+            }
+            thread_votes.append(vote_item)
+
+    thread_root["votes"] = thread_votes
+    poll_options = thread_root.get("poll_options") or []
+    vote_counts = {opt: 0 for opt in poll_options}
+    for v in thread_votes:
+        sel = v.get("vote") or ""
+        if not sel and v.get("content"):
+            try:
+                parsed = json.loads(v["content"])
+                sel = parsed.get("selection") or parsed.get("vote") or ""
+            except Exception:
+                pass
+        if sel and sel in vote_counts:
+            vote_counts[sel] += 1
+
+    total_votes = len(thread_votes)
+    thread_root["total_votes"] = total_votes
+    thread_root["vote_counts"] = vote_counts
+    thread_root["vote_distribution"] = [
+        {
+            "option": opt,
+            "count": vote_counts.get(opt, 0),
+            "pct": round((vote_counts.get(opt, 0) / total_votes) * 100) if total_votes > 0 else 0,
+        }
+        for opt in poll_options
+    ]
 
     # 2. Ancestor Resolution: Build strictly ordered list [root, …, grandparent, parent]
     #    (Phase 16.2) bounded by the recursion safety limit, then ordered
@@ -3386,8 +3445,36 @@ def process_into_feed(raw_events, profiles=None, max_items=50, use_thread_tree=T
                 "pubkey": v_raw.get("pubkey", ""),
                 "content": v_raw.get("content", ""),
                 "created_at": _ts_to_dt(v_raw.get("created_at", 0)),
+                "vote": get_tag_value(tags, "vote"),
             }
             root_by_id[parent_id].setdefault("votes", []).append(item)
+
+    # Tally votes for poll cards
+    for r in roots:
+        if r.get("kind") == 30023 and r.get("poll_options"):
+            r_votes = r.get("votes") or []
+            v_counts = {opt: 0 for opt in r["poll_options"]}
+            for v in r_votes:
+                sel = v.get("vote") or ""
+                if not sel and v.get("content"):
+                    try:
+                        parsed = json.loads(v["content"])
+                        sel = parsed.get("selection") or parsed.get("vote") or ""
+                    except Exception:
+                        pass
+                if sel and sel in v_counts:
+                    v_counts[sel] += 1
+            tot = len(r_votes)
+            r["total_votes"] = tot
+            r["vote_counts"] = v_counts
+            r["vote_distribution"] = [
+                {
+                    "option": opt,
+                    "count": v_counts.get(opt, 0),
+                    "pct": round((v_counts.get(opt, 0) / tot) * 100) if tot > 0 else 0,
+                }
+                for opt in r["poll_options"]
+            ]
 
     # Add orphan Kind 1111 replies as standalone root items
     for pid, replies in reply_map.items():

@@ -58,6 +58,13 @@
             }
         }
 
+        // Kind 30023 polls may carry empty content if question and options are in tags
+        if (note.kind === 30023 || note.kind === "30023") {
+            var hasTitle = !!(note.title || (Array.isArray(tags) && tags.some(function (t) { return t && t[0] === "title" && t[1]; })));
+            var hasOptions = !!(note.poll_options || (Array.isArray(tags) && tags.some(function (t) { return t && t[0] === "option" && t[1]; })));
+            if (hasTitle || hasOptions) return true;
+        }
+
         return false;
     }
 
@@ -439,6 +446,9 @@
             ["p", parentPubkey || "", ""],
             ["p", pk, ""],
         ];
+        if (window.GEOGRAPHIC_SCOPE) {
+            tags.push(["geo", window.GEOGRAPHIC_SCOPE]);
+        }
 
         var event = {
             kind: 1111,

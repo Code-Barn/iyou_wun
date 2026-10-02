@@ -227,6 +227,18 @@ def is_renderable_note(event: dict) -> bool:
                 return True
         return False
 
+    # Kind 30023 poll definitions (NIP-69 / Paper of Record) may carry empty content
+    # if question and options are encoded purely in tags or pre-enriched attributes.
+    if kind == 30023 or event.get("kind") == 30023:
+        from .views import get_tag_value
+        has_title = bool(event.get("title") or get_tag_value(tags, "title"))
+        has_options = bool(
+            event.get("poll_options")
+            or any(isinstance(t, (list, tuple)) and len(t) >= 2 and t[0] == "option" for t in tags)
+        )
+        if has_title or has_options:
+            return True
+
     # Suppress P2P mesh discovery tags and multiaddr beacons
     p2p_tags = {"miasma-peer", "p2p-beacon", "relay-ping", "node-discovery"}
     for tag in tags:
@@ -626,6 +638,18 @@ def parse_nip10_tags(tags):
         elif parent_id and not root_id:
             root_id = parent_id
 
+    # Fallback thread parsing for NIP-33 'a' tags (e.g. 30023:<pubkey>:<dtag>)
+    if not root_id:
+        for tag in tags:
+            if tag and len(tag) > 1 and tag[0] == "a":
+                a_val = str(tag[1]).strip()
+                parts = a_val.split(":", 2)
+                if len(parts) == 3 and parts[0] == "30023":
+                    root_id = a_val
+                    if not parent_id:
+                        parent_id = a_val
+                    break
+
     return root_id, parent_id, reply_marker, mention_ids, reply_to_pubkey
 
 
@@ -938,7 +962,14 @@ def build_thread_tree(raw_events, profiles=None):
     # Attach direct replies and recursive reply counts to root notes
     root_ids = set(seen_root_ids)
     for root in roots:
-        direct_replies = reply_map.get(root["id"], [])
+        direct_replies = list(reply_map.get(root["id"], []))
+        if root.get("kind") == 30023 and root.get("poll_d_tag"):
+            a_addr = f"30023:{root.get('pubkey')}:{root['poll_d_tag']}"
+            root_ids.add(a_addr)
+            for rep in reply_map.get(a_addr, []):
+                if rep not in direct_replies:
+                    direct_replies.append(rep)
+            direct_replies.sort(key=lambda n: n["created_at"])
         root["replies"] = direct_replies
         root["reply_count"] = _count_all_replies(root["id"], reply_map) or len(direct_replies)
 
