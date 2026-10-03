@@ -50,7 +50,17 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             return UserModel.objects.none()
         return UserModel.objects.filter(username=sub)
 
+    def get_userinfo(self, access_token, id_token, payload):
+        user_info = super().get_userinfo(access_token, id_token, payload)
+        if isinstance(user_info, dict) and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            public_emails = user_info.get("public_emails", [])
+            self.request.session["verified_public_emails"] = public_emails
+        return user_info
+
     def get_or_create_user(self, access_token, id_token, payload):
+        if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            if payload and isinstance(payload, dict) and "public_emails" in payload:
+                self.request.session["verified_public_emails"] = payload.get("public_emails", [])
         if payload and "dep" in payload:
             dep_claim = payload.get("dep")
             if isinstance(dep_claim, dict) and dep_claim.get("revoked") is True:
@@ -80,21 +90,27 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         user.set_unusable_password()
         user.save()
         logger.info(f"Created new sovereign user via OIDC: {sub}")
-        if claims and "dep" in claims and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
-            from .context import store_dependent_context
-            try:
-                store_dependent_context(self.request.session, claims)
-            except Exception as e:
-                logger.debug(f"Failed to store dependent context in create_user: {e}")
+        if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            if claims and isinstance(claims, dict) and "public_emails" in claims:
+                self.request.session["verified_public_emails"] = claims.get("public_emails", [])
+            if claims and "dep" in claims:
+                from .context import store_dependent_context
+                try:
+                    store_dependent_context(self.request.session, claims)
+                except Exception as e:
+                    logger.debug(f"Failed to store dependent context in create_user: {e}")
         return self._evaluate_admin_elevation(user, claims)
 
     def update_user(self, user, claims):
-        if claims and "dep" in claims and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
-            from .context import store_dependent_context
-            try:
-                store_dependent_context(self.request.session, claims)
-            except Exception as e:
-                logger.debug(f"Failed to store dependent context in update_user: {e}")
+        if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            if claims and isinstance(claims, dict) and "public_emails" in claims:
+                self.request.session["verified_public_emails"] = claims.get("public_emails", [])
+            if claims and "dep" in claims:
+                from .context import store_dependent_context
+                try:
+                    store_dependent_context(self.request.session, claims)
+                except Exception as e:
+                    logger.debug(f"Failed to store dependent context in update_user: {e}")
         return self._evaluate_admin_elevation(user, claims)
 
     def get_username(self, claims):

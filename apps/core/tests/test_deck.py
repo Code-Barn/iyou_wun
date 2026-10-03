@@ -952,3 +952,237 @@ class Phase37NIP05DerivationTest(TestCase):
             discriminator=0
         )
         self.assertEqual(deck.nip05, "alice@iyou.me")
+
+
+class VerifiedEmailBadgeTests(TestCase):
+    """
+    Unit tests asserting:
+    - Email link items matching verified OIDC claims receive verification badges.
+    - Arbitrary unverified email link items remain unbadged.
+    - External viewers see verified badges on public profiles.
+    - OIDC userinfo extraction captures public_emails in session.
+    """
+
+    def setUp(self):
+        self.owner = User.objects.create_user(username="did:key:z6MkhaXgBZDvB9gEMAIL1")
+        self.deck = claim_handle(self.owner, "alice")
+        self.verified_email = "alice@example.com"
+
+    def _login_with_verified_emails(self, emails=None):
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["verified_public_emails"] = emails if emails is not None else [self.verified_email]
+        session.save()
+
+    def test_email_link_matching_verified_oidc_claim_receives_badge(self):
+        self._login_with_verified_emails(["alice@example.com"])
+        response = post_json(
+            self.client,
+            reverse("api_deck_items"),
+            {
+                "title": "Email Me",
+                "url": "mailto:alice@example.com",
+                "icon_category": "email",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        item_data = response.json()["item"]
+        self.assertTrue(item_data["is_verified_claim"])
+        self.assertEqual(item_data["icon_category"], "email")
+
+        # Assert persisted to DB
+        item = UserLinkItem.objects.get(id=item_data["id"])
+        self.assertTrue(item.is_verified_claim)
+
+    def test_arbitrary_unverified_email_link_remains_unbadged(self):
+        self._login_with_verified_emails(["alice@example.com"])
+        response = post_json(
+            self.client,
+            reverse("api_deck_items"),
+            {
+                "title": "Unverified Email",
+                "url": "mailto:attacker@malicious.com",
+                "icon_category": "email",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        item_data = response.json()["item"]
+        self.assertFalse(item_data["is_verified_claim"])
+
+        item = UserLinkItem.objects.get(id=item_data["id"])
+        self.assertFalse(item.is_verified_claim)
+
+    def test_email_without_session_claims_remains_unbadged(self):
+        self.client.force_login(self.owner)
+        # Empty session, no verified_public_emails key
+        response = post_json(
+            self.client,
+            reverse("api_deck_items"),
+            {
+                "title": "Contact",
+                "url": "mailto:alice@example.com",
+                "icon_category": "email",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        item_data = response.json()["item"]
+        self.assertFalse(item_data["is_verified_claim"])
+
+    def test_email_matching_with_kind_parameter(self):
+        self._login_with_verified_emails(["alice@example.com"])
+        response = post_json(
+            self.client,
+            reverse("api_deck_items"),
+            {
+                "title": "Support",
+                "url": "mailto:alice@example.com",
+                "kind": "email",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        item_data = response.json()["item"]
+        self.assertTrue(item_data["is_verified_claim"])
+        self.assertEqual(item_data["icon_category"], "email")
+
+    def test_email_matching_case_insensitive_and_query_parameters(self):
+        self._login_with_verified_emails(["Alice.Smith@Domain.org"])
+        response = post_json(
+            self.client,
+            reverse("api_deck_items"),
+            {
+                "title": "Work Email",
+                "url": "mailto:alice.smith@domain.org?subject=Inquiry",
+                "icon_category": "email",
+            },
+        )
+        self.assertEqual(response.status_code, 201)
+        item_data = response.json()["item"]
+        self.assertTrue(item_data["is_verified_claim"])
+
+    def test_patch_updates_verification_status(self):
+        self._login_with_verified_emails(["alice@example.com"])
+        item = UserLinkItem.objects.create(
+            deck=self.deck,
+            title="Initial Email",
+            url="mailto:alice@example.com",
+            icon_category="email",
+            is_verified_claim=True,
+        )
+
+        # Update to an unverified email address -> drops verification
+        response = patch_json(
+            self.client,
+            reverse("api_deck_item_detail", kwargs={"pk": item.id}),
+            {"url": "mailto:other@unknown.com"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["item"]["is_verified_claim"])
+        item.refresh_from_db()
+        self.assertFalse(item.is_verified_claim)
+
+        # Update back to verified address -> re-verifies
+        response = patch_json(
+            self.client,
+            reverse("api_deck_item_detail", kwargs={"pk": item.id}),
+            {"url": "mailto:alice@example.com"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["item"]["is_verified_claim"])
+        item.refresh_from_db()
+        self.assertTrue(item.is_verified_claim)
+
+    def test_external_viewers_see_verified_badge_on_public_deck(self):
+        UserLinkItem.objects.create(
+            deck=self.deck,
+            title="Verified Work Email",
+            url="mailto:alice@example.com",
+            icon_category="email",
+            is_verified_claim=True,
+            order=1,
+        )
+        UserLinkItem.objects.create(
+            deck=self.deck,
+            title="Unverified Personal Email",
+            url="mailto:anon@proton.me",
+            icon_category="email",
+            is_verified_claim=False,
+            order=2,
+        )
+
+        # Ensure viewer is logged out (external anonymous user)
+        self.client.logout()
+
+        # 1. Test canonical public handle page /@alice
+        response = self.client.get(f"/@{self.deck.handle}")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("✓ Verified via iyou_idp", content)
+        self.assertIn("Proof of ownership verified via iyou_idp", content)
+
+        # 2. Test JSON view of deck items without leaking private session
+        response_json = self.client.get(f"/@{self.deck.handle}?format=json")
+        self.assertEqual(response_json.status_code, 200)
+        items = response_json.json()["items"]
+        verified_items = [i for i in items if i["title"] == "Verified Work Email"]
+        unverified_items = [i for i in items if i["title"] == "Unverified Personal Email"]
+        self.assertTrue(verified_items[0]["is_verified_claim"])
+        self.assertFalse(unverified_items[0]["is_verified_claim"])
+
+    def test_external_viewers_see_verified_badge_on_public_profile(self):
+        UserLinkItem.objects.create(
+            deck=self.deck,
+            title="Verified Email Link",
+            url="mailto:alice@example.com",
+            icon_category="email",
+            is_verified_claim=True,
+        )
+
+        self.client.logout()
+        npub = did_to_npub(self.owner.username)
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode("utf-8")
+        self.assertIn("✓ Verified via iyou_idp", content)
+        self.assertIn("Proof of ownership verified via iyou_idp", content)
+
+    def test_oidc_userinfo_extraction_records_verified_public_emails(self):
+        from apps.core.auth import MyOIDCAuthenticationBackend
+        from apps.core.auth_pkce import PKCEAuthenticationBackend
+        from django.test.client import RequestFactory
+
+        rf = RequestFactory()
+        request = rf.get("/oidc/callback/")
+        request.session = self.client.session
+
+        backend = MyOIDCAuthenticationBackend()
+        backend.request = request
+
+        user_info = {
+            "sub": "did:key:z6Mkoidcemailtest",
+            "public_emails": ["verified.user@company.com"],
+        }
+        with patch.object(
+            MyOIDCAuthenticationBackend,
+            "get_userinfo",
+            wraps=backend.get_userinfo,
+        ):
+            with patch("mozilla_django_oidc.auth.OIDCAuthenticationBackend.get_userinfo", return_value=user_info):
+                result = backend.get_userinfo("access_tok", "id_tok", {})
+                self.assertEqual(result["public_emails"], ["verified.user@company.com"])
+                self.assertEqual(
+                    request.session.get("verified_public_emails"),
+                    ["verified.user@company.com"],
+                )
+
+        # Test PKCEAuthenticationBackend as well
+        pkce_backend = PKCEAuthenticationBackend()
+        pkce_backend.request = request
+        with patch("mozilla_django_oidc.auth.OIDCAuthenticationBackend.get_userinfo", return_value=user_info):
+            result_pkce = pkce_backend.get_userinfo("access_tok", "id_tok", {})
+            self.assertEqual(result_pkce["public_emails"], ["verified.user@company.com"])
+            self.assertEqual(
+                request.session.get("verified_public_emails"),
+                ["verified.user@company.com"],
+            )
+

@@ -141,6 +141,15 @@ class Bookmark(models.Model):
         return f"<Bookmark {self.user.username} -> {self.event_id[:16]}...>"
 
 
+class UserLinkItemQuerySet(models.QuerySet):
+    def filter(self, *args, **kwargs):
+        if "kind" in kwargs:
+            kwargs["icon_category"] = kwargs.pop("kind")
+        if "kind__in" in kwargs:
+            kwargs["icon_category__in"] = kwargs.pop("kind__in")
+        return super().filter(*args, **kwargs)
+
+
 class UserLinkItem(models.Model):
     ICON_CATEGORY_CHOICES = [
         ("x", "X"),
@@ -152,6 +161,7 @@ class UserLinkItem(models.Model):
         ("poly", "Poly"),
         ("gallery", "Gallery"),
         ("link", "Link"),
+        ("email", "Email"),
     ]
 
     deck = models.ForeignKey(UserLinkDeck, on_delete=models.CASCADE, related_name="items")
@@ -163,16 +173,89 @@ class UserLinkItem(models.Model):
     is_ecosystem_link = models.BooleanField(default=False)
     order = models.PositiveIntegerField(default=0)
     is_active = models.BooleanField(default=True)
+    is_verified_claim = models.BooleanField(default=False)
+
+    objects = UserLinkItemQuerySet.as_manager()
 
     class Meta:
         ordering = ["order", "id"]
+
+    def __init__(self, *args, **kwargs):
+        if "kind" in kwargs and "icon_category" not in kwargs:
+            kwargs["icon_category"] = kwargs.pop("kind")
+        super().__init__(*args, **kwargs)
 
     def __str__(self):
         return f"<UserLinkItem {self.title} -> {self.url}>"
 
     @property
+    def kind(self):
+        return self.icon_category
+
+    @kind.setter
+    def kind(self, value):
+        self.icon_category = value
+
+    @property
     def icon_emoji(self):
         return ICON_EMOJIS.get(self.icon_category, "🔗")
+
+    @property
+    def email_address(self):
+        raw = (self.url or "").strip()
+        if raw.lower().startswith("mailto:"):
+            raw = raw[7:]
+        if "?" in raw:
+            raw = raw.split("?", 1)[0]
+        return raw.strip().lower()
+
+    @property
+    def is_email(self):
+        return (
+            self.icon_category == "email"
+            or (self.url or "").strip().lower().startswith("mailto:")
+        )
+
+    def verify_against_claims(self, verified_emails):
+        """
+        Verify mailto: or email link item against verified public emails from OIDC claim.
+        Sets is_verified_claim = True if matched, False otherwise.
+        """
+        if not self.is_email:
+            self.is_verified_claim = False
+            return False
+
+        addr = self.email_address
+        if not addr or not verified_emails:
+            self.is_verified_claim = False
+            return False
+
+        normalized = set()
+        if isinstance(verified_emails, str):
+            verified_emails = [verified_emails]
+        for e in verified_emails:
+            if isinstance(e, str):
+                cleaned = e.strip().lower()
+                if cleaned.startswith("mailto:"):
+                    cleaned = cleaned[7:].split("?", 1)[0].strip()
+                normalized.add(cleaned)
+            elif isinstance(e, dict):
+                val = e.get("email") or e.get("address")
+                if val:
+                    cleaned = str(val).strip().lower()
+                    if cleaned.startswith("mailto:"):
+                        cleaned = cleaned[7:].split("?", 1)[0].strip()
+                    normalized.add(cleaned)
+
+        if addr in normalized:
+            self.is_verified_claim = True
+            return True
+
+        self.is_verified_claim = False
+        return False
+
+    def check_email_verified(self, verified_emails):
+        return self.verify_against_claims(verified_emails)
 
 
 ICON_EMOJIS = {
@@ -185,6 +268,7 @@ ICON_EMOJIS = {
     "poly": "\U0001F5F3\uFE0F",
     "gallery": "\U0001F5BC\uFE0F",
     "link": "\U0001F517",
+    "email": "✉️",
 }
 
 

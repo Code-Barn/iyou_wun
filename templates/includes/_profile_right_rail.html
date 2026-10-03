@@ -24,6 +24,9 @@
           {% if item.is_ecosystem_link %}
           <span class="shrink-0 text-[9px] uppercase bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 px-1 py-0.5 rounded-full border border-violet-200 dark:border-violet-800/60">mesh</span>
           {% endif %}
+          {% if item.is_verified_claim %}
+          <span class="shrink-0 text-[9px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 px-1 py-0.5 rounded" title="Proof of ownership verified via iyou_idp">✓ Verified</span>
+          {% endif %}
         </span>
         <span class="shrink-0 text-slate-400">↗</span>
       </a>

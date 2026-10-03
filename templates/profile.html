@@ -126,6 +126,15 @@
           </span>
           {% endif %}
 
+          {% for item in deck_items %}
+            {% if item.is_verified_claim %}
+            <a href="{{ item.url }}" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0 hover:opacity-90 transition" title="Proof of ownership verified via iyou_idp">
+              <span>✉️</span>
+              <span>✓ Verified via iyou_idp</span>
+            </a>
+            {% endif %}
+          {% endfor %}
+
           <span class="author-badge-slot shrink-0" data-author-slot="{{ target_pubkey_hex }}"></span>
         </div>
 
@@ -254,6 +263,11 @@
         <span class="font-medium text-sm text-slate-800 dark:text-slate-200 truncate">{{ item.title }}</span>
         {% if item.is_ecosystem_link %}
         <span class="text-[10px] uppercase font-mono bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded-full border border-violet-200 dark:border-violet-800/60">mesh</span>
+        {% endif %}
+        {% if item.is_verified_claim %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0" title="Proof of ownership verified via iyou_idp">
+          ✓ Verified via iyou_idp
+        </span>
         {% endif %}
       </span>
       <span class="text-xs font-mono text-slate-400">↗</span>

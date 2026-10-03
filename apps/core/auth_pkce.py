@@ -79,12 +79,21 @@ class PKCEOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
     def login_success(self):
         if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
             raw_id_token = self.request.session.get("oidc_id_token")
-            if raw_id_token and "dependent_context" not in self.request.session:
-                from apps.core.context import store_dependent_context
-                try:
-                    store_dependent_context(self.request.session, raw_id_token)
-                except Exception as exc:
-                    logger.debug(f"Could not parse dependent context from oidc_id_token: {exc}")
+            if raw_id_token:
+                if "dependent_context" not in self.request.session:
+                    from apps.core.context import store_dependent_context
+                    try:
+                        store_dependent_context(self.request.session, raw_id_token)
+                    except Exception as exc:
+                        logger.debug(f"Could not parse dependent context from oidc_id_token: {exc}")
+                if "verified_public_emails" not in self.request.session:
+                    from apps.core.context import decode_jwt_unverified
+                    try:
+                        claims = decode_jwt_unverified(raw_id_token) if isinstance(raw_id_token, str) else raw_id_token
+                        if isinstance(claims, dict) and "public_emails" in claims:
+                            self.request.session["verified_public_emails"] = claims.get("public_emails", [])
+                    except Exception as exc:
+                        logger.debug(f"Could not parse public_emails from oidc_id_token: {exc}")
         return super().login_success()
 
 
@@ -105,5 +114,11 @@ class PKCEOIDCLogoutView(OIDCLogoutView):
 
 
 class PKCEAuthenticationBackend(MyOIDCAuthenticationBackend):
-    pass
+    def get_userinfo(self, access_token, id_token, payload):
+        user_info = super().get_userinfo(access_token, id_token, payload)
+        if isinstance(user_info, dict) and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            public_emails = user_info.get("public_emails", [])
+            self.request.session["verified_public_emails"] = public_emails
+        return user_info
+
 

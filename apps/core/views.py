@@ -117,6 +117,7 @@ def _serialize_deck(deck):
                 "is_ecosystem_link": item.is_ecosystem_link,
                 "order": item.order,
                 "is_active": item.is_active,
+                "is_verified_claim": item.is_verified_claim,
             }
             for item in deck.items.all()
         ],
@@ -4724,6 +4725,8 @@ def _serialize_deck_item(item):
         "is_ecosystem_link": item.is_ecosystem_link,
         "order": item.order,
         "is_active": item.is_active,
+        "is_verified_claim": getattr(item, "is_verified_claim", False),
+        "kind": item.icon_category,
     }
 
 
@@ -4800,6 +4803,7 @@ class LinkDeckView(TemplateView):
                         "icon_category": item.icon_category,
                         "is_ecosystem_link": item.is_ecosystem_link,
                         "order": item.order,
+                        "is_verified_claim": getattr(item, "is_verified_claim", False),
                     }
                     for item in items
                 ],
@@ -4914,7 +4918,9 @@ def api_deck_items(request):
 
     title = (data.get("title") or "").strip()
     url = (data.get("url") or "").strip()
-    icon_category = data.get("icon_category") or "link"
+    icon_category = data.get("icon_category") or data.get("kind") or "link"
+    if icon_category == "link" and url.lower().startswith("mailto:"):
+        icon_category = "email"
 
     if not title or len(title) > 64:
         return JsonResponse({"error": "title is required (max 64 chars)"}, status=400)
@@ -4924,13 +4930,16 @@ def api_deck_items(request):
         return JsonResponse({"error": f"unknown icon_category: {icon_category}"}, status=400)
 
     max_order = deck.items.aggregate(Max("order"))["order__max"]
-    item = UserLinkItem.objects.create(
+    item = UserLinkItem(
         deck=deck,
         title=title,
         url=url,
         icon_category=icon_category,
         order=0 if max_order is None else max_order + 1,
     )
+    verified_emails = request.session.get("verified_public_emails", [])
+    item.verify_against_claims(verified_emails)
+    item.save()
     return JsonResponse({"ok": True, "item": _serialize_deck_item(item)}, status=201)
 
 
@@ -4958,14 +4967,21 @@ def api_deck_item_detail(request, pk):
             if not url or len(url) > 2048:
                 return JsonResponse({"error": "url is required (max 2048 chars)"}, status=400)
             item.url = url
-        if "icon_category" in data:
-            if data["icon_category"] not in dict(UserLinkItem.ICON_CATEGORY_CHOICES):
+        category = data.get("icon_category") or data.get("kind")
+        if category is not None:
+            if category not in dict(UserLinkItem.ICON_CATEGORY_CHOICES):
                 return JsonResponse(
-                    {"error": f"unknown icon_category: {data['icon_category']}"}, status=400
+                    {"error": f"unknown icon_category: {category}"}, status=400
                 )
-            item.icon_category = data["icon_category"]
+            item.icon_category = category
+        if item.icon_category == "link" and item.url.lower().startswith("mailto:"):
+            item.icon_category = "email"
         if "is_active" in data:
             item.is_active = bool(data["is_active"])
+
+        verified_emails = request.session.get("verified_public_emails", [])
+        if "url" in data or "icon_category" in data or "kind" in data or "verified_public_emails" in request.session:
+            item.verify_against_claims(verified_emails)
         item.save()
         return JsonResponse({"ok": True, "item": _serialize_deck_item(item)})
 

@@ -120,6 +120,7 @@
                 '<span class="block font-mono text-[11px] text-gray-400 truncate">' + escapeHtml(item.url) + "</span>" +
                 "</span>" +
                 (item.is_ecosystem_link ? '<span class="flex-shrink-0 text-[10px] uppercase font-mono bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded-full">mesh</span>' : "") +
+                (item.is_verified_claim ? '<span class="flex-shrink-0 text-[10px] font-mono font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300 px-1.5 py-0.5 rounded" title="Proof of ownership verified via iyou_idp">✓ Verified via iyou_idp</span>' : "") +
                 '<span class="flex-shrink-0 text-[10px] uppercase font-mono ' +
                 (item.is_active ? "bg-green-100 text-green-800" : "bg-gray-200 text-gray-500") +
                 ' px-1.5 py-0.5 rounded-full">' + (item.is_active ? "on" : "off") + "</span>";
@@ -223,6 +224,9 @@
             url: (urlEl.value || "").trim(),
             icon_category: iconEl ? iconEl.value : "link",
         };
+        if (payload.icon_category === "link" && payload.url.toLowerCase().startsWith("mailto:")) {
+            payload.icon_category = "email";
+        }
         if (!payload.title || !payload.url) { showDeckStatus("Title and URL are required.", true); return false; }
         deckFetch("/api/deck/items", { method: "POST", body: JSON.stringify(payload) })
             .then(function () {

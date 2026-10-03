@@ -76,7 +76,28 @@
   <!-- Your Links Section -->
   <div class="pt-2">
     <h3 class="text-xs font-mono font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-3">Your Links</h3>
-    <div id="deckItemsList" class="space-y-2 mb-4"></div>
+    <div id="deckItemsList" class="space-y-2 mb-4">
+      {% if deck and deck.items.all %}
+        {% for item in deck.items.all %}
+        <div class="deck-item-server-card flex items-center gap-2 bg-gray-50 dark:bg-slate-900 border rounded-lg px-3 py-2 {% if item.is_active %}border-gray-200 dark:border-slate-800{% else %}border-dashed border-gray-300 opacity-60{% endif %}">
+          <span class="flex items-center gap-2 min-w-0 flex-1">
+            <span class="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded bg-white dark:bg-slate-800 border border-gray-200 dark:border-slate-700 text-sm">{{ item.icon_emoji }}</span>
+            <span class="min-w-0">
+              <span class="block text-sm font-medium text-gray-800 dark:text-gray-200 truncate">{{ item.title }}</span>
+              <span class="block font-mono text-[11px] text-gray-400 truncate">{{ item.url }}</span>
+            </span>
+            {% if item.is_ecosystem_link %}
+            <span class="flex-shrink-0 text-[10px] uppercase font-mono bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded-full">mesh</span>
+            {% endif %}
+            {% if item.is_verified_claim %}
+            <span class="flex-shrink-0 text-[10px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 px-1.5 py-0.5 rounded" title="Proof of ownership verified via iyou_idp">✓ Verified via iyou_idp</span>
+            {% endif %}
+            <span class="flex-shrink-0 text-[10px] uppercase font-mono {% if item.is_active %}bg-green-100 dark:bg-green-950/60 text-green-800 dark:text-green-300{% else %}bg-gray-200 dark:bg-slate-800 text-gray-500{% endif %} px-1.5 py-0.5 rounded-full">{% if item.is_active %}on{% else %}off{% endif %}</span>
+          </span>
+        </div>
+        {% endfor %}
+      {% endif %}
+    </div>
 
     <!-- Add Link Form -->
     <form onsubmit="return addDeckItem(event)" class="border border-slate-200 dark:border-slate-800 rounded-xl p-4 bg-slate-50/70 dark:bg-slate-950/60">
@@ -84,11 +105,12 @@
       <div class="grid grid-cols-1 sm:grid-cols-[1fr_2fr] gap-3 mb-3">
         <input type="text" id="deckItemTitle" placeholder="Title (e.g. My GitHub)" maxlength="64"
                class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
-        <input type="text" id="deckItemUrl" placeholder="https://...  |  nostr:...  |  did:..." maxlength="2048"
+        <input type="text" id="deckItemUrl" placeholder="https://...  |  mailto:...  |  nostr:...  |  did:..." maxlength="2048"
                class="w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg p-2 text-xs font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:border-violet-500" />
       </div>
       <div class="flex items-center justify-between gap-3">
         <select id="deckItemIcon" class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs font-mono text-slate-700 dark:text-slate-300 focus:outline-none focus:border-violet-500">
+          <option value="email">✉️ Email</option>
           <option value="x">𝕏 X</option>
           <option value="github">💻 GitHub</option>
           <option value="mastodon">🐘 Mastodon</option>
