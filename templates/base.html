@@ -179,10 +179,23 @@
     {% include "includes/_live_audio_tray.html" %}
     <script src="{% static 'js/live_audio_player.js' %}"></script>
 
-    <!-- Floating Chat Messenger System (Omitted on dedicated /chat page) -->
-    {% if user.is_authenticated and request.resolver_match.url_name != 'chat' %}
-      {% include "includes/_floating_chat_dock.html" %}
-      <script src="{% static 'js/floating_chat.js' %}"></script>
+    {% if user.is_authenticated %}
+      <!-- iyou_chat Sovereign Dock Integration -->
+      <script 
+        src="{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}/static/js/dock_embed.js" 
+        data-chat-origin="{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}"
+        defer>
+      </script>
+      <script>
+        window.openDockedChat = function(peer, name, avatar) {
+          if (window.IyouChatDock) {
+            window.IyouChatDock.openPeer(peer);
+          } else {
+            const chatOrigin = "{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}";
+            window.open(chatOrigin + "/?peer=" + encodeURIComponent(peer), "_blank");
+          }
+        };
+      </script>
     {% endif %}
     {% include "includes/_mobile_bottom_dock.html" %}
 

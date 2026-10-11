@@ -13,117 +13,79 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+from unittest.mock import patch
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.test import TestCase
-from django.urls import reverse
-
-from apps.core.views import did_to_pubkey
+from django.test import TestCase, override_settings
+from django.urls import NoReverseMatch, reverse
 
 User = get_user_model()
 
 FULL_HEX = "039daaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
-class ApiChatSessionTest(TestCase):
-    def test_api_chat_session_requires_auth(self):
-        response = self.client.get(reverse("api_chat_session"))
-        self.assertEqual(response.status_code, 401)
-        payload = response.json()
-        self.assertIs(payload.get("success"), False)
-
-    def test_api_chat_session_returns_canonical_jid_and_ws(self):
-        user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
-        self.client.force_login(user)
-
-        response = self.client.get(reverse("api_chat_session"))
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-
-        resolved_hex = did_to_pubkey(user.username)
-        domain = getattr(settings, "XMPP_DOMAIN", "127.0.0.1")
-        ws_url = getattr(
+class ChatRedirectViewTest(TestCase):
+    def test_chat_redirect_issues_302_to_iyou_chat_origin(self):
+        expected_origin = getattr(
             settings,
-            "XMPP_WS_URL",
-            "wss://home.iyou.me:5281/xmpp-websocket",
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
         )
-
-        self.assertEqual(payload.get("success"), True)
-        self.assertEqual(payload.get("pubkey_hex"), resolved_hex)
-        self.assertEqual(payload.get("domain"), domain)
-        self.assertEqual(payload.get("ws_url"), ws_url)
-        self.assertEqual(payload.get("jid"), f"{resolved_hex}@{domain}")
-        self.assertTrue(payload.get("jid").startswith(f"{FULL_HEX}@"))
-
-    def test_api_chat_session_secure_request_returns_wss_endpoint(self):
-        user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
-        self.client.force_login(user)
-
-        response = self.client.get(reverse("api_chat_session"), HTTP_X_FORWARDED_PROTO="https")
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-
-        # The session bootstrap feeds Converse its websocket_url; over HTTPS it
-        # must ship an encrypted non-loopback endpoint or the browser blocks it.
-        ws_url = payload.get("ws_url", "")
-        self.assertTrue(ws_url.startswith("wss://"), ws_url)
-        self.assertNotIn("127.0.0.1", ws_url)
-        self.assertIn(":5281/xmpp-websocket", ws_url)
-
-    def test_api_chat_session_persists_xmpp_token(self):
-        user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
-        self.client.force_login(user)
-
-        self.client.get(reverse("api_chat_session"))
-        session = self.client.session
-        self.assertIn("xmpp_token", session)
-        self.assertTrue(session["xmpp_token"])
-
-
-class ChatSessionBootstrapTest(TestCase):
-    def test_chat_view_renders_session_bootstrap_script(self):
-        user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
-        self.client.force_login(user)
         response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode()
-        self.assertIn("/api/chat/session/", content)
-        self.assertIn("converse.initialize", content)
-        # The bootstrap must reference the session-driven credentials.
-        self.assertIn("session.ws_url", content)
-        self.assertIn("session.jid", content)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{expected_origin}/")
+
+    def test_chat_redirect_with_peer_parameter(self):
+        expected_origin = getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
+        )
+        peer = FULL_HEX
+        response = self.client.get(f"{reverse('chat')}?peer={peer}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{expected_origin}/?peer={peer}")
+
+    @override_settings(IYOU_CHAT_ORIGIN="https://custom-chat.iyou.me")
+    def test_chat_redirect_uses_custom_origin(self):
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], "https://custom-chat.iyou.me/")
+
+    def test_chat_redirect_for_authenticated_user(self):
+        user = User.objects.create_user(username=f"did:key:z6Mk{FULL_HEX[:16]}")
+        self.client.force_login(user)
+        expected_origin = getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
+        )
+        response = self.client.get(reverse("chat"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{expected_origin}/")
 
 
-class Nip04CryptoContractTest(TestCase):
-    def test_chat_view_context_includes_nip04_bridge_contracts(self):
-        bridge_src = (settings.BASE_DIR / "static" / "js" / "bridge_client.js").read_text()
-        chat_src = (settings.BASE_DIR / "static" / "js" / "floating_chat.js").read_text()
-        for marker in (
-            "NIP04_ENCRYPT",
-            "NIP04_DECRYPT",
-            "nip04Encrypt",
-            "nip04Decrypt",
-            "encrypted_payload",
-        ):
-            self.assertIn(marker, bridge_src)
-        for marker in (
-            "nip04Encrypt",
-            "nip04Decrypt",
-            "kind: 4",
-            "NIP-04 E2EE Session",
-            "Sovereign Enclave Mesh",
-        ):
-            self.assertIn(marker, chat_src)
+class ApiChatSessionDeprecationTest(TestCase):
+    def test_api_chat_session_reverse_raises_no_reverse_match(self):
+        with self.assertRaises(NoReverseMatch):
+            reverse("api_chat_session")
 
-    def test_floating_dock_template_renders_encryption_badge_containers(self):
+    def test_api_chat_session_endpoint_returns_404(self):
+        response = self.client.get("/api/chat/session/")
+        self.assertEqual(response.status_code, 404)
+
+
+class DockEmbedIntegrationTest(TestCase):
+    def test_dock_embed_mounted_for_authenticated_users(self):
         user = User.objects.create_user(username=f"did:iyou:0x{FULL_HEX}")
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard"))
         self.assertEqual(response.status_code, 200)
-        content = response.content.decode()
-        self.assertIn('id="docked-chat-windows"', content)
-        self.assertIn('id="floating-dock-security-status"', content)
-        self.assertIn('id="dock-security-badge-e2ee"', content)
-        self.assertIn('id="dock-security-badge-mesh"', content)
-        self.assertIn("NIP-04 E2EE Session", content)
-        self.assertIn("Sovereign Enclave Mesh", content)
+        self.assertContains(response, "dock_embed.js")
+        self.assertContains(response, "data-chat-origin")
+
+    def test_dock_embed_omitted_for_anonymous_users(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "dock_embed.js")

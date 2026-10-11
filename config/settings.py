@@ -369,6 +369,10 @@ XMPP_DOMAIN = env.str("XMPP_DOMAIN", default="127.0.0.1")
 XMPP_WS_URL = env.str("XMPP_WS_URL", default="ws://127.0.0.1:5222/xmpp-websocket")
 XMPP_PASSWORD = env.str("XMPP_PASSWORD", default="")
 
+# Sovereign Messenger Satellite Origin (iyou_chat Phase 3B)
+IYOU_CHAT_ORIGIN = env("IYOU_CHAT_ORIGIN", default="http://127.0.0.1:8017" if DEBUG else "https://chat.iyou.me")
+
 # User infrastructure level: "1" = Managed (cluster), "2" = Sovereign (local enclave)
 WUN_USER_LEVEL = env.str("WUN_USER_LEVEL", default="2")
+
 

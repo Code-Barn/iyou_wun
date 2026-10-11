@@ -37,7 +37,14 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.cache import cache
 from django.db import IntegrityError, OperationalError, connection, transaction
 from django.db.models import Max, Q
-from django.http import HttpResponsePermanentRedirect, HttpResponseBadRequest, Http404, JsonResponse
+from django.http import (
+    Http404,
+    HttpResponseBadRequest,
+    HttpResponsePermanentRedirect,
+    HttpResponseRedirect,
+    JsonResponse,
+)
+
 from django.shortcuts import redirect, render
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -1108,116 +1115,16 @@ class FeedView(TemplateView):
         return super().get(request, *args, **kwargs)
 
 
-def resolve_xmpp_endpoints(request=None):
-    """Resolve a mixed-content-safe Converse WebSocket endpoint for a request.
-
-    Browsers block unencrypted ``ws://`` sockets inside HTTPS origins, and
-    ``127.0.0.1`` embedded in a production URL resolves on the visitor's own
-    machine rather than the Prosody host. Over HTTPS, loopback-configured
-    ``XMPP_WS_URL`` values are therefore remapped to the ``chat`` subdomain of
-    ``BASE_DOMAIN`` (falling back to the request host), non-loopback endpoints
-    are upgraded from ``ws://`` to ``wss://``, and the loopback default is only
-    kept for plain-HTTP requests.
-
-    Returns ``(is_secure, ws_url, domain)`` so ChatView and the session
-    bootstrap API agree on a single endpoint.
-    """
-    is_secure = bool(request) and (
-        request.is_secure() or request.headers.get("X-Forwarded-Proto") == "https"
+def chat_redirect_view(request):
+    chat_origin = getattr(
+        settings,
+        "IYOU_CHAT_ORIGIN",
+        "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
     )
-    host = request.get_host().split(":")[0] if request else ""
-    env_ws_url = getattr(settings, "XMPP_WS_URL", "")
+    peer = request.GET.get("peer")
+    target = f"{chat_origin}/?peer={peer}" if peer else f"{chat_origin}/"
+    return HttpResponseRedirect(target)
 
-    if is_secure:
-        if "127.0.0.1" in env_ws_url or "localhost" in env_ws_url:
-            base_domain = getattr(settings, "BASE_DOMAIN", "") or (
-                host
-                if host and host not in ("127.0.0.1", "localhost") and "." in host
-                else "iyou.me"
-            )
-            xmpp_ws_url = f"wss://chat.{base_domain}:5281/xmpp-websocket"
-        else:
-            xmpp_ws_url = env_ws_url.replace("ws://", "wss://")
-    else:
-        xmpp_ws_url = env_ws_url or "ws://127.0.0.1:5222/xmpp-websocket"
-
-    xmpp_domain = getattr(settings, "XMPP_DOMAIN", "iyou.me" if is_secure else "127.0.0.1")
-    return is_secure, xmpp_ws_url, xmpp_domain
-
-
-@method_decorator(ensure_csrf_cookie, name='dispatch')
-class ChatView(LoginRequiredMixin, TemplateView):
-    template_name = "chat.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        is_auth = self.request.user.is_authenticated
-        user_pubkey = get_effective_user_pubkey(self.request) if is_auth else ""
-        context["user_pubkey"] = user_pubkey
-        context["user_did"] = self.request.user.username if is_auth else ""
-
-        level = getattr(settings, "WUN_USER_LEVEL", "2")
-        context["user_level"] = level
-
-        # RFC 7622 nodeprep-compliant localpart: lowercase hex, no colons.
-        context["user_pubkey_hex"] = user_pubkey
-
-        _, xmpp_ws_url, xmpp_domain = resolve_xmpp_endpoints(self.request)
-        context["xmpp_domain"] = xmpp_domain
-        context["xmpp_ws_url"] = xmpp_ws_url
-        context["xmpp_bosh_url"] = getattr(settings, "XMPP_BOSH_URL", "")
-
-        user_jid = ""
-        if user_pubkey:
-            user_jid = f"{user_pubkey}@{xmpp_domain}"
-        elif is_auth and self.request.user.username:
-            user_jid = f"{self.request.user.username}@{xmpp_domain}"
-
-        xmpp_token = getattr(settings, "XMPP_PASSWORD", "") or user_pubkey
-        context["user_jid"] = user_jid
-        context["xmpp_token"] = xmpp_token
-        context["xmpp_password"] = xmpp_token
-
-        peer = self.request.GET.get("peer", "").strip()
-        context["peer_target"] = peer
-        return context
-
-
-
-
-def api_chat_session(request):
-    """Return an authenticated XMPP session bootstrap payload (JID, WS/BOSH URLs, pubkey hex)."""
-    if not request.user.is_authenticated:
-        return JsonResponse(
-            {"success": False, "error": "Authentication required."}, status=401
-        )
-
-    pubkey_hex = get_effective_user_pubkey(request)
-
-    _, xmpp_ws_url, xmpp_domain = resolve_xmpp_endpoints(request)
-
-    jid = f"{pubkey_hex}@{xmpp_domain}" if pubkey_hex else ""
-
-    token = request.session.get("xmpp_token")
-    if not token:
-        token = request.session.get("_auth_user_hash")
-        if not token:
-            token = hashlib.sha256(
-                (pubkey_hex or request.user.username or str(time.time())).encode()
-            ).hexdigest()
-        request.session["xmpp_token"] = token
-
-    return JsonResponse(
-        {
-            "success": True,
-            "jid": jid,
-            "ws_url": xmpp_ws_url,
-            "bosh_url": getattr(settings, "XMPP_BOSH_URL", ""),
-            "domain": xmpp_domain,
-            "pubkey_hex": pubkey_hex,
-            "token": token,
-        }
-    )
 
 
 @login_required
@@ -4513,6 +4420,8 @@ class ProfileView(TemplateView):
         context["hex_pubkey"] = hex_pubkey or ""
         context["target_pubkey_hex"] = hex_pubkey or ""
         context["target_nostr_pubkey_hex"] = hex_pubkey or ""
+        context["profile_pubkey_hex"] = hex_pubkey or ""
+
         # Never echo the raw URL segment into the npub field. For an unresolvable
         # identifier that used to print a bare handle under the "Nostr Public Key"
         # label, which reads as a real key but is not one.
@@ -4819,7 +4728,9 @@ class LinkDeckView(TemplateView):
             "owner_did": owner_did,
             "hex_pubkey": hex_pubkey,
             "target_nostr_pubkey_hex": hex_pubkey,
+            "profile_pubkey_hex": hex_pubkey,
             "target_did": owner_did,
+
             "profile_did": owner_did,
             "profile_handle": target_deck.handle if target_deck else "",
             "npub": hex_to_npub(hex_pubkey) if hex_pubkey else owner_did,

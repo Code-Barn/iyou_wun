@@ -26,3 +26,7 @@ dev = [
 DJANGO_SETTINGS_MODULE = "config.settings"
 python_files = ["test_*.py"]
 testpaths = ["apps/core/tests"]
+
+[tool.ruff]
+exclude = ["docs"]
+

@@ -109,10 +109,8 @@ class DashboardViewTest(TestCase):
         self.client.force_login(user)
         response = self.client.get(reverse("dashboard"))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'id="floating-chat-root"')
-        self.assertContains(response, 'id="floating-chat-toggle-btn"')
-        self.assertContains(response, 'id="chat-roster-popover"')
-        self.assertContains(response, "floating_chat.js")
+        self.assertContains(response, "dock_embed.js")
+        self.assertContains(response, "data-chat-origin")
 
     def test_floating_chat_dock_rendered_on_feed_and_dashboard(self):
         user = User.objects.create_user(username="did:iyou:0xdockfeedgal")
@@ -123,19 +121,16 @@ class DashboardViewTest(TestCase):
             feed_response = self.client.get(reverse("feed"))
             dashboard_response = self.client.get(reverse("dashboard"))
         self.assertEqual(feed_response.status_code, 200)
-        self.assertContains(feed_response, 'id="floating-chat-root"')
-        self.assertContains(feed_response, "floating_chat.js")
+        self.assertContains(feed_response, "dock_embed.js")
         self.assertEqual(dashboard_response.status_code, 200)
-        self.assertContains(dashboard_response, 'id="floating-chat-root"')
-        self.assertContains(dashboard_response, "floating_chat.js")
+        self.assertContains(dashboard_response, "dock_embed.js")
 
     def test_floating_chat_dock_omitted_on_chat_view(self):
         user = User.objects.create_user(username="did:iyou:0xdockchatomit")
         self.client.force_login(user)
         response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'id="floating-chat-root"')
-        self.assertNotContains(response, "floating_chat.js")
+        self.assertEqual(response.status_code, 302)
+
 
     def test_dashboard_renders_moderation_management_roster(self):
         user = User.objects.create_user(username="did:iyou:0xmodroster")
@@ -181,162 +176,39 @@ class JwksConnectivityTest(TestCase):
             self.skipTest(f"IdP not reachable at {url}: {e}")
 
 
-class ChatViewTest(TestCase):
-    def test_redirects_anonymous(self):
+class ChatRedirectViewTest(TestCase):
+    def test_chat_redirects_to_iyou_chat_origin(self):
+        expected_origin = getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
+        )
         response = self.client.get(reverse("chat"))
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{expected_origin}/")
 
-    def test_redirects_to_idp_login(self):
-        response = self.client.get(reverse("chat"))
-        self.assertIn("/oidc/authenticate/", response.url)
+    def test_chat_redirects_with_peer_parameter(self):
+        expected_origin = getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
+        )
+        peer = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
+        response = self.client.get(f"{reverse('chat')}?peer={peer}")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{expected_origin}/?peer={peer}")
 
-    def test_authenticated_user_sees_chat(self):
+    def test_chat_redirect_authenticated_user(self):
         user = User.objects.create_user(username="did:key:z6Mkchat123")
         self.client.force_login(user)
+        expected_origin = getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if settings.DEBUG else "https://chat.iyou.me",
+        )
         response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        self.assertTemplateUsed(response, "chat.html")
-
-    def test_chat_contains_xmpp_init(self):
-        user = User.objects.create_user(username="did:key:z6Mkchat456")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertContains(response, "converse.initialize")
-        # Plain-HTTP requests keep the loopback dev endpoint (schema-matched).
-        self.assertContains(response, "127.0.0.1:5222/xmpp-websocket")
-
-    def test_chat_secure_request_injects_wss_endpoint(self):
-        user = User.objects.create_user(username="did:key:z6Mkwsschat")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"), HTTP_X_FORWARDED_PROTO="https")
-        self.assertEqual(response.status_code, 200)
-        ws_url = response.context["xmpp_ws_url"]
-        # HTTPS origins must never receive a mixed-content `ws://` loopback URL.
-        self.assertTrue(ws_url.startswith("wss://"))
-        self.assertIn("chat.", ws_url)
-        self.assertIn(":5281/xmpp-websocket", ws_url)
-        self.assertNotIn("ws://127.0.0.1", ws_url)
-        content = response.content.decode()
-        self.assertIn(ws_url, content)
-        self.assertNotIn("ws://127.0.0.1:5222", content)
-
-    def test_chat_pubkey_hex_is_rfc7622_compliant(self):
-        user = User.objects.create_user(username="did:key:z6Mkhexlocal")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        pubkey_hex = response.context["user_pubkey_hex"]
-        # Converse localparts must be lowercase hex with no RFC 7622 separators.
-        self.assertRegex(pubkey_hex, r"^[0-9a-f]{64}$")
-        self.assertNotIn(":", pubkey_hex)
-        self.assertNotIn("did:key:", pubkey_hex)
-
-    def test_chat_shows_nav(self):
-        user = User.objects.create_user(username="did:key:z6Mknav")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertContains(response, "Dashboard")
-        self.assertContains(response, "Feed")
-
-    def test_authenticated_user_sees_logout_in_chat(self):
-        user = User.objects.create_user(username="did:key:z6Mklogout")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertContains(response, "Sign Out")
-
-    def test_chat_persistent_store_local(self):
-        user = User.objects.create_user(username="did:key:z6Mkomemo1")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertContains(response, "persistent_store: 'local'")
-
-    def test_chat_allow_non_roster_messaging(self):
-        user = User.objects.create_user(username="did:key:z6Mkomemo2")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertContains(response, "allow_non_roster_messaging: true")
-
-    def test_chat_keepalive_enabled(self):
-        user = User.objects.create_user(username="did:key:z6Mkomemo3")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertContains(response, "keepalive: true")
-
-    def test_chat_jid_uses_pubkey_hex(self):
-        user = User.objects.create_user(username="did:key:z6Mkjidtest")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        content = response.content.decode()
-        # The Converse JID localpart must be the 64-char pubkey hex derived from
-        # the DID, not the raw `did:key:...` string.
-        from apps.core.views import did_to_pubkey
-        pubkey_hex = did_to_pubkey("did:key:z6Mkjidtest")
-        self.assertTrue(pubkey_hex)
-        self.assertIn(f"{pubkey_hex}@127.0.0.1", content)
-        self.assertNotIn("did:key:z6Mkjidtest@", content)
-
-    def test_chat_renders_embedded_layout_and_loading_spinner(self):
-        user = User.objects.create_user(username="did:key:z6Mkspin123")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'id="chat-loading-overlay"')
-        self.assertContains(response, 'id="conversejs-wrap"')
-        self.assertContains(response, "view_mode: 'embedded'")
-        self.assertContains(response, "show_controlbox_by_default: true")
-        self.assertContains(response, "singleton: false")
-        self.assertContains(response, "converse.plugins.add('iyou-lifecycle'")
-        self.assertContains(response, "_converse.api.listen.on('connected', dismissLoadingSpinner)")
-        self.assertContains(response, "_converse.api.listen.on('statusInitialized', dismissLoadingSpinner)")
-
-    def test_chat_renders_connection_alert_banner_with_fallback_actions(self):
-        user = User.objects.create_user(username="did:key:z6Mkalert99")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode()
-        # The No-Blank-Screen diagnostic banner must ship with retry + stream
-        # fallback actions wired to the same ids the watchdog/error paths toggle.
-        self.assertIn('id="chat-connection-alert"', content)
-        self.assertIn("unreachable or blocked by browser security", content)
-        self.assertIn("Retry Connection", content)
-        self.assertIn("Return to Stream", content)
-        self.assertIn(reverse("feed"), content)
-        # Watchdog + error handlers must know how to reveal the banner.
-        self.assertIn("showConnectionAlert", content)
-        self.assertIn("document.getElementById('chat-connection-alert')", content)
-
-    def test_chat_retains_l1_and_l2_headers(self):
-        user = User.objects.create_user(username="did:key:z6Mklayers123")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "sovereign-ecosystem-topbar")
-        self.assertContains(response, "iyou")
-        self.assertContains(response, "_wun")
-        self.assertContains(response, "[ 💬 Chat ]")
-
-    def test_chat_renders_script_type_module(self):
-        user = User.objects.create_user(username="did:key:z6Mkesmtest")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat"))
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, '<script type="module">')
-        # Converse loads via the UMD build (window.converse) — no broken ESM
-        # default import from the minified bundle.
-        self.assertContains(response, "cdn.conversejs.org/10.1.7/dist/converse.min.js")
-        self.assertNotContains(response, "import converse from 'https://cdn.conversejs.org/10.1.7/dist/converse.min.js'")
-        self.assertContains(response, "const converse = window.converse || self.converse;")
-        self.assertContains(response, "auto_join_private_chats: autoJoinChats")
-
-    def test_chat_view_passes_peer_context(self):
-        user = User.objects.create_user(username="did:key:z6Mkpeerctx")
-        self.client.force_login(user)
-        response = self.client.get(reverse("chat") + "?peer=npub1testpeer123")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.context["peer_target"], "npub1testpeer123")
-        self.assertContains(response, 'window.peerTarget = "npub1testpeer123"')
-        self.assertContains(response, "auto-open-peer")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["Location"], f"{expected_origin}/")
 
 
 
@@ -606,7 +478,7 @@ class ProfileViewTest(TestCase):
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, 'id="floating-chat-root"')
+        self.assertNotContains(response, "dock_embed.js")
         self.assertNotContains(response, "floating_chat.js")
 
 
@@ -1723,10 +1595,10 @@ class FeedViewTwoTierToolbarTest(TestCase):
         self.assertEqual(resp_dash.status_code, 200)
         self.assertNotContains(resp_dash, 'id="circle-filter-group"')
 
-        # Chat: circle filter group should NOT be present
-        resp_chat = self.client.get(reverse("chat"))
-        self.assertEqual(resp_chat.status_code, 200)
-        self.assertNotContains(resp_chat, 'id="circle-filter-group"')
+        # Notifications: circle filter group should NOT be present
+        resp_notif = self.client.get(reverse("notifications"))
+        self.assertEqual(resp_notif.status_code, 200)
+        self.assertNotContains(resp_notif, 'id="circle-filter-group"')
 
 
 class FeedModernizationAndExternalAttributionTest(TestCase):
@@ -3929,11 +3801,11 @@ class Phase37GlobalScriptTest(TestCase):
         self.assertIn(b"bridge_client.js", res_gallery.content)
         self.assertIn(b"toast_manager.js", res_gallery.content)
 
-        # 3. Chat view
-        res_chat = self.client.get("/chat")
-        self.assertEqual(res_chat.status_code, 200)
-        self.assertIn(b"bridge_client.js", res_chat.content)
-        self.assertIn(b"toast_manager.js", res_chat.content)
+        # 3. Dashboard view
+        res_dash = self.client.get("/dashboard")
+        self.assertEqual(res_dash.status_code, 200)
+        self.assertIn(b"bridge_client.js", res_dash.content)
+        self.assertIn(b"toast_manager.js", res_dash.content)
 
         # 4. Profile view
         res_profile = self.client.get("/profile/testuser")

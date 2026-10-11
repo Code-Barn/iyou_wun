@@ -32,7 +32,18 @@ def satellite_urls(request):
         "blossom_cdn_url": getattr(settings, "BLOSSOM_CDN_URL", "https://cdn.iyou.me"),
         "BLOSSOM_CDN_URL": getattr(settings, "BLOSSOM_CDN_URL", "https://cdn.iyou.me"),
         "POLY_BASE_DOMAIN": getattr(settings, "POLY_BASE_DOMAIN", "poly.iyou.me"),
+        "IYOU_CHAT_ORIGIN": getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if getattr(settings, "DEBUG", False) else "https://chat.iyou.me",
+        ),
+        "iyou_chat_origin": getattr(
+            settings,
+            "IYOU_CHAT_ORIGIN",
+            "http://127.0.0.1:8017" if getattr(settings, "DEBUG", False) else "https://chat.iyou.me",
+        ),
     }
+
 
 
 def user_identity(request):

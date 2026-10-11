@@ -53,8 +53,9 @@
       <span id="mobile-gallery-unread-dot" class="absolute top-1 right-4 h-2 w-2 rounded-full bg-violet-500 hidden" aria-hidden="true"></span>
     </a>
 
-    {# ---- 3 · Chat / DMs (NUMERIC pill — the only reliable counter, AUDIT-002 lock) ---- #}
+    {# ---- 3 · Chat / DMs (NUMERIC pill — iyou:chat:unread_update) ---- #}
     <a href="{% url 'chat' %}"
+       onclick="if (window.IyouChatDock) { event.preventDefault(); window.IyouChatDock.toggle(); }"
        {% if request.resolver_match.url_name == 'chat' %}aria-current="page"{% endif %}
        aria-label="{% if request.resolver_match.url_name == 'chat' %}Chat, current page{% else %}Chat{% endif %}"
        title="Chat &amp; Direct Messages"
@@ -100,6 +101,17 @@
     "use strict";
     if (global.__wunMobileDockBadgesBound) return;
     global.__wunMobileDockBadgesBound = true;
+
+    window.addEventListener('message', function (event) {
+      if (event.data && event.data.type === 'iyou:chat:unread_update') {
+        var pill = document.getElementById('mobile-chat-unread-pill');
+        if (pill) {
+          var count = event.data.count || 0;
+          pill.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
+          pill.classList.toggle('hidden', count === 0);
+        }
+      }
+    });
 
     function apply() {
       var chatSrc = document.getElementById("floating-chat-unread-badge");

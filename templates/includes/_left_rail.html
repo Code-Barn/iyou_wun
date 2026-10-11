@@ -149,6 +149,17 @@
     if (global.__wunLeftRailBadgesBound) return;
     global.__wunLeftRailBadgesBound = true;
 
+    window.addEventListener('message', function (event) {
+      if (event.data && event.data.type === 'iyou:chat:unread_update') {
+        var pill = document.getElementById('rail-chat-unread-pill');
+        if (pill) {
+          var count = event.data.count || 0;
+          pill.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
+          pill.classList.toggle('hidden', count === 0);
+        }
+      }
+    });
+
     function srcOf(name) {
       return name === "notification"
         ? document.getElementById("notification-unread-dot")

@@ -135,9 +135,10 @@
         <span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-violet-500 hidden" data-unread-mirror="notification" aria-hidden="true"></span>
       </a>
     </li>
-    {# Chat / DMs — numeric rose pill mirror of #floating-chat-unread-badge (AUDIT-002 lock) #}
+    {# Chat / DMs — numeric rose pill mirror of iyou:chat:unread_update #}
     <li>
       <a href="{% url 'chat' %}"
+         onclick="if (window.IyouChatDock) { event.preventDefault(); window.IyouChatDock.toggle(); }"
          {% if request.resolver_match.url_name == 'chat' %}aria-current="page"{% endif %}
          title="Chat &amp; Direct Messages"
          class="group relative flex items-center gap-3 rounded-lg py-2.5 min-h-[44px] transition-colors
