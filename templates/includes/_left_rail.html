@@ -151,12 +151,15 @@
 
     window.addEventListener('message', function (event) {
       if (event.data && event.data.type === 'iyou:chat:unread_update') {
-        var pill = document.getElementById('rail-chat-unread-pill');
-        if (pill) {
-          var count = event.data.count || 0;
-          pill.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
-          pill.classList.toggle('hidden', count === 0);
-        }
+        var count = event.data.count || 0;
+        var displayCount = count > 99 ? '99+' : (count > 0 ? count : '');
+        ['rail-chat-unread-pill', 'nav-chat-unread-pill', 'mobile-chat-unread-pill'].forEach(function (id) {
+          var pill = document.getElementById(id);
+          if (pill) {
+            pill.textContent = displayCount;
+            pill.classList.toggle('hidden', count === 0);
+          }
+        });
       }
     });
 

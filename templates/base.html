@@ -195,6 +195,20 @@
             window.open(chatOrigin + "/?peer=" + encodeURIComponent(peer), "_blank");
           }
         };
+
+        window.addEventListener('message', function (event) {
+          if (event.data && event.data.type === 'iyou:chat:unread_update') {
+            const count = event.data.count || 0;
+            const displayCount = count > 99 ? '99+' : (count > 0 ? count : '');
+            ['rail-chat-unread-pill', 'nav-chat-unread-pill', 'mobile-chat-unread-pill'].forEach(function (id) {
+              const pill = document.getElementById(id);
+              if (pill) {
+                pill.textContent = displayCount;
+                pill.classList.toggle('hidden', count === 0);
+              }
+            });
+          }
+        });
       </script>
     {% endif %}
     {% include "includes/_mobile_bottom_dock.html" %}

@@ -16,8 +16,15 @@
         <a href="{% url 'dashboard' %}" class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'dashboard' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}">
           [ 📊 {% trans "Dashboard" %} ]
         </a>
-        <a href="{% url 'chat' %}" class="px-2.5 py-1 rounded transition-colors {% if request.resolver_match.url_name == 'chat' %}bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}">
-          [ 💬 {% trans "Chat" %} ]
+        <a 
+          href="{% url 'chat' %}" 
+          id="nav-chat-toggle-btn"
+          onclick="if (window.IyouChatDock && !event.metaKey && !event.ctrlKey && event.button === 0) { event.preventDefault(); window.IyouChatDock.toggle(); }"
+          class="nav-tab-pill px-2.5 py-1 rounded transition-colors inline-flex items-center {% if request.resolver_match.url_name == 'chat' %}active bg-violet-600 text-white font-bold dark:bg-violet-500 dark:text-slate-950{% else %}text-slate-600 hover:text-slate-900 bg-slate-200/80 dark:text-slate-400 dark:hover:text-slate-200 dark:bg-slate-800/60{% endif %}"
+          title="Toggle Messaging Dock (Cmd/Ctrl+Click to open standalone)"
+        >
+          <span>💬 Chat</span>
+          <span id="nav-chat-unread-pill" class="hidden ml-1 px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-violet-600 text-white"></span>
         </a>
         {% if user.is_authenticated or request.user.is_authenticated %}
         {% if not thread_mode and not thread_id and feed_mode != 'thread' %}

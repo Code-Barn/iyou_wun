@@ -89,3 +89,13 @@ class DockEmbedIntegrationTest(TestCase):
             response = self.client.get(reverse("feed"))
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "dock_embed.js")
+
+    def test_nav_chat_toggle_btn_rendered_with_guards_and_unread_pill(self):
+        with patch("apps.core.views.relay_req", return_value={}):
+            response = self.client.get(reverse("feed"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="nav-chat-toggle-btn"')
+        self.assertContains(response, 'id="nav-chat-unread-pill"')
+        self.assertContains(response, "window.IyouChatDock.toggle()")
+        self.assertContains(response, "!event.metaKey && !event.ctrlKey")
+
