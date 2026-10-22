@@ -14,7 +14,6 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import json
-from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth.models import User
@@ -22,11 +21,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from apps.core.models import (
-    HandleVerificationChallenge,
-    UserLinkDeck,
-    UserLinkItem,
-)
+from apps.core.models import UserLinkDeck
 from apps.core.utils import (
     validate_external_bio_url,
     verify_external_profile_token,
@@ -42,10 +37,6 @@ from .helpers import make_event
 
 def post_json(client, url, payload):
     return client.post(url, data=json.dumps(payload), content_type="application/json")
-
-
-def patch_json(client, url, payload):
-    return client.patch(url, data=json.dumps(payload), content_type="application/json")
 
 
 class DeckHandleClaimTests(TestCase):
@@ -125,15 +116,20 @@ class DeckHandleClaimTests(TestCase):
         response = self._claim(u3, "delta")
         self.assertEqual(response.json()["discriminator"], 2)
 
-    def test_seeded_ecosystem_items_created_on_first_deck(self):
-        user = User.objects.create_user(username="did:key:z6Mkseedme")
-        self._claim(user, "seeder")
-        deck = UserLinkDeck.objects.get(user=user)
-        seeds = deck.items.filter(is_ecosystem_link=True)
-        self.assertEqual(seeds.count(), 4)
-        categories = set(seeds.values_list("icon_category", flat=True))
-        self.assertEqual(categories, {"blog", "talk", "poly", "gallery"})
-        self.assertFalse(seeds.filter(is_active=True).exists())
+    def test_headline_update_via_handle_endpoint(self):
+        user = User.objects.create_user(username="did:key:z6Mkheadline1")
+        deck = claim_handle(user, "owner")
+        self.client.force_login(user)
+        response = post_json(self.client, reverse("api_deck_handle"), {"headline": "Sovereign since day one"})
+        self.assertEqual(response.status_code, 200)
+        deck.refresh_from_db()
+        self.assertEqual(deck.headline, "Sovereign since day one")
+
+    def test_headline_requires_deck(self):
+        other = User.objects.create_user(username="did:key:z6Mkheadline2")
+        self.client.force_login(other)
+        response = post_json(self.client, reverse("api_deck_handle"), {"headline": "sneaky"})
+        self.assertEqual(response.status_code, 400)
 
     def test_anonymous_gated(self):
         response = post_json(self.client, reverse("api_deck_handle"), {"handle": "alice"})
@@ -219,21 +215,6 @@ class DeckRoutingTests(TestCase):
         self.assertTemplateUsed(response, "link_deck.html")
         self.assertContains(response, "No links on this deck yet")
 
-    def test_active_items_rendered_inactive_hidden(self):
-        UserLinkItem.objects.create(
-            deck=self.alice_deck, title="Visible Link", url="https://example.com",
-            icon_category="website", order=10,
-        )
-        hidden = UserLinkItem.objects.create(
-            deck=self.alice_deck, title="Hidden Link", url="https://secret.example.com",
-            icon_category="website", order=11,
-        )
-        hidden.is_active = False
-        hidden.save()
-        response, _ = self._get_with_relays_down("/@alice")
-        self.assertContains(response, "Visible Link")
-        self.assertNotContains(response, "Hidden Link")
-
     def test_profile_hero_enrichment_from_kind0(self):
         hex_pubkey = did_to_pubkey(self.alice.username)
         profile_event = make_event(
@@ -312,203 +293,15 @@ class DeckRoutingTests(TestCase):
         self.assertEqual(data["discriminator"], 1)
 
 
-class DeckItemAPITests(TestCase):
-    @classmethod
-    def setUpTestData(cls):
-        pass
-
-    def setUp(self):
-        self.owner = User.objects.create_user(username="did:key:z6Mkapiown")
-        self.other = User.objects.create_user(username="did:key:z6Mkapioth")
-        self.deck = claim_handle(self.owner, "owner")
-
-    def _create_item(self, **overrides):
-        payload = {
-            "title": overrides.pop("title", "My X"),
-            "url": overrides.pop("url", "https://x.com/owner"),
-            "icon_category": overrides.pop("icon_category", "x"),
-        }
-        payload.update(overrides)
-        return post_json(self.client, reverse("api_deck_items"), payload)
-
-    def test_create_item_returns_201(self):
-        self.client.force_login(self.owner)
-        response = self._create_item()
-        self.assertEqual(response.status_code, 201)
-        item = response.json()["item"]
-        self.assertEqual(item["title"], "My X")
-        self.assertEqual(item["icon_category"], "x")
-        self.assertTrue(item["is_active"])
-
-    def test_create_requires_claimed_deck(self):
-        self.client.force_login(self.other)
-        response = self._create_item()
-        self.assertEqual(response.status_code, 400)
-
-    def test_create_validates_fields(self):
-        self.client.force_login(self.owner)
-        self.assertEqual(self._create_item(title="   ").status_code, 400)
-        self.assertEqual(self._create_item(url="").status_code, 400)
-        long_title = "t" * 65
-        self.assertEqual(self._create_item(title=long_title).status_code, 400)
-        self.assertEqual(self._create_item(icon_category="bitcoin").status_code, 400)
-
-    def test_list_returns_all_items_including_inactive(self):
-        UserLinkItem.objects.create(deck=self.deck, title="Off Item", url="https://off.example.com", is_active=False)
-        self.client.force_login(self.owner)
-        response = self.client.get(reverse("api_deck_items"))
-        data = response.json()
-        self.assertEqual(data["handle"], "owner")
-        titles = [i["title"] for i in data["items"]]
-        self.assertIn("Off Item", titles)
-        self.assertEqual(len(titles), 5)  # 4 ecosystem seeds + 1 custom
-
-    def test_patch_toggle_is_active(self):
-        item = UserLinkItem.objects.create(deck=self.deck, title="Blog", url="https://blog.example.com")
-        self.client.force_login(self.owner)
-        response = patch_json(self.client, reverse("api_deck_item_detail", kwargs={"pk": item.id}), {"is_active": False})
-        self.assertTrue(response.json()["ok"])
-        item.refresh_from_db()
-        self.assertFalse(item.is_active)
-
-    def test_patch_updates_fields(self):
-        item = UserLinkItem.objects.create(deck=self.deck, title="Old", url="https://old.example.com")
-        self.client.force_login(self.owner)
-        response = patch_json(
-            self.client,
-            reverse("api_deck_item_detail", kwargs={"pk": item.id}),
-            {"title": "New", "url": "https://new.example.com", "icon_category": "github"},
-        )
-        data = response.json()["item"]
-        self.assertEqual(data["title"], "New")
-        self.assertEqual(data["url"], "https://new.example.com")
-        self.assertEqual(data["icon_category"], "github")
-
-    def test_delete_item(self):
-        item = UserLinkItem.objects.create(deck=self.deck, title="Doomed", url="https://doom.example.com")
-        self.client.force_login(self.owner)
-        response = self.client.delete(reverse("api_deck_item_detail", kwargs={"pk": item.id}))
-        self.assertTrue(response.json()["ok"])
-        self.assertFalse(UserLinkItem.objects.filter(pk=item.id).exists())
-
-    def test_non_owner_cannot_modify_or_delete(self):
-        foreign_item = UserLinkItem.objects.create(deck=self.deck, title="Mine", url="https://mine.example.com")
-        self.client.force_login(self.other)
-        patch_response = patch_json(
-            self.client,
-            reverse("api_deck_item_detail", kwargs={"pk": foreign_item.id}),
-            {"title": "Hacked"},
-        )
-        delete_response = self.client.delete(reverse("api_deck_item_detail", kwargs={"pk": foreign_item.id}))
-        self.assertEqual(patch_response.status_code, 403)
-        self.assertEqual(delete_response.status_code, 403)
-        foreign_item.refresh_from_db()
-        self.assertEqual(foreign_item.title, "Mine")
-
-    def test_non_owner_cannot_add_to_foreign_deck(self):
-        self.client.force_login(self.other)
-        response = self._create_item()
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.deck.items.filter(is_ecosystem_link=False).count(), 0)
-
-    def test_anonymous_gated(self):
-        item = UserLinkItem.objects.create(deck=self.deck, title="Gate", url="https://gate.example.com")
-        self.assertEqual(self.client.get(reverse("api_deck_items")).status_code, 302)
-        self.assertEqual(post_json(self.client, reverse("api_deck_items"), {}).status_code, 302)
-        self.assertEqual(
-            patch_json(self.client, reverse("api_deck_item_detail", kwargs={"pk": item.id}), {}).status_code, 302
-        )
-        self.assertEqual(
-            self.client.delete(reverse("api_deck_item_detail", kwargs={"pk": item.id})).status_code, 302
-        )
-
-    def test_missing_item_404(self):
-        self.client.force_login(self.owner)
-        response = patch_json(self.client, reverse("api_deck_item_detail", kwargs={"pk": 99999}), {})
-        self.assertEqual(response.status_code, 404)
-
-    def test_headline_update_via_handle_endpoint(self):
-        self.client.force_login(self.owner)
-        response = post_json(self.client, reverse("api_deck_handle"), {"headline": "Sovereign since day one"})
-        self.assertEqual(response.status_code, 200)
-        self.deck.refresh_from_db()
-        self.assertEqual(self.deck.headline, "Sovereign since day one")
-
-    def test_headline_requires_deck(self):
-        self.client.force_login(self.other)
-        response = post_json(self.client, reverse("api_deck_handle"), {"headline": "sneaky"})
-        self.assertEqual(response.status_code, 400)
-
-
-class DeckReorderTests(TestCase):
-    def setUp(self):
-        self.owner = User.objects.create_user(username="did:key:z6Mkordrow")
-        self.intruder = User.objects.create_user(username="did:key:z6Mkordinv")
-        self.deck = claim_handle(self.owner, "reorder")
-        self.foreign_deck = claim_handle(self.intruder, "intruder")
-        self.a = UserLinkItem.objects.create(deck=self.deck, title="A", url="https://a.example.com", order=10)
-        self.b = UserLinkItem.objects.create(deck=self.deck, title="B", url="https://b.example.com", order=11)
-        self.c = UserLinkItem.objects.create(deck=self.deck, title="C", url="https://c.example.com", order=12)
-        self.foreign = UserLinkItem.objects.create(deck=self.foreign_deck, title="F", url="https://f.example.com", order=50)
-
-    def _reorder(self, ids):
-        self.client.force_login(self.owner)
-        return post_json(self.client, reverse("api_deck_reorder"), {"item_ids": ids})
-
-    def test_reorder_persists(self):
-        response = self._reorder([self.c.id, self.a.id, self.b.id])
-        self.assertTrue(response.json()["ok"])
-        orders = {i.title: i.order for i in UserLinkItem.objects.filter(deck=self.deck)}
-        self.assertEqual(orders["C"], 0)
-        self.assertEqual(orders["A"], 1)
-        self.assertEqual(orders["B"], 2)
-
-    def test_reordered_deck_serves_public_order(self):
-        self._reorder([self.c.id, self.a.id, self.b.id])
-        with patch("apps.core.views.relay_req", return_value={}):
-            response = self.client.get("/@reorder")
-        body = response.content.decode()
-        c_pos = body.find(">C<")
-        a_pos = body.find(">A<")
-        b_pos = body.find(">B<")
-        self.assertLess(c_pos, a_pos)
-        self.assertLess(a_pos, b_pos)
-
-    def test_reorder_scoped_to_own_deck(self):
-        response = self._reorder([self.b.id, self.foreign.id, self.a.id])
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["updated"], 2)
-        self.foreign.refresh_from_db()
-        self.assertEqual(self.foreign.order, 50)
-
-    def test_reorder_rejects_non_list(self):
-        self.client.force_login(self.owner)
-        response = post_json(self.client, reverse("api_deck_reorder"), {"item_ids": "not-a-list"})
-        self.assertEqual(response.status_code, 400)
-
-    def test_reorder_anonymous_gated(self):
-        response = post_json(self.client, reverse("api_deck_reorder"), {"item_ids": [1]})
-        self.assertEqual(response.status_code, 302)
-
-
 class DashboardDeckTabTests(TestCase):
-    def test_dashboard_contains_deck_tab_and_script(self):
+    def test_dashboard_contains_migrated_deck_handoff_cta(self):
         user = User.objects.create_user(username="did:key:z6Mkdashtab")
         self.client.force_login(user)
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Link Deck Manager")
-        self.assertContains(response, "link_deck_manager.js")
-        self.assertContains(response, "deckHandleDisplay")
-
-    def test_deck_items_api_serves_claimed_handle(self):
-        user = User.objects.create_user(username="did:key:z6Mkdashban")
-        claim_handle(user, "banner")
-        self.client.force_login(user)
-        response = self.client.get(reverse("api_deck_items"))
-        data = response.json()
-        self.assertEqual(data["handle"], "banner")
-        self.assertEqual(data["canonical_url"], "/@banner")
+        self.assertContains(response, "Sovereign Link Decks have migrated")
+        self.assertContains(response, "https://link.iyou.me/manager")
+        self.assertContains(response, "Manage Link Deck")
 
 
 class ProfileDeckChipsTests(TestCase):
@@ -519,21 +312,21 @@ class ProfileDeckChipsTests(TestCase):
         npub = did_to_npub(user.username)
         return reverse("profile", kwargs={"npub": npub})
 
-    def test_profile_shows_active_deck_chips(self):
+    def test_profile_shows_outbound_deck_button(self):
         user = User.objects.create_user(username=self.CHIP_DID_WITH_DECK)
-        deck = claim_handle(user, "chips")
-        UserLinkItem.objects.create(deck=deck, title="Chip Target", url="https://chip.example.com", icon_category="github")
+        claim_handle(user, "chips")
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(self._profile_url_for(user))
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "Chip Target")
+        self.assertContains(response, "View Official Link Deck")
+        self.assertContains(response, "https://link.iyou.me/@chips")
 
-    def test_profile_hides_chips_without_deck(self):
+    def test_profile_hides_outbound_deck_button_without_deck(self):
         user = User.objects.create_user(username=self.CHIP_DID_NO_DECK)
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(self._profile_url_for(user))
         self.assertEqual(response.status_code, 200)
-        self.assertNotContains(response, "Chip Target")
+        self.assertNotContains(response, "View Official Link Deck")
 
 
 class BioScraperSSRFTests(TestCase):
@@ -633,7 +426,7 @@ class BioScraperFetchTests(TestCase):
     TOKEN = "iyou-verify-wun-abcdef1234567890"
 
     def test_token_found_in_body(self):
-        html = f'<html><head></head><body>bio text {self.TOKEN} more</body></html>'.encode()
+        html = f"<html><head></head><body>bio text {self.TOKEN} more</body></html>".encode()
         with patch("apps.core.utils._OPENER") as opener:
             opener.open.return_value = _mock_fetch_response(html)
             ok, message = verify_external_profile_token("https://github.com/u", self.TOKEN)
@@ -670,179 +463,6 @@ class BioScraperFetchTests(TestCase):
         self.assertIn("missing", reason.lower())
 
 
-class VerifyChallengeAPITests(TestCase):
-    def setUp(self):
-        self.owner = User.objects.create_user(username="did:key:z6Mkchalown")
-        self.deckless = User.objects.create_user(username="did:key:z6Mkchalno")
-        claim_handle(self.owner, "bioseeker")
-
-    def _create_challenge(self, handle="testcreator", url="https://github.com/u"):
-        return post_json(self.client, reverse("api_deck_verify_challenge"), {
-            "target_handle": handle,
-            "external_url": url,
-        })
-
-    def test_create_challenge_returns_token_and_expiry(self):
-        self.client.force_login(self.owner)
-        before = timezone.now()
-        response = self._create_challenge()
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["token"].startswith("iyou-verify-wun-"))
-        suffix = data["token"][len("iyou-verify-wun-"):]
-        self.assertEqual(len(suffix), 16)
-        expires = timezone.datetime.fromisoformat(data["expires_at"])
-        delta = expires - before.replace(microsecond=0)
-        self.assertAlmostEqual(delta.total_seconds(), 30 * 60, delta=5)
-        self.assertIn("bio", data["instructions"].lower())
-        challenge = HandleVerificationChallenge.objects.get(token=data["token"])
-        self.assertEqual(challenge.target_handle, "testcreator")
-        self.assertFalse(challenge.is_completed)
-
-    def test_requires_deck(self):
-        self.client.force_login(self.deckless)
-        response = self._create_challenge()
-        self.assertEqual(response.status_code, 400)
-
-    def test_anonymous_gated(self):
-        response = post_json(self.client, reverse("api_deck_verify_challenge"), {})
-        self.assertEqual(response.status_code, 302)
-
-    def test_invalid_target_handle_rejected(self):
-        self.client.force_login(self.owner)
-        self.assertEqual(self._create_challenge(handle="ab").status_code, 400)
-        self.assertEqual(self._create_challenge(handle="Bad Handle").status_code, 400)
-
-    def test_reserved_target_handle_rejected(self):
-        self.client.force_login(self.owner)
-        response = self._create_challenge(handle="admin")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("reserved", response.json()["error"])
-
-    def test_disallowed_external_url_rejected(self):
-        self.client.force_login(self.owner)
-        response = self._create_challenge(url="https://evil.example.com/bio")
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("allowlist", response.json()["error"].lower())
-
-    def test_get_method_rejected(self):
-        self.client.force_login(self.owner)
-        response = self.client.get(reverse("api_deck_verify_challenge"))
-        self.assertEqual(response.status_code, 405)
-
-
-class VerifyConfirmSwapTests(TestCase):
-    def setUp(self):
-        self.user_a = User.objects.create_user(username="did:key:z6Mkswapaaa")
-        self.user_b = User.objects.create_user(username="did:key:z6Mkswapbbb")
-        self.user_c = User.objects.create_user(username="did:key:z6Mkswapccc")
-        claim_handle(self.user_a, "testcreator")
-        claim_handle(self.user_b, "testcreator")
-
-    def _challenge_token_for_b(self):
-        self.client.force_login(self.user_b)
-        response = post_json(self.client, reverse("api_deck_verify_challenge"), {
-            "target_handle": "testcreator",
-            "external_url": "https://github.com/testcreator",
-        })
-        self.assertEqual(response.status_code, 200)
-        return response.json()["token"]
-
-    def _confirm(self, user, token):
-        self.client.force_login(user)
-        return post_json(self.client, reverse("api_deck_verify_confirm"), {"token": token})
-
-    @patch("apps.core.views.verify_external_profile_token", return_value=(True, "Token verified successfully"))
-    def test_full_swap_promotes_verifier_and_demotes_squatter(self, mock_verify):
-        token = self._challenge_token_for_b()
-        response = self._confirm(self.user_b, token)
-        self.assertEqual(response.status_code, 200)
-        data = response.json()
-        self.assertTrue(data["valid"])
-        self.assertEqual(data["handle"], "testcreator")
-        self.assertEqual(data["discriminator"], 0)
-        self.assertTrue(data["is_verified"])
-
-        deck_a = UserLinkDeck.objects.get(user=self.user_a)
-        deck_b = UserLinkDeck.objects.get(user=self.user_b)
-        self.assertEqual((deck_b.handle, deck_b.discriminator), ("testcreator", 0))
-        self.assertTrue(deck_b.is_verified)
-        self.assertEqual(deck_b.verified_source_url, "https://github.com/testcreator")
-        self.assertIsNotNone(deck_b.verified_at)
-        self.assertEqual(deck_a.discriminator, 2)
-        self.assertFalse(deck_a.is_verified)
-        challenge = HandleVerificationChallenge.objects.get(token=token)
-        self.assertTrue(challenge.is_completed)
-        mock_verify.assert_called_once_with("https://github.com/testcreator", token)
-
-    @patch("apps.core.views.verify_external_profile_token", return_value=(True, "ok"))
-    def test_swapped_routes_resolve_correctly(self, mock_verify):
-        token = self._challenge_token_for_b()
-        self._confirm(self.user_b, token)
-        with patch("apps.core.views.relay_req", return_value={}):
-            canonical = self.client.get("/@testcreator")
-            demoted = self.client.get("/@testcreator[2]")
-        self.assertEqual(canonical.status_code, 200)
-        self.assertContains(canonical, "VERIFIED")
-        self.assertEqual(demoted.status_code, 200)
-        did_redirect = self.client.get(f"/u/{self.user_b.username}/")
-        self.assertEqual(did_redirect["Location"], "/@testcreator")
-
-    @patch("apps.core.views.verify_external_profile_token", return_value=(False, "Token not found in bio content"))
-    def test_failed_verification_leaves_handles_intact(self, mock_verify):
-        token = self._challenge_token_for_b()
-        response = self._confirm(self.user_b, token)
-        self.assertEqual(response.status_code, 400)
-        self.assertFalse(response.json()["valid"])
-        deck_a = UserLinkDeck.objects.get(user=self.user_a)
-        deck_b = UserLinkDeck.objects.get(user=self.user_b)
-        self.assertEqual((deck_a.handle, deck_a.discriminator), ("testcreator", 0))
-        self.assertEqual((deck_b.handle, deck_b.discriminator), ("testcreator", 1))
-        self.assertFalse(UserLinkDeck.objects.filter(is_verified=True).exists())
-        challenge = HandleVerificationChallenge.objects.get(token=token)
-        self.assertFalse(challenge.is_completed)
-
-    def test_expired_challenge_rejected(self):
-        token = self._challenge_token_for_b()
-        past = timezone.now() - timedelta(minutes=1)
-        HandleVerificationChallenge.objects.update(expires_at=past)
-        with patch("apps.core.views.verify_external_profile_token") as mock_verify:
-            response = self._confirm(self.user_b, token)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("expired", response.json()["error"].lower())
-        mock_verify.assert_not_called()
-
-    @patch("apps.core.views.verify_external_profile_token", return_value=(True, "ok"))
-    def test_completed_challenge_not_reusable(self, mock_verify):
-        token = self._challenge_token_for_b()
-        self.assertEqual(self._confirm(self.user_b, token).status_code, 200)
-        response = self._confirm(self.user_b, token)
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("completed", response.json()["error"].lower())
-        mock_verify.assert_called_once()
-
-    def test_unknown_token_rejected(self):
-        response = self._confirm(self.user_b, "iyou-verify-wun-doesnotexist1234")
-        self.assertEqual(response.status_code, 404)
-
-    def test_foreign_deck_cannot_confirm_anothers_challenge(self):
-        claim_handle(self.user_c, "bystander")
-        token = self._challenge_token_for_b()
-        response = self._confirm(self.user_c, token)
-        self.assertEqual(response.status_code, 404)
-        deck_b = UserLinkDeck.objects.get(user=self.user_b)
-        self.assertEqual(deck_b.discriminator, 1)
-
-    def test_anonymous_gated(self):
-        response = post_json(self.client, reverse("api_deck_verify_confirm"), {"token": "x"})
-        self.assertEqual(response.status_code, 302)
-
-    def test_get_method_rejected(self):
-        self.client.force_login(self.user_a)
-        response = self.client.get(reverse("api_deck_verify_confirm"))
-        self.assertEqual(response.status_code, 405)
-
-
 class VerifiedBadgeRenderingTests(TestCase):
     def test_public_deck_renders_verified_badge(self):
         owner = User.objects.create_user(username="did:key:z6Mkbadgeon")
@@ -877,17 +497,6 @@ class VerifiedBadgeRenderingTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "VERIFIED")
 
-    def test_dashboard_contains_verification_card_and_modal(self):
-        user = User.objects.create_user(username="did:key:z6Mkdashvrf")
-        claim_handle(user, "dashverify")
-        self.client.force_login(user)
-        with patch("apps.core.views.relay_req", return_value={}):
-            response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Proof-of-Authority Verification")
-        self.assertContains(response, "Verify Profile / Claim Canonical Handle")
-        self.assertContains(response, 'id="verifyModal"')
-        self.assertContains(response, "link_deck_manager.js")
-
 
 class Phase37NIP05DerivationTest(TestCase):
     """Phase 37: Automated Handle-to-NIP-05 Derivation tests."""
@@ -921,11 +530,11 @@ class Phase37NIP05DerivationTest(TestCase):
             discriminator=0
         )
         self.assertEqual(deck.nip05, "alice@iyou.me")
-        
+
         # Change handle
         deck.handle = "bob"
         deck.save()
-        
+
         # Refresh from DB
         deck.refresh_from_db()
         self.assertEqual(deck.nip05, "bob@iyou.me")
@@ -950,196 +559,7 @@ class Phase37NIP05DerivationTest(TestCase):
 
 
 class VerifiedEmailBadgeTests(TestCase):
-    """
-    Unit tests asserting:
-    - Email link items matching verified OIDC claims receive verification badges.
-    - Arbitrary unverified email link items remain unbadged.
-    - External viewers see verified badges on public profiles.
-    - OIDC userinfo extraction captures public_emails in session.
-    """
-
-    def setUp(self):
-        self.owner = User.objects.create_user(username="did:key:z6MkhaXgBZDvB9gEMAIL1")
-        self.deck = claim_handle(self.owner, "alice")
-        self.verified_email = "alice@example.com"
-
-    def _login_with_verified_emails(self, emails=None):
-        self.client.force_login(self.owner)
-        session = self.client.session
-        session["verified_public_emails"] = emails if emails is not None else [self.verified_email]
-        session.save()
-
-    def test_email_link_matching_verified_oidc_claim_receives_badge(self):
-        self._login_with_verified_emails(["alice@example.com"])
-        response = post_json(
-            self.client,
-            reverse("api_deck_items"),
-            {
-                "title": "Email Me",
-                "url": "mailto:alice@example.com",
-                "icon_category": "email",
-            },
-        )
-        self.assertEqual(response.status_code, 201)
-        item_data = response.json()["item"]
-        self.assertTrue(item_data["is_verified_claim"])
-        self.assertEqual(item_data["icon_category"], "email")
-
-        # Assert persisted to DB
-        item = UserLinkItem.objects.get(id=item_data["id"])
-        self.assertTrue(item.is_verified_claim)
-
-    def test_arbitrary_unverified_email_link_remains_unbadged(self):
-        self._login_with_verified_emails(["alice@example.com"])
-        response = post_json(
-            self.client,
-            reverse("api_deck_items"),
-            {
-                "title": "Unverified Email",
-                "url": "mailto:attacker@malicious.com",
-                "icon_category": "email",
-            },
-        )
-        self.assertEqual(response.status_code, 201)
-        item_data = response.json()["item"]
-        self.assertFalse(item_data["is_verified_claim"])
-
-        item = UserLinkItem.objects.get(id=item_data["id"])
-        self.assertFalse(item.is_verified_claim)
-
-    def test_email_without_session_claims_remains_unbadged(self):
-        self.client.force_login(self.owner)
-        # Empty session, no verified_public_emails key
-        response = post_json(
-            self.client,
-            reverse("api_deck_items"),
-            {
-                "title": "Contact",
-                "url": "mailto:alice@example.com",
-                "icon_category": "email",
-            },
-        )
-        self.assertEqual(response.status_code, 201)
-        item_data = response.json()["item"]
-        self.assertFalse(item_data["is_verified_claim"])
-
-    def test_email_matching_with_kind_parameter(self):
-        self._login_with_verified_emails(["alice@example.com"])
-        response = post_json(
-            self.client,
-            reverse("api_deck_items"),
-            {
-                "title": "Support",
-                "url": "mailto:alice@example.com",
-                "kind": "email",
-            },
-        )
-        self.assertEqual(response.status_code, 201)
-        item_data = response.json()["item"]
-        self.assertTrue(item_data["is_verified_claim"])
-        self.assertEqual(item_data["icon_category"], "email")
-
-    def test_email_matching_case_insensitive_and_query_parameters(self):
-        self._login_with_verified_emails(["Alice.Smith@Domain.org"])
-        response = post_json(
-            self.client,
-            reverse("api_deck_items"),
-            {
-                "title": "Work Email",
-                "url": "mailto:alice.smith@domain.org?subject=Inquiry",
-                "icon_category": "email",
-            },
-        )
-        self.assertEqual(response.status_code, 201)
-        item_data = response.json()["item"]
-        self.assertTrue(item_data["is_verified_claim"])
-
-    def test_patch_updates_verification_status(self):
-        self._login_with_verified_emails(["alice@example.com"])
-        item = UserLinkItem.objects.create(
-            deck=self.deck,
-            title="Initial Email",
-            url="mailto:alice@example.com",
-            icon_category="email",
-            is_verified_claim=True,
-        )
-
-        # Update to an unverified email address -> drops verification
-        response = patch_json(
-            self.client,
-            reverse("api_deck_item_detail", kwargs={"pk": item.id}),
-            {"url": "mailto:other@unknown.com"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["item"]["is_verified_claim"])
-        item.refresh_from_db()
-        self.assertFalse(item.is_verified_claim)
-
-        # Update back to verified address -> re-verifies
-        response = patch_json(
-            self.client,
-            reverse("api_deck_item_detail", kwargs={"pk": item.id}),
-            {"url": "mailto:alice@example.com"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertTrue(response.json()["item"]["is_verified_claim"])
-        item.refresh_from_db()
-        self.assertTrue(item.is_verified_claim)
-
-    def test_external_viewers_see_verified_badge_on_public_deck(self):
-        UserLinkItem.objects.create(
-            deck=self.deck,
-            title="Verified Work Email",
-            url="mailto:alice@example.com",
-            icon_category="email",
-            is_verified_claim=True,
-            order=1,
-        )
-        UserLinkItem.objects.create(
-            deck=self.deck,
-            title="Unverified Personal Email",
-            url="mailto:anon@proton.me",
-            icon_category="email",
-            is_verified_claim=False,
-            order=2,
-        )
-
-        # Ensure viewer is logged out (external anonymous user)
-        self.client.logout()
-
-        # 1. Test canonical public handle page /@alice
-        response = self.client.get(f"/@{self.deck.handle}")
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertIn("✓ Verified via iyou_idp", content)
-        self.assertIn("Proof of ownership verified via iyou_idp", content)
-
-        # 2. Test JSON view of deck items without leaking private session
-        response_json = self.client.get(f"/@{self.deck.handle}?format=json")
-        self.assertEqual(response_json.status_code, 200)
-        items = response_json.json()["items"]
-        verified_items = [i for i in items if i["title"] == "Verified Work Email"]
-        unverified_items = [i for i in items if i["title"] == "Unverified Personal Email"]
-        self.assertTrue(verified_items[0]["is_verified_claim"])
-        self.assertFalse(unverified_items[0]["is_verified_claim"])
-
-    def test_external_viewers_see_verified_badge_on_public_profile(self):
-        UserLinkItem.objects.create(
-            deck=self.deck,
-            title="Verified Email Link",
-            url="mailto:alice@example.com",
-            icon_category="email",
-            is_verified_claim=True,
-        )
-
-        self.client.logout()
-        npub = did_to_npub(self.owner.username)
-        with patch("apps.core.views.relay_req", return_value={}):
-            response = self.client.get(reverse("profile", kwargs={"npub": npub}))
-        self.assertEqual(response.status_code, 200)
-        content = response.content.decode("utf-8")
-        self.assertIn("✓ Verified via iyou_idp", content)
-        self.assertIn("Proof of ownership verified via iyou_idp", content)
+    """OIDC userinfo extraction captures public_emails in session."""
 
     def test_oidc_userinfo_extraction_records_verified_public_emails(self):
         from apps.core.auth import MyOIDCAuthenticationBackend
@@ -1180,4 +600,3 @@ class VerifiedEmailBadgeTests(TestCase):
                 request.session.get("verified_public_emails"),
                 ["verified.user@company.com"],
             )
-

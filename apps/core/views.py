@@ -25,9 +25,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import uuid
 from collections import Counter
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import bech32
 from django.conf import settings
@@ -72,12 +71,9 @@ from .moderation import (
 )
 from .models import (
     Bookmark,
-    HandleVerificationChallenge,
     IssuedCredential,
     UserLinkDeck,
-    UserLinkItem,
 )
-from .utils import validate_external_bio_url, verify_external_profile_token
 
 logger = logging.getLogger(__name__)
 UserModel = get_user_model()
@@ -102,7 +98,7 @@ def _extract_backup_payload(request):
 
 
 def _serialize_deck(deck):
-    """Serialize a UserLinkDeck plus its active link items to a plain dict."""
+    """Serialize a UserLinkDeck to a plain dict."""
     if not deck:
         return None
     return {
@@ -116,18 +112,7 @@ def _serialize_deck(deck):
         "lud16": deck.lud16,
         "nostr_pubkey": getattr(deck, "nostr_pubkey", "") or "",
         "is_public": deck.is_public,
-        "items": [
-            {
-                "title": item.title,
-                "url": item.url,
-                "icon_category": item.icon_category,
-                "is_ecosystem_link": item.is_ecosystem_link,
-                "order": item.order,
-                "is_active": item.is_active,
-                "is_verified_claim": item.is_verified_claim,
-            }
-            for item in deck.items.all()
-        ],
+        "items": [],
     }
 
 
@@ -196,32 +181,6 @@ def api_backup_import(request):
                 deck.nostr_pubkey = str(deck_data.get("nostr_pubkey") or "")[:64]
                 deck.is_public = bool(deck_data.get("is_public", True))
                 deck.save()
-
-                deck.items.all().delete()
-                items = deck_data.get("items") or []
-                new_items = []
-                for i, item_data in enumerate(items):
-                    if not isinstance(item_data, dict):
-                        continue
-                    title = str(item_data.get("title") or "")[:64]
-                    url = str(item_data.get("url") or "").strip()
-                    if not title or not url:
-                        continue
-                    new_items.append(
-                        UserLinkItem(
-                            deck=deck,
-                            title=title,
-                            url=url[:2048],
-                            icon_category=str(
-                                item_data.get("icon_category") or "link"
-                            )[:20],
-                            is_ecosystem_link=bool(item_data.get("is_ecosystem_link")),
-                            order=int(item_data.get("order") or i),
-                            is_active=item_data.get("is_active", True) is not False,
-                        )
-                    )
-                if new_items:
-                    UserLinkItem.objects.bulk_create(new_items)
 
     except IntegrityError:
         return JsonResponse(
@@ -4507,6 +4466,7 @@ class ProfileView(TemplateView):
 
         context["owner_deck"] = owner_deck
         context["link_deck"] = owner_deck
+        context["deck"] = owner_deck
 
         is_iyou_native = bool(
             is_owner
@@ -4514,7 +4474,7 @@ class ProfileView(TemplateView):
             or UserLinkDeck.objects.filter(user__username=hex_pubkey).exists()
         )
         context["is_iyou_native"] = is_iyou_native
-        context["deck_items"] = list(owner_deck.items.filter(is_active=True)) if owner_deck else []
+        context["deck_items"] = []
         context["relays"] = get_relays_for_request(self.request)
         context["relay_count"] = len(context["relays"])
         context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
@@ -4545,13 +4505,6 @@ RESERVED_HANDLES = {
 HANDLE_PATTERN = re.compile(r"^[a-z0-9_-]{3,32}$")
 MAX_HANDLE_CLAIM_ATTEMPTS = 5
 
-ECOSYSTEM_SEED_ITEMS = [
-    ("Blog", "https://blog.iyou.me", "blog"),
-    ("Talk", "https://talk.iyou.me", "talk"),
-    ("Poly", "https://poly.iyou.me", "poly"),
-    ("Gallery", "/gallery", "gallery"),
-]
-
 
 class HandleValidationError(Exception):
     pass
@@ -4559,22 +4512,6 @@ class HandleValidationError(Exception):
 
 def normalize_handle(raw_handle):
     return (raw_handle or "").strip().lstrip("@").lower()
-
-
-def seed_default_deck_items(deck):
-    items = [
-        UserLinkItem(
-            deck=deck,
-            title=title,
-            url=url,
-            icon_category=category,
-            is_ecosystem_link=True,
-            is_active=False,
-            order=position,
-        )
-        for position, (title, url, category) in enumerate(ECOSYSTEM_SEED_ITEMS)
-    ]
-    UserLinkItem.objects.bulk_create(items)
 
 
 def claim_handle(user, raw_handle):
@@ -4596,17 +4533,13 @@ def claim_handle(user, raw_handle):
                     Max("discriminator")
                 )["discriminator__max"]
                 discriminator = 0 if max_disc is None else max_disc + 1
-                created = False
                 if deck is None:
                     deck = UserLinkDeck(user=user, handle=handle, discriminator=discriminator)
                     deck.save()
-                    created = True
                 else:
                     deck.handle = handle
                     deck.discriminator = discriminator
                     deck.save()
-                if created:
-                    seed_default_deck_items(deck)
                 return deck
         except (IntegrityError, OperationalError):
             existing = UserLinkDeck.objects.filter(user=user).first()
@@ -4622,21 +4555,6 @@ def claim_handle(user, raw_handle):
 
 def _get_user_deck(user):
     return UserLinkDeck.objects.filter(user=user).first()
-
-
-def _serialize_deck_item(item):
-    return {
-        "id": item.id,
-        "title": item.title,
-        "url": item.url,
-        "icon_category": item.icon_category,
-        "icon_emoji": item.icon_emoji,
-        "is_ecosystem_link": item.is_ecosystem_link,
-        "order": item.order,
-        "is_active": item.is_active,
-        "is_verified_claim": getattr(item, "is_verified_claim", False),
-        "kind": item.icon_category,
-    }
 
 
 class LinkDeckView(TemplateView):
@@ -4683,7 +4601,7 @@ class LinkDeckView(TemplateView):
         relays = request.session.get("relays", DEFAULT_RELAYS)
         profile = fetch_profile_data(hex_pubkey, relay_urls=relays) if hex_pubkey else {}
 
-        items = list(target_deck.items.filter(is_active=True)) if target_deck else []
+        items = []
 
         if wants_json:
             target_npub = hex_to_npub(hex_pubkey) if hex_pubkey else owner_did
@@ -4704,18 +4622,7 @@ class LinkDeckView(TemplateView):
                     "pubkey_hex": hex_pubkey or "",
                     "npub": target_npub or "",
                 },
-                "items": [
-                    {
-                        "id": item.id,
-                        "title": item.title,
-                        "url": item.url,
-                        "icon_category": item.icon_category,
-                        "is_ecosystem_link": item.is_ecosystem_link,
-                        "order": item.order,
-                        "is_verified_claim": getattr(item, "is_verified_claim", False),
-                    }
-                    for item in items
-                ],
+                "items": [],
             }
             response = JsonResponse(data, status=200)
             response["Access-Control-Allow-Origin"] = "*"
@@ -4793,265 +4700,6 @@ def api_deck_handle(request):
         "display_handle": deck.display_handle,
         "canonical_url": deck.canonical_path,
         "headline": deck.headline,
-    })
-
-
-@login_required
-def api_deck_items(request):
-    if request.method == "GET":
-        deck = _get_user_deck(request.user)
-        items = list(deck.items.all()) if deck else []
-        return JsonResponse({
-            "handle": deck.handle if deck else None,
-            "display_handle": deck.display_handle if deck else None,
-            "canonical_url": deck.canonical_path if deck else None,
-            "headline": deck.headline if deck else "",
-            "is_verified": deck.is_verified if deck else False,
-            "verified_source_url": deck.verified_source_url if deck else "",
-            "verified_at": (
-                deck.verified_at.isoformat()
-                if deck and deck.verified_at else None
-            ),
-            "items": [_serialize_deck_item(i) for i in items],
-        })
-
-    if request.method != "POST":
-        return JsonResponse({"error": "GET or POST required"}, status=405)
-
-    deck = _get_user_deck(request.user)
-    if deck is None:
-        return JsonResponse({"error": "Claim a handle first."}, status=400)
-
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-    title = (data.get("title") or "").strip()
-    url = (data.get("url") or "").strip()
-    icon_category = data.get("icon_category") or data.get("kind") or "link"
-    if icon_category == "link" and url.lower().startswith("mailto:"):
-        icon_category = "email"
-
-    if not title or len(title) > 64:
-        return JsonResponse({"error": "title is required (max 64 chars)"}, status=400)
-    if not url or len(url) > 2048:
-        return JsonResponse({"error": "url is required (max 2048 chars)"}, status=400)
-    if icon_category not in dict(UserLinkItem.ICON_CATEGORY_CHOICES):
-        return JsonResponse({"error": f"unknown icon_category: {icon_category}"}, status=400)
-
-    max_order = deck.items.aggregate(Max("order"))["order__max"]
-    item = UserLinkItem(
-        deck=deck,
-        title=title,
-        url=url,
-        icon_category=icon_category,
-        order=0 if max_order is None else max_order + 1,
-    )
-    verified_emails = request.session.get("verified_public_emails", [])
-    item.verify_against_claims(verified_emails)
-    item.save()
-    return JsonResponse({"ok": True, "item": _serialize_deck_item(item)}, status=201)
-
-
-@login_required
-def api_deck_item_detail(request, pk):
-    item = UserLinkItem.objects.select_related("deck").filter(pk=pk).first()
-    if item is None:
-        return JsonResponse({"error": "item not found"}, status=404)
-    if item.deck.user_id != request.user.id:
-        return JsonResponse({"error": "not your deck item"}, status=403)
-
-    if request.method == "PATCH":
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-        if "title" in data:
-            title = (data.get("title") or "").strip()
-            if not title or len(title) > 64:
-                return JsonResponse({"error": "title is required (max 64 chars)"}, status=400)
-            item.title = title
-        if "url" in data:
-            url = (data.get("url") or "").strip()
-            if not url or len(url) > 2048:
-                return JsonResponse({"error": "url is required (max 2048 chars)"}, status=400)
-            item.url = url
-        category = data.get("icon_category") or data.get("kind")
-        if category is not None:
-            if category not in dict(UserLinkItem.ICON_CATEGORY_CHOICES):
-                return JsonResponse(
-                    {"error": f"unknown icon_category: {category}"}, status=400
-                )
-            item.icon_category = category
-        if item.icon_category == "link" and item.url.lower().startswith("mailto:"):
-            item.icon_category = "email"
-        if "is_active" in data:
-            item.is_active = bool(data["is_active"])
-
-        verified_emails = request.session.get("verified_public_emails", [])
-        if "url" in data or "icon_category" in data or "kind" in data or "verified_public_emails" in request.session:
-            item.verify_against_claims(verified_emails)
-        item.save()
-        return JsonResponse({"ok": True, "item": _serialize_deck_item(item)})
-
-    if request.method == "DELETE":
-        item.delete()
-        return JsonResponse({"ok": True})
-
-    return JsonResponse({"error": "PATCH or DELETE required"}, status=405)
-
-
-@login_required
-def api_deck_reorder(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-    item_ids = data.get("item_ids")
-    if not isinstance(item_ids, list):
-        return JsonResponse({"error": "item_ids must be a list"}, status=400)
-
-    deck = _get_user_deck(request.user)
-    if deck is None:
-        return JsonResponse({"error": "Claim a handle first."}, status=400)
-
-    valid_ids = [i for i in item_ids if isinstance(i, int)]
-    order_by_id = {iid: pos for pos, iid in enumerate(valid_ids)}
-    updated = 0
-    with transaction.atomic():
-        for item in deck.items.filter(id__in=valid_ids):
-            item.order = order_by_id[item.id]
-            item.save(update_fields=["order"])
-            updated += 1
-    return JsonResponse({"ok": True, "updated": updated})
-
-
-VERIFY_CHALLENGE_TTL_MINUTES = 30
-
-
-@login_required
-def api_deck_verify_challenge(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-
-    deck = _get_user_deck(request.user)
-    if deck is None:
-        return JsonResponse({"error": "Claim a handle first."}, status=400)
-
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-    target_handle = normalize_handle(data.get("target_handle"))
-    if not HANDLE_PATTERN.match(target_handle):
-        return JsonResponse(
-            {"error": "Handle must be 3-32 chars: lowercase letters, digits, '_' or '-'."},
-            status=400,
-        )
-    if target_handle in RESERVED_HANDLES:
-        return JsonResponse({"error": "That handle is reserved."}, status=400)
-
-    external_url = (data.get("external_url") or "").strip()
-    url_allowed, url_reason = validate_external_bio_url(external_url)
-    if not url_allowed:
-        return JsonResponse({"error": url_reason}, status=400)
-
-    token = f"iyou-verify-wun-{uuid.uuid4().hex[:16]}"
-    challenge = HandleVerificationChallenge.objects.create(
-        deck=deck,
-        token=token,
-        target_handle=target_handle,
-        external_url=external_url,
-        expires_at=timezone.now() + timedelta(minutes=VERIFY_CHALLENGE_TTL_MINUTES),
-    )
-    return JsonResponse({
-        "token": challenge.token,
-        "target_handle": challenge.target_handle,
-        "external_url": challenge.external_url,
-        "expires_at": challenge.expires_at.isoformat(),
-        "instructions": (
-            "Paste this token into your public bio on the linked profile, "
-            "then run Check & Claim Handle before it expires."
-        ),
-    })
-
-
-@login_required
-def api_deck_verify_confirm(request):
-    if request.method != "POST":
-        return JsonResponse({"error": "POST required"}, status=405)
-
-    deck = _get_user_deck(request.user)
-    if deck is None:
-        return JsonResponse({"error": "Claim a handle first."}, status=400)
-
-    try:
-        data = json.loads(request.body)
-    except json.JSONDecodeError:
-        return JsonResponse({"error": "invalid JSON body"}, status=400)
-
-    token = (data.get("token") or "").strip()
-    if not token:
-        return JsonResponse({"error": "token is required"}, status=400)
-
-    challenge = deck.challenges.filter(token=token).first()
-    if challenge is None:
-        return JsonResponse({"error": "No pending challenge found for this token."}, status=404)
-    if challenge.is_completed:
-        return JsonResponse({"error": "Challenge already completed."}, status=400)
-    if challenge.expires_at <= timezone.now():
-        return JsonResponse(
-            {"error": "Challenge expired. Generate a new token."}, status=400
-        )
-
-    verified, reason = verify_external_profile_token(challenge.external_url, challenge.token)
-    if not verified:
-        return JsonResponse({"valid": False, "error": reason}, status=400)
-
-    try:
-        with transaction.atomic():
-            squatter = (
-                UserLinkDeck.objects.select_for_update()
-                .filter(handle=challenge.target_handle, discriminator=0)
-                .exclude(pk=deck.pk)
-                .first()
-            )
-            if squatter is not None:
-                max_disc = (
-                    UserLinkDeck.objects.filter(handle=challenge.target_handle)
-                    .aggregate(Max("discriminator"))["discriminator__max"]
-                    or 0
-                )
-                squatter.discriminator = max_disc + 1
-                squatter.save(update_fields=["discriminator", "updated_at"])
-
-            deck.handle = challenge.target_handle
-            deck.discriminator = 0
-            deck.is_verified = True
-            deck.verified_source_url = challenge.external_url
-            deck.verified_at = timezone.now()
-            deck.save()
-
-            challenge.is_completed = True
-            challenge.save(update_fields=["is_completed"])
-    except IntegrityError:
-        return JsonResponse(
-            {"valid": False, "error": "Handle ownership changed during verification. Try again."},
-            status=409,
-        )
-
-    return JsonResponse({
-        "valid": True,
-        "handle": deck.handle,
-        "discriminator": deck.discriminator,
-        "is_verified": True,
-        "canonical_url": deck.canonical_path,
     })
 
 

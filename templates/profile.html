@@ -127,15 +127,6 @@
           </span>
           {% endif %}
 
-          {% for item in deck_items %}
-            {% if item.is_verified_claim %}
-            <a href="{{ item.url }}" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0 hover:opacity-90 transition" title="Proof of ownership verified via iyou_idp">
-              <span>✉️</span>
-              <span>✓ Verified via iyou_idp</span>
-            </a>
-            {% endif %}
-          {% endfor %}
-
           <span class="author-badge-slot shrink-0" data-author-slot="{{ target_pubkey_hex }}"></span>
         </div>
 
@@ -153,6 +144,15 @@
         {% if profile.about %}
         <div class="text-sm sm:text-[15px] text-slate-700 dark:text-slate-300 leading-relaxed max-w-3xl whitespace-pre-line pt-1">{{ profile.about|linebreaksbr }}</div>
         {% endif %}
+
+        {% if deck.handle %}
+        <div class="mt-4">
+          <a href="https://link.iyou.me/@{{ deck.handle }}" target="_blank" rel="noopener noreferrer" class="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-slate-100 rounded-xl text-sm font-bold transition border border-slate-200 dark:border-slate-700">
+            <span>🔗 View Official Link Deck</span>
+            <span class="text-slate-400">↗</span>
+          </a>
+        </div>
+        {% endif %}
       </div>
 
     </div>
@@ -168,11 +168,6 @@
       <button type="button" class="profile-tab px-3 py-2.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition" data-target="tab-media">
         🖼️ Media ({{ media_assets|length }})
       </button>
-      {% if link_deck %}
-      <button type="button" class="profile-tab px-3 py-2.5 border-b-2 border-transparent text-slate-500 hover:text-slate-900 dark:hover:text-slate-200 transition" data-target="tab-links">
-        🔗 Link Deck ({{ deck_items|length }})
-      </button>
-      {% endif %}
     </div>
   </div>
 
@@ -252,32 +247,6 @@
       {% endfor %}
     </div>
   </div>
-
-  <!-- 4. Link Deck Panel -->
-  {% if link_deck %}
-  <div id="tab-links" class="tab-panel hidden max-w-xl mx-auto space-y-3 py-4">
-    {% for item in deck_items %}
-    <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer" 
-       class="flex items-center justify-between p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 hover:border-violet-500 dark:hover:border-violet-500 hover:shadow-md transition">
-      <span class="flex items-center gap-2.5 min-w-0">
-        <span>{{ item.icon_emoji }}</span>
-        <span class="font-medium text-sm text-slate-800 dark:text-slate-200 truncate">{{ item.title }}</span>
-        {% if item.is_ecosystem_link %}
-        <span class="text-[10px] uppercase font-mono bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 px-1.5 py-0.5 rounded-full border border-violet-200 dark:border-violet-800/60">mesh</span>
-        {% endif %}
-        {% if item.is_verified_claim %}
-        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700 shrink-0" title="Proof of ownership verified via iyou_idp">
-          ✓ Verified via iyou_idp
-        </span>
-        {% endif %}
-      </span>
-      <span class="text-xs font-mono text-slate-400">↗</span>
-    </a>
-    {% empty %}
-    <div class="text-center py-8 text-slate-400 font-mono text-xs">No public links in this deck.</div>
-    {% endfor %}
-  </div>
-  {% endif %}
   {% endif %}
 </div>
 {% endblock %}

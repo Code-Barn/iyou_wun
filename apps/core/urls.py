@@ -65,10 +65,5 @@ urlpatterns += [
     ),
     path("u/<str:did_key>/", views.LinkDeckView.as_view(), name="link_deck_did"),
     path("api/deck/handle", views.api_deck_handle, name="api_deck_handle"),
-    path("api/deck/items", views.api_deck_items, name="api_deck_items"),
-    path("api/deck/items/<int:pk>", views.api_deck_item_detail, name="api_deck_item_detail"),
-    path("api/deck/reorder", views.api_deck_reorder, name="api_deck_reorder"),
-    path("api/deck/verify/challenge", views.api_deck_verify_challenge, name="api_deck_verify_challenge"),
-    path("api/deck/verify/confirm", views.api_deck_verify_confirm, name="api_deck_verify_confirm"),
 ]
 

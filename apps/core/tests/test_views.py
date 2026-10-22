@@ -31,7 +31,7 @@ from django.conf import settings
 
 from .helpers import make_event, VALID_PUBKEY_HEX
 from apps.core.views import hex_to_npub
-from apps.core.models import Bookmark, UserLinkDeck, UserLinkItem
+from apps.core.models import Bookmark, UserLinkDeck
 
 
 
@@ -1181,10 +1181,7 @@ class BackupGraphTest(TestCase):
 
     def test_api_backup_export_returns_valid_json_schema(self):
         user = User.objects.create_user(username="did:key:z6Mkbackupexport1")
-        deck = UserLinkDeck.objects.create(user=user, handle="@export_handle")
-        UserLinkItem.objects.create(
-            deck=deck, title="Site", url="https://example.com", icon_category="website", order=0
-        )
+        UserLinkDeck.objects.create(user=user, handle="@export_handle")
         self.client.force_login(user)
         response = self.client.get(reverse("api_backup_export"))
         self.assertEqual(response.status_code, 200)
@@ -1193,7 +1190,7 @@ class BackupGraphTest(TestCase):
         for key in ("version", "exported_at", "user", "deck", "contacts", "relays", "circles", "muted"):
             self.assertIn(key, data)
         self.assertEqual(data["deck"]["handle"], "@export_handle")
-        self.assertEqual(data["deck"]["items"][0]["title"], "Site")
+        self.assertEqual(data["deck"]["items"], [])
 
     def test_api_backup_import_restores_user_graph(self):
         user = User.objects.create_user(username="did:key:z6Mkbackupimport1")
@@ -1225,8 +1222,6 @@ class BackupGraphTest(TestCase):
         deck = UserLinkDeck.objects.get(user=user)
         self.assertEqual(deck.handle, "restored_handle")
         self.assertEqual(deck.display_name, "Restored Sovereign")
-        self.assertEqual(deck.items.count(), 1)
-        self.assertEqual(deck.items.first().title, "Git")
 
     def test_dashboard_renders_backup_recovery_controls(self):
         user = User.objects.create_user(username="did:key:z6Mkbackupcontrols1")
