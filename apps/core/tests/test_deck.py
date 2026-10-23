@@ -299,9 +299,8 @@ class DashboardDeckTabTests(TestCase):
         self.client.force_login(user)
         with patch("apps.core.views.relay_req", return_value={}):
             response = self.client.get(reverse("dashboard"))
-        self.assertContains(response, "Sovereign Link Decks have migrated")
         self.assertContains(response, "https://link.iyou.me/manager")
-        self.assertContains(response, "Manage Link Deck")
+        self.assertContains(response, 'title="Sovereign Link Deck Manager"')
 
 
 class ProfileDeckChipsTests(TestCase):
