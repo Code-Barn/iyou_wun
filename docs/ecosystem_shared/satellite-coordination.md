@@ -35,6 +35,7 @@ Edit tasks here first, then propagate to the satellite repos via their agents.
 | iyou_spot | `~/CODE_BASE/iyou_spot/` | [TODO.md](../../../iyou_spot/TODO.md) | 🟡 Onboarding | Local Discovery & Recommendations. Color: `pink`. |
 | iyou_baba | `~/CODE_BASE/iyou_baba/` | [TODO.md](../../../iyou_baba/TODO.md) | 🟢 Operational (PKCE Secretless) | Sovereign Sticker Vault, Discovery Index & Curation Foundry. Color: `blue`. Domain: `baba.iyou.me`. Dev port: 8016. Cookie namespaces: `baba_sessionid`, `baba_csrftoken`. |
 | iyou_chat | `~/CODE_BASE/iyou_chat/` | [TODO.md](../../../iyou_chat/TODO.md) | 🟡 Onboarding (target: PKCE Secretless) | Sovereign Messenger Hub, MAM Archive, standalone messenger UI, and embeddable dock bundle. Color: `blue` (#3B82F6). Dev port: `8017`. Domain: `chat.iyou.me`. |
+| iyou_dine | `~/CODE_BASE/iyou_dine/` | [TODO.md](../../../iyou_dine/TODO.md) | 🟢 Operational (PKCE Secretless) | Sovereign Restaurant Operating System, 0% Take-Rate Settlement, Line-to-Floor Telemetry. Color: `amber` (`#F59E0B`). Port: `8028`. Path: `~/CODE_BASE/iyou_dine`. Domain: `dine.iyou.me`. Client ID: `iyou-dine-satellite-client`. Cookie namespaces: `dine_sessionid`, `dine_csrftoken`, `dine_theme`. Badge: `RESTAURANT OS`. |
 
 ### Supporting Projects & Micro-Satellites (Not in Ecosystem Bar)
 
