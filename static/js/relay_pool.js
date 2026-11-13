@@ -86,18 +86,9 @@
      */
     function buildBootstrapRelays() {
         return [
-            // Sovereign Insiders (enabled by default)
+            // Sovereign Insiders (enabled by default in closed ecosystem)
             { url: "ws://127.0.0.1:9003", read: true, write: true, isLocal: true, primary: false, enabled: true },
-            { url: "wss://relay.iyou.me", read: true, write: false, isLocal: false, primary: false, enabled: true },
-
-            // Global Public Fleet (cataloged, disabled by default)
-            { url: "wss://offchain.pub", read: true, write: true, isLocal: false, primary: true, enabled: false },
-            { url: "wss://relay.damus.io", read: true, write: true, isLocal: false, primary: false, enabled: false },
-            { url: "wss://relay.primal.net", read: true, write: true, isLocal: false, primary: false, enabled: false },
-            { url: "wss://nostr.mom", read: true, write: true, isLocal: false, primary: false, enabled: false },
-            { url: "wss://relay.snort.social", read: true, write: true, isLocal: false, primary: false, enabled: false },
-            { url: "wss://relay.wellorder.net", read: true, write: true, isLocal: false, primary: false, enabled: false },
-            { url: "wss://nostr.oxtr.dev", read: true, write: true, isLocal: false, primary: false, enabled: false }
+            { url: "wss://relay.iyou.me", read: true, write: true, isLocal: false, primary: false, enabled: true }
         ].filter(function (r) { return !isExcludedRelay(r.url); });
     }
 
@@ -361,7 +352,9 @@
             if (isMixedContentRelay(r.url)) return;
             if (r.write && r.status !== "quarantined") urls.push(r.url);
         });
-        return urls.length > 0 ? urls : this.getRelays();
+        if (urls.length > 0) return urls;
+        var fallbacks = this.getRelays().filter(function (u) { return !isMixedContentRelay(u); });
+        return fallbacks.length > 0 ? fallbacks : ["wss://relay.iyou.me"];
     };
 
     RelayPool.prototype.getReadRelays = function () {

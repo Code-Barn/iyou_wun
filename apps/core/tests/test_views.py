@@ -926,7 +926,7 @@ class PersonaSessionSwitchTest(TestCase):
 
         response = self.client.post(
             reverse("api_persona_switch"),
-            data=json.dumps({"did": did2, "persona_name": "Burner Runner", "level": 2}),
+            data=json.dumps({"did": did2, "persona_name": "Burner Runner", "level": 2, "manual_switch": True}),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 200)
@@ -952,13 +952,32 @@ class PersonaSessionSwitchTest(TestCase):
         # Switching back restores the original deck untouched (per-DID isolation).
         resp_back = self.client.post(
             reverse("api_persona_switch"),
-            data=json.dumps({"did": did1, "persona_name": "", "level": 1}),
+            data=json.dumps({"did": did1, "persona_name": "", "level": 1, "manual_switch": True}),
             content_type="application/json",
         )
         self.assertEqual(resp_back.status_code, 200)
         self.assertTrue(resp_back.json()["success"])
         user1.refresh_from_db()
         self.assertEqual(UserLinkDeck.objects.get(user=user1).handle, "alice_sov")
+
+    def test_api_persona_switch_preserves_l1_session_when_not_manual(self):
+        did1 = f"did:iyou:0x{self.ANCHOR_PK}"
+        did2 = "did:key:z6Mkpersonaswtest22"
+        user1 = self._login(did1)
+        UserLinkDeck.objects.create(user=user1, handle="alice_l1", display_name="Alice L1")
+
+        # Call persona-switch WITHOUT manual_switch flag on an L1 session
+        response = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({"did": did2, "persona_name": "Burner Runner", "level": 2}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertTrue(data["success"])
+        self.assertFalse(data["reanchored"])
+        self.assertEqual(data["did"], did1)
+        self.assertEqual(data["level"], 1)
 
     def test_api_persona_switch_gates_method_and_did(self):
         self._login(f"did:iyou:0x{self.ANCHOR_PK}")
@@ -1100,7 +1119,7 @@ class PersonaSessionSwitchTest(TestCase):
         # Switch to brand new persona without a link deck
         resp = self.client.post(
             reverse("api_persona_switch"),
-            data=json.dumps({"did": target_did, "persona_name": "Concurrent Persona", "level": 2}),
+            data=json.dumps({"did": target_did, "persona_name": "Concurrent Persona", "level": 2, "manual_switch": True}),
             content_type="application/json",
         )
         self.assertEqual(resp.status_code, 200)
@@ -1112,7 +1131,7 @@ class PersonaSessionSwitchTest(TestCase):
         # Switch again to verify idempotent recovery and existing record reuse
         resp2 = self.client.post(
             reverse("api_persona_switch"),
-            data=json.dumps({"did": target_did, "persona_name": "Concurrent Persona", "level": 2}),
+            data=json.dumps({"did": target_did, "persona_name": "Concurrent Persona", "level": 2, "manual_switch": True}),
             content_type="application/json",
         )
         self.assertEqual(resp2.status_code, 200)
@@ -2884,7 +2903,7 @@ class SearchAPITests(TestCase):
 
 
 class NIP05EndpointTests(TestCase):
-    NIP05_RELAYS = ["wss://relay.iyou.me", "wss://nos.lol", "wss://relay.damus.io"]
+    NIP05_RELAYS = ["wss://relay.iyou.me"]
 
     def test_nip05_returns_cors_header_wildcard(self):
         response = self.client.get("/.well-known/nostr.json")
@@ -2942,6 +2961,65 @@ class NIP05EndpointTests(TestCase):
             data["names"]["audrey"],
             "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
         )
+
+    def test_nip05_returns_secp256k1_pubkey(self):
+        ed25519_did = "did:key:z6MkhaXgBZDvB9gGHgK9rR6xWGL2GCBXEgGhexP5xtJ3fc7u"
+        secp256k1_hex = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        user = User.objects.create_user(username=ed25519_did)
+        UserLinkDeck.objects.create(
+            user=user,
+            handle="secpuser",
+            nostr_pubkey=secp256k1_hex,
+            is_public=True,
+        )
+
+        response = self.client.get("/.well-known/nostr.json?name=secpuser")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["names"]["secpuser"], secp256k1_hex)
+        self.assertIn(secp256k1_hex, data["relays"])
+        self.assertEqual(data["relays"][secp256k1_hex], self.NIP05_RELAYS)
+
+
+class ClosedEcosystemIdentityAndRelayTests(TestCase):
+    def test_resolve_deck_pubkey_prefers_nostr_pubkey_over_username_hex(self):
+        from apps.core.views import _resolve_deck_pubkey
+
+        username_hex = "1111111111111111111111111111111111111111111111111111111111111111"
+        enclave_secp_hex = "2222222222222222222222222222222222222222222222222222222222222222"
+        user = User.objects.create_user(username=username_hex)
+        deck = UserLinkDeck.objects.create(
+            user=user,
+            handle="deckuser",
+            nostr_pubkey=enclave_secp_hex,
+        )
+        resolved = _resolve_deck_pubkey(deck)
+        self.assertEqual(resolved, enclave_secp_hex)
+
+    def test_ecosystem_pubkeys_includes_synced_secp256k1_keys(self):
+        from apps.core.identity import get_ecosystem_pubkeys
+
+        user = User.objects.create_user(username="did:key:z6Mkexampleuser1234")
+        secp_hex = "3333333333333333333333333333333333333333333333333333333333333333"
+        UserLinkDeck.objects.create(
+            user=user,
+            handle="ecosystem_member",
+            nostr_pubkey=secp_hex,
+        )
+        pubkeys = get_ecosystem_pubkeys()
+        self.assertIn(secp_hex, pubkeys)
+
+    def test_closed_ecosystem_default_relays(self):
+        from django.conf import settings
+        from apps.core.views import DEFAULT_RELAYS, INDEXING_FALLBACK_RELAYS, NIP05_RELAYS
+
+        # Closed ecosystem: only local relay and relay.iyou.me
+        self.assertEqual(settings.NOSTR_RELAYS, [settings.LOCAL_RELAY_URL, "wss://relay.iyou.me"])
+        self.assertEqual(settings.NOSTR_PUBLIC_RELAYS, [])
+        self.assertEqual(settings.NOSTR_READ_ONLY_RELAYS, [])
+        self.assertEqual(DEFAULT_RELAYS, [settings.LOCAL_RELAY_URL, "wss://relay.iyou.me"])
+        self.assertEqual(INDEXING_FALLBACK_RELAYS, ["wss://relay.iyou.me", settings.LOCAL_RELAY_URL])
+        self.assertEqual(NIP05_RELAYS, ["wss://relay.iyou.me"])
 
 
 class ApiContactsFollowTests(TestCase):
@@ -4500,11 +4578,16 @@ class CircleAwareRelaySetTests(TestCase):
             self.assertEqual(_relays_for_circle(circle), _relays_for_circle("iyou"))
 
     def test_global_circle_gets_the_wan_fleet(self):
+        import apps.core.views as views
         from apps.core.views import DEFAULT_RELAYS, _relays_for_circle
 
-        self.assertEqual(_relays_for_circle("global"), _relays_for_circle("global"))
-        self.assertNotEqual(_relays_for_circle("global"), DEFAULT_RELAYS)
-        self.assertGreater(len(_relays_for_circle("global")), len(DEFAULT_RELAYS))
+        # In closed-ecosystem default, global matches the closed ecosystem fleet
+        self.assertEqual(_relays_for_circle("global"), DEFAULT_RELAYS)
+        # When public relays are configured, global circle includes them
+        with patch.object(views, "PUBLIC_RELAYS", ["wss://relay.damus.io"]):
+            with patch.object(views, "GLOBAL_RELAYS", list(dict.fromkeys(DEFAULT_RELAYS + ["wss://relay.damus.io"]))):
+                self.assertNotEqual(_relays_for_circle("global"), DEFAULT_RELAYS)
+                self.assertGreater(len(_relays_for_circle("global")), len(DEFAULT_RELAYS))
 
     def test_explicit_relay_override_is_never_overridden_by_circle(self):
         from apps.core.views import _relays_for_circle
@@ -4515,6 +4598,7 @@ class CircleAwareRelaySetTests(TestCase):
 
     def test_settle_window_and_relay_set_agree_for_global(self):
         """The invariant that broke: 750ms settle window over an insider-only set."""
+        import apps.core.views as views
         from apps.core.views import (
             DEFAULT_RELAYS,
             DEFAULT_SETTLE_TIMEOUT,
@@ -4523,11 +4607,14 @@ class CircleAwareRelaySetTests(TestCase):
         )
 
         self.assertGreater(GLOBAL_SETTLE_TIMEOUT, DEFAULT_SETTLE_TIMEOUT)
-        self.assertGreater(
-            len(GLOBAL_RELAYS),
-            len(DEFAULT_RELAYS),
-            "Global must query more than the default fleet to justify its settle window",
-        )
+        # By default in closed ecosystem, GLOBAL_RELAYS matches DEFAULT_RELAYS
+        self.assertEqual(len(GLOBAL_RELAYS), len(DEFAULT_RELAYS))
+        with patch.object(views, "GLOBAL_RELAYS", list(dict.fromkeys(DEFAULT_RELAYS + ["wss://relay.damus.io"]))):
+            self.assertGreater(
+                len(views.GLOBAL_RELAYS),
+                len(DEFAULT_RELAYS),
+                "Global must query more than the default fleet when WAN relays are configured",
+            )
 
     def test_gallery_global_scope_queries_the_wan_fleet(self):
         """End-to-end guard on the regression: relay_req must see public relays."""

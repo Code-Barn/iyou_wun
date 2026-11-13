@@ -78,33 +78,14 @@ NOSTR_RELAYS = [
     "wss://relay.iyou.me",
 ]
 
-# Public WAN fleet, queried ONLY by the Global circle.
-#
-# The lean insider list above is the default for iyou/sovereign. Global scope is
-# different in kind: relay.iyou.me delivers zero events for public kinds, so with
-# only the insider fleet the Global feed and gallery have no public source at all
-# and GLOBAL_SETTLE_TIMEOUT spends 750ms waiting on a relay set that cannot answer.
-# These entries are what the widened settle window is actually waiting for. They
-# are kept out of the default fleet precisely so ordinary traffic never pays a
-# WAN round trip.
-NOSTR_PUBLIC_RELAYS = [
-    "wss://offchain.pub",
-    "wss://relay.damus.io",
-    "wss://relay.wellorder.net",
-    "wss://relay.snort.social",
-    "wss://nostr.mom",
-    "wss://nostr.oxtr.dev",
-    "wss://relay.primal.net",
-]
+# Closed-Ecosystem Default: Public WAN fleet is empty by default.
+# Users may configure external relays via NOSTR_PUBLIC_RELAYS or the UI Switchboard.
+NOSTR_PUBLIC_RELAYS = env.list("NOSTR_PUBLIC_RELAYS", default=[])
 
-# Relays we read from but never publish to. wss://relay.iyou.me handshakes
-# reliably and is queried for coverage, but its writes are dropped server-side,
-# so it must never appear in a publish target set. Mirrors the `write: false`
-# entry in buildBootstrapRelays() in static/js/relay_pool.js; a test asserts
-# the two catalogs agree so the policy cannot drift.
-NOSTR_READ_ONLY_RELAYS = [
-    "wss://relay.iyou.me",
-]
+# Relays we read from but never publish to. Empty by default in closed ecosystem
+# so wss://relay.iyou.me can serve as the writable WAN ecosystem relay when
+# ws://127.0.0.1:9003 is unavailable or blocked by HTTPS mixed-content rules.
+NOSTR_READ_ONLY_RELAYS = []
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 USE_X_FORWARDED_HOST = True

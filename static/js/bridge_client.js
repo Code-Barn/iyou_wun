@@ -527,7 +527,7 @@
         if (profile && profile.did) {
             try {
                 localStorage.setItem('wun_active_persona', JSON.stringify({
-                    name: profile.name || profile.profile_name || profile.label || '',
+                    name: profile.display_name || profile.profile_name || profile.name || profile.label || '',
                     handle: profile.handle || '',
                     level: profile.level !== undefined ? profile.level : profile.derivation_index,
                     did: profile.did
@@ -544,8 +544,8 @@
             nameStr = "@" + String(profile.handle).replace(/^@/, "");
         } else if (labelEl && labelEl.textContent && labelEl.textContent.trim().startsWith("@")) {
             nameStr = labelEl.textContent.trim();
-        } else if (profile.name || profile.profile_name || profile.label) {
-            nameStr = profile.name || profile.profile_name || profile.label;
+        } else if (profile.display_name || profile.profile_name || profile.name || profile.label) {
+            nameStr = profile.display_name || profile.profile_name || profile.name || profile.label;
         } else if (profile.npub) {
             nameStr = profile.npub.slice(0, 14) + "...";
         } else if (profile.did) {
@@ -587,11 +587,18 @@
      * refreshed except on the dashboard, which self-heals via the
      * `persona:session-reanchored` event so the bridge socket is never dropped.
      */
-    TauriBridgeClient.prototype.handlePersonaChanged = function (profile) {
+    TauriBridgeClient.prototype.handlePersonaChanged = function (profile, manualSwitch) {
         if (!profile) return;
         var did = profile.did || profile.active_did || "";
         var sessionDid = (typeof window.CURRENT_SESSION_DID === "string") ? window.CURRENT_SESSION_DID : "";
         if (!did || !sessionDid || did === sessionDid) return;
+
+        // Guard active Level 1 sessions against background persona hijacking
+        var activeLvl = (typeof window.ACTIVE_PERSONA_LEVEL === "number") ? window.ACTIVE_PERSONA_LEVEL : 1;
+        if (activeLvl === 1 && !manualSwitch) {
+            console.warn("[Bridge] Suppressing background persona re-anchor to preserve active Level 1 session (DID: " + did + ")");
+            return;
+        }
 
         if (this._isSwitchingPersona) {
             console.warn("[Bridge] Persona switch already in flight, ignoring duplicate event");
@@ -604,14 +611,15 @@
         this._isSwitchingPersona = true;
         this._lastSwitchedProfileId = profileId;
 
-        var name = profile.name || profile.profile_name || profile.label || "";
+        var name = profile.display_name || profile.profile_name || profile.name || profile.label || "";
         var level = profile.level !== undefined ? profile.level : (profile.derivation_index || 1);
         if (typeof level === "string") level = parseInt(level, 10) || 1;
 
         var payload = {
             did: did,
             persona_name: String(name),
-            level: level
+            level: level,
+            manual_switch: !!manualSwitch
         };
         var csrfToken = (typeof getCsrfToken === "function")
             ? getCsrfToken()
@@ -789,8 +797,8 @@
             var name = "";
             if (p.handle) {
                 name = "@" + String(p.handle).replace(/^@/, "");
-            } else if (p.name || p.profile_name || p.label) {
-                name = p.name || p.profile_name || p.label;
+            } else if (p.display_name || p.profile_name || p.name || p.label) {
+                name = p.display_name || p.profile_name || p.name || p.label;
             } else if (p.npub) {
                 name = p.npub.slice(0, 14) + "...";
             } else if (p.did) {
@@ -875,21 +883,33 @@
                     // Persist the enclave's true Secp256k1 Nostr pubkey so every
                     // downstream signature/query uses the real identity instead of a
                     // DID-derived placeholder, and mirror it into the Django session.
-                    var syncedHex = prof.nostr_pubkey_hex || prof.pubkey_hex || prof.pubkey || "";
-                    // Always cache whatever the enclave reports as the pubkey;
-                    // the server sync below only uploads 64-char hex forms.
-                    if (syncedHex) {
-                        try { localStorage.setItem("nostr_pubkey_hex", String(syncedHex)); } catch (e) { /* ignore storage quotas */ }
-                    }
-                    if (isHex64(syncedHex)) {
-                        this.syncKeysToServer(syncedHex.toLowerCase());
+                    // Guard: only call syncKeysToServer (and persist localStorage nostr_pubkey_hex)
+                    // when (prof.level === undefined || prof.level === 1) AND (!window.CURRENT_SESSION_DID || !prof.did || prof.did === window.CURRENT_SESSION_DID).
+                    // If iyou_home is switched to a Level 2 burner/dependent persona (prof.level === 2), log a debug message.
+                    var profLevel = prof.level !== undefined ? (typeof prof.level === "string" ? parseInt(prof.level, 10) : prof.level) : undefined;
+                    var isL1 = (profLevel === undefined || profLevel === 1);
+                    var sessionDid = (typeof window.CURRENT_SESSION_DID === "string") ? window.CURRENT_SESSION_DID : "";
+                    var isSessionMatch = (!sessionDid || !prof.did || prof.did === sessionDid);
+
+                    if (isL1 && isSessionMatch) {
+                        var syncedHex = prof.nostr_pubkey_hex || prof.pubkey_hex || prof.pubkey || "";
+                        if (syncedHex) {
+                            try { localStorage.setItem("nostr_pubkey_hex", String(syncedHex)); } catch (e) { /* ignore storage quotas */ }
+                        }
+                        if (isHex64(syncedHex)) {
+                            this.syncKeysToServer(syncedHex.toLowerCase());
+                        } else {
+                            // A previously parked key may now be authenticated.
+                            this.flushPendingKeySync();
+                        }
                     } else {
-                        // A previously parked key may now be authenticated.
-                        this.flushPendingKeySync();
+                        console.debug("[Bridge] Skipping L1 key sync for Level 2 sub-persona (level: " + prof.level + ", did: " + prof.did + ")");
                     }
 
                     this.updateActivePersonaUI(prof);
-                    this.handlePersonaChanged(prof);
+                    var isManual = !!(this._manualPersonaSwitch || message.type === "SET_ACTIVE_PERSONA_RESPONSE");
+                    this._manualPersonaSwitch = false;
+                    this.handlePersonaChanged(prof, isManual);
                     if (window.enclavePersonas && window.enclavePersonas.length > 0) {
                         this.renderPersonaDropdownList(window.enclavePersonas);
                     }
@@ -1451,6 +1471,9 @@
     // ---------- Persona Switcher API ----------
 
     window.switchPersona = function (profileId) {
+        if (window.bridgeClient) {
+            window.bridgeClient._manualPersonaSwitch = true;
+        }
         var socket = window.activeFeedSocket || (window.bridgeClient && window.bridgeClient.socket);
         if (!socket || socket.readyState !== WebSocket.OPEN) {
             console.warn('Bridge socket not connected');

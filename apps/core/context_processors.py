@@ -47,8 +47,15 @@ def satellite_urls(request):
 
 
 def user_identity(request):
+    import json
+    from .identity import get_ecosystem_pubkeys
+
+    ecosystem_pubkeys = sorted(list(get_ecosystem_pubkeys()))
+    ecosystem_pubkeys_json = json.dumps(ecosystem_pubkeys)
+
     context = {
         "SHOW_L2_TOGGLE": getattr(settings, "SHOW_L2_TOGGLE", True),
+        "ecosystem_pubkeys_json": ecosystem_pubkeys_json,
     }
     if not request.user.is_authenticated:
         context["user_display_label"] = ""
@@ -120,6 +127,7 @@ def user_identity(request):
         wot_distance_limit=limit,
         wot_distance_limit_json=limit_json,
         parent_did=dep_ctx.get("parent_did") or "",
+        ecosystem_pubkeys_json=ecosystem_pubkeys_json,
     )
     return context
 

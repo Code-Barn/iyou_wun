@@ -241,6 +241,23 @@ def api_persona_switch(request):
 
     target_did = did
 
+    is_manual = bool(payload.get("manual_switch") is True or str(payload.get("manual_switch")).lower() == "true")
+    if request.session.get("active_persona_level", 1) == 1 and not is_manual and request.user.username != target_did:
+        deck = UserLinkDeck.objects.filter(user=request.user).first()
+        pubkey = _resolve_deck_pubkey(deck) if deck else None
+        return JsonResponse({
+            "status": "locked_l1",
+            "preserved": True,
+            "success": True,
+            "active_did": request.user.username,
+            "did": request.user.username,
+            "reanchored": False,
+            "level": 1,
+            "active_persona_level": 1,
+            "handle": deck.handle if deck else None,
+            "nostr_pubkey_hex": pubkey,
+        }, status=200)
+
     if request.user.is_authenticated and request.user.username == target_did:
         # Already authenticated as this persona; update session metadata without cycling session ID
         request.session["active_persona_name"] = persona_name
@@ -577,11 +594,10 @@ def _resolve_profile_candidates(identifier):
         if found_user:
             owner_user = found_user
             owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
-            hex_pubkey = did_to_pubkey(owner_user.username)
             carried = "did"
-            # Inclusive: deck key + DID-derived key, so notes published during
-            # the early enclave transition stay reachable.
+            # Inclusive: deck key + DID-derived key, prioritizing deck.nostr_pubkey
             candidates = _author_candidates_for_deck(owner_deck, owner_user.username)
+            hex_pubkey = candidates[0] if candidates else (did_to_pubkey(owner_user.username) or "")
             return carried, owner_user, owner_deck, hex_pubkey, candidates
 
     if re.fullmatch(r"[0-9a-fA-F]{64}", identifier):
@@ -595,6 +611,12 @@ def _resolve_profile_candidates(identifier):
             # A bare hex identifier is always its own author.
             if hex_pubkey not in candidates:
                 candidates.append(hex_pubkey)
+            if owner_deck and owner_deck.nostr_pubkey and re.fullmatch(r"[0-9a-fA-F]{64}", owner_deck.nostr_pubkey.strip()):
+                deck_pk = owner_deck.nostr_pubkey.strip().lower()
+                if deck_pk in candidates:
+                    candidates.remove(deck_pk)
+                candidates.insert(0, deck_pk)
+            hex_pubkey = candidates[0] if candidates else hex_pubkey
         else:
             candidates = [hex_pubkey]
         return carried, owner_user, owner_deck, hex_pubkey, candidates
@@ -638,11 +660,15 @@ def _resolve_profile_candidates(identifier):
         if found_user:
             owner_user = found_user
             owner_deck = UserLinkDeck.objects.filter(user=owner_user).first()
-            candidates = list(filter(None, [
-                (owner_deck.nostr_pubkey if owner_deck else "") or "",
-                did_to_pubkey(owner_user.username),
-                hex_pubkey,
-            ]))
+            candidates = _author_candidates_for_deck(owner_deck, owner_user.username)
+            if hex_pubkey not in candidates:
+                candidates.append(hex_pubkey)
+            if owner_deck and owner_deck.nostr_pubkey and re.fullmatch(r"[0-9a-fA-F]{64}", owner_deck.nostr_pubkey.strip()):
+                deck_pk = owner_deck.nostr_pubkey.strip().lower()
+                if deck_pk in candidates:
+                    candidates.remove(deck_pk)
+                candidates.insert(0, deck_pk)
+            hex_pubkey = candidates[0] if candidates else hex_pubkey
         else:
             candidates = [hex_pubkey]
         return carried, owner_user, owner_deck, hex_pubkey, candidates
@@ -1684,10 +1710,9 @@ def api_profile_notes(request, identifier):
     
     # Set a 2.0s deadline for the relay request to avoid blocking
     deadline = time.time() + 2.0
-    relays = get_relays_for_request(request)
     local_relay = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
-    if local_relay and local_relay not in relays:
-        relays = list(relays) + [local_relay]
+    request_relays = get_relays_for_request(request)
+    relays = list(dict.fromkeys([local_relay, "wss://relay.iyou.me"] + list(request_relays)))
     
     try:
         raw_events = relay_req(filter_obj, relay_urls=relays, deadline=deadline)
@@ -2565,11 +2590,11 @@ def og_fallback_image(request):
     return f"{scheme}://{host}{static('img/iyou_symbol.png')}"
 
 
+LOCAL_RELAY_URL = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
+
 INDEXING_FALLBACK_RELAYS = [
-    "wss://relay.nostr.band",
-    "wss://purplepag.es",
-    "wss://nos.lol",
-    "wss://relay.damus.io",
+    "wss://relay.iyou.me",
+    LOCAL_RELAY_URL,
 ]
 
 
@@ -2826,36 +2851,24 @@ def get_tag_value(tags, tag_name, index=1, default=""):
     return default
 
 
-DEFAULT_RELAYS = [
-    "ws://127.0.0.1:9003",
-    "wss://relay.iyou.me",
-]
-
-# Public WAN fleet, consulted only by the Global circle. Kept out of
-# DEFAULT_RELAYS so iyou/sovereign traffic never pays a WAN round trip; see
-# NOSTR_PUBLIC_RELAYS in config/settings.py for the rationale.
-PUBLIC_RELAYS = getattr(
+DEFAULT_RELAYS = getattr(
     settings,
-    "NOSTR_PUBLIC_RELAYS",
+    "NOSTR_RELAYS",
     [
-        "wss://offchain.pub",
-        "wss://relay.damus.io",
-        "wss://relay.wellorder.net",
-        "wss://relay.snort.social",
-        "wss://nostr.mom",
-        "wss://nostr.oxtr.dev",
-        "wss://relay.primal.net",
+        LOCAL_RELAY_URL,
+        "wss://relay.iyou.me",
     ],
 )
 
-# Centralized relay fleet: NOSTR_RELAYS from Django settings wins when defined;
-# otherwise fall back to the canonical bootstrap list above.
-DEFAULT_RELAYS = getattr(settings, "NOSTR_RELAYS", DEFAULT_RELAYS)
+# Public WAN fleet: empty by default in closed ecosystem.
+PUBLIC_RELAYS = getattr(
+    settings,
+    "NOSTR_PUBLIC_RELAYS",
+    [],
+)
 
-# Relays we read from but never publish to. See NOSTR_READ_ONLY_RELAYS in
-# config/settings.py; mirrored by the `write: false` catalog entry in
-# static/js/relay_pool.js.
-READ_ONLY_RELAYS = set(getattr(settings, "NOSTR_READ_ONLY_RELAYS", ["wss://relay.iyou.me"]))
+# Relays we read from but never publish to. Empty by default in closed ecosystem.
+READ_ONLY_RELAYS = set(getattr(settings, "NOSTR_READ_ONLY_RELAYS", []))
 
 
 def relay_catalog():
@@ -4780,18 +4793,21 @@ def did_to_npub(did):
 
 
 def _resolve_deck_pubkey(deck):
-    """Resolve a UserLinkDeck to its 64-char Nostr public key hex, or None."""
+    """Resolve a UserLinkDeck to its 64-char lowercase Secp256k1 Nostr pubkey hex."""
+    if not deck:
+        return None
+    raw_pk = (deck.nostr_pubkey or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", raw_pk):
+        return raw_pk
     username = (deck.user.username if deck.user else "") or ""
-    if re.match(r"^[0-9a-fA-F]{64}$", username):
+    if re.fullmatch(r"[0-9a-fA-F]{64}", username):
         return username.lower()
     if username.startswith("did:"):
         return did_to_pubkey(username)
-    if username.startswith("npub1"):
-        return npub_to_hex(username)
     return None
 
 
-NIP05_RELAYS = ["wss://relay.iyou.me", "wss://nos.lol", "wss://relay.damus.io"]
+NIP05_RELAYS = ["wss://relay.iyou.me"]
 
 
 def nip05_well_known(request):

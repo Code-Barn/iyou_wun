@@ -1408,8 +1408,12 @@ class AttachSocialCountsTests(TestCase):
         with patch("apps.core.views.relay_req", side_effect=mock_relay_req):
             result = fetch_thread("target_reply", relay_urls=["wss://relay.iyou.me"])
 
-        self.assertIn("wss://relay.nostr.band", captured_relays)
-        self.assertIn("wss://purplepag.es", captured_relays)
+        from django.conf import settings
+
+        self.assertIn("wss://relay.iyou.me", captured_relays)
+        self.assertIn(settings.LOCAL_RELAY_URL, captured_relays)
+        self.assertNotIn("wss://relay.nostr.band", captured_relays)
+        self.assertNotIn("wss://purplepag.es", captured_relays)
         self.assertEqual(len(result["ancestors"]), 1)
         self.assertEqual(result["ancestors"][0]["id"], "missing_parent_id")
 

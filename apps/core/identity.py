@@ -72,9 +72,9 @@ def _cache_delete(key):
 def get_ecosystem_pubkeys(force_refresh=False) -> set:
     """Return the cached set of ecosystem pubkey hexes for this node.
 
-    Membership is computed purely from registered local auth accounts
-    (``User.username``) resolved through :func:`did_to_pubkey_hex`, so the
-    iyou circle is cryptographically scoped to this node's own users.
+    Membership includes:
+    1. Direct Secp256k1 Nostr pubkeys registered on UserLinkDeck (nostr_pubkey)
+    2. Registered local auth accounts (User.username) resolved through did_to_pubkey_hex
     """
     if not force_refresh:
         cached = _cache_get(CACHE_KEY_ECOSYSTEM_PUBKEYS)
@@ -83,6 +83,16 @@ def get_ecosystem_pubkeys(force_refresh=False) -> set:
     keys = set()
     try:
         from django.contrib.auth import get_user_model
+        from .models import UserLinkDeck
+
+        for raw_pk in (
+            UserLinkDeck.objects.exclude(nostr_pubkey="")
+            .exclude(nostr_pubkey__isnull=True)
+            .values_list("nostr_pubkey", flat=True)
+        ):
+            clean = (raw_pk or "").strip().lower()
+            if _HEX64_RE.fullmatch(clean):
+                keys.add(clean)
 
         usernames = (
             get_user_model()
@@ -120,11 +130,14 @@ def _deck_for_pubkey(pk):
     Both are treated as aliases for the same deck so a note signed by either key
     renders the registered identity instead of a raw npub.
     """
-    candidates = [pk, f"did:iyou:0x{pk}"]
-    deck = UserLinkDeck.objects.filter(user__username__in=candidates).first()
+    pk = (pk or "").strip().lower()
+    if not pk:
+        return None
+    deck = UserLinkDeck.objects.filter(nostr_pubkey__iexact=pk).select_related("user").first()
     if deck is not None:
         return deck
-    deck = UserLinkDeck.objects.filter(nostr_pubkey=pk).first()
+    candidates = [pk, f"did:iyou:0x{pk}"]
+    deck = UserLinkDeck.objects.filter(user__username__in=candidates).select_related("user").first()
     if deck is not None:
         return deck
     for d in UserLinkDeck.objects.select_related("user").iterator():

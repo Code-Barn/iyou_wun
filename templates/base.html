@@ -128,7 +128,12 @@
     <script>
       window.userPubkey = window.userPubkey || "{{ user_pubkey_hex|default:'' }}";
       window.userNpub = window.userNpub || "{{ user_npub|default:'' }}";
+      window.userHandle = window.userHandle || "{{ user_handle|default:''|escapejs }}";
+      window.userDisplayName = window.userDisplayName || "{{ user_display_name|default:''|escapejs }}";
+      window.userAvatarUrl = window.userAvatarUrl || "{{ user_avatar_url|default:''|escapejs }}";
       window.CURRENT_SESSION_DID = window.CURRENT_SESSION_DID || "{{ current_session_did|escapejs }}";
+      window.ACTIVE_PERSONA_LEVEL = {{ active_persona_level|default:1 }};
+      window.IYOU_ECOSYSTEM_KEYS = {{ ecosystem_pubkeys_json|default:"[]"|safe }};
       window.GEOGRAPHIC_SCOPE = "{{ GEOGRAPHIC_SCOPE|default:''|escapejs }}";
       window.JURISDICTION_LEVEL = "{{ JURISDICTION_LEVEL|default:''|escapejs }}";
       window.POLY_BASE_DOMAIN = "{{ POLY_BASE_DOMAIN|default:'poly.iyou.me'|escapejs }}";

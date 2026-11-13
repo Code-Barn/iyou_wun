@@ -847,7 +847,7 @@
         // Display-only fallback. Never used for routing.
         var displayNpub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "Anonymous");
         var npub = displayNpub;
-        var authorName = note.author_display_name || note.author_name || displayNpub;
+        var authorName = note.author_display_name || note.display_name || note.author_name || note.profile_name || note.name || displayNpub;
         // Strict de-duplication, mirroring the guard in
         // templates/includes/_thread_post.html: the subline is dropped unless
         // the handle is non-empty and strictly distinct from BOTH raw name
@@ -857,6 +857,7 @@
         var authorSubLabel = (authorHandle &&
             authorHandle !== authorName &&
             authorHandle !== (note.author_display_name || "") &&
+            authorHandle !== (note.display_name || "") &&
             authorHandle !== (note.author_name || "")) ? authorHandle : "";
         var authorAvatar = note.author_avatar || "";
         var authorDid = note.author_did || "";
@@ -1266,22 +1267,42 @@
         }
 
         // Attribute the card to the ACTUAL incoming event author, never the
-        // logged-in viewer. Metadata may be attached by the server bridge, or
-        // we fall back to a short label derived from the event's own pubkey.
-        var eventPubkey = event.pubkey_hex || event.pubkey || "";
-        // Same split as buildCardHtml: a routable npub (or empty) for the `npub`
-        // field, and a possibly-truncated label for the byline text. Park the
-        // label in `npub` and the card href resolves to a dead route.
-        var eventNpub = /^npub1[0-9a-z]+$/i.test(event.npub || "") ? event.npub : "";
+        // logged-in viewer, unless the event author matches the current user.
+        // Metadata may be attached by the server bridge, or hydrated from
+        // the active user session/profile, or fall back to a short pubkey label.
+        var eventPubkey = (event.pubkey_hex || event.pubkey || "").toLowerCase();
+        var activePk = (window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex || window.activeProfile.pubkey) : (window.userPubkey || localStorage.getItem("nostr_pubkey_hex") || "")) || "";
+        activePk = String(activePk).toLowerCase();
+        var isCurrentUser = !!(eventPubkey && activePk && eventPubkey === activePk);
+
+        var eventNpub = /^npub1[0-9a-z]+$/i.test(event.npub || "") ? event.npub : (isCurrentUser && window.userNpub ? window.userNpub : "");
         var eventNpubLabel = event.npub || (eventPubkey ? eventPubkey.substring(0, 12) + "..." : "");
-        var eventAuthorName = event.author_display_name || event.author_name || eventNpubLabel || "";
-        var eventAuthorAvatar = event.author_avatar || "";
+
+        var activeProf = window.activeProfile || {};
+        var fallbackName = isCurrentUser ? (activeProf.display_name || activeProf.profile_name || activeProf.name || activeProf.label || window.userDisplayName || "") : "";
+        var eventAuthorName = event.author_display_name || event.display_name || event.author_name || event.profile_name || fallbackName || eventNpubLabel || "";
+
+        var fallbackHandle = isCurrentUser ? (activeProf.handle || window.userHandle || "") : "";
+        var eventAuthorHandle = event.author_handle || event.handle || fallbackHandle || "";
+
+        var fallbackAvatar = isCurrentUser ? (activeProf.avatar || activeProf.avatar_url || window.userAvatarUrl || "") : "";
+        var eventAuthorAvatar = event.author_avatar || fallbackAvatar || "";
+
+        var fallbackUrl = "";
+        if (eventAuthorHandle) {
+            fallbackUrl = "/@" + String(eventAuthorHandle).replace(/^@/, "") + "/";
+        } else if (eventNpub) {
+            fallbackUrl = "/profile/" + eventNpub + "/";
+        }
+        var eventAuthorUrl = event.author_url || fallbackUrl || "";
+
         // Sovereign only when the event itself carries verified iyou metadata or
         // the author pubkey is a known ecosystem member — never blanket-true.
         var isSovereign = !!(
             event.is_sovereign ||
             event.is_iyou_native ||
             event.author_did ||
+            isCurrentUser ||
             (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(eventPubkey))
         );
 
@@ -1330,9 +1351,12 @@
             kind: event.kind,
             pubkey: eventPubkey,
             pubkey_hex: eventPubkey,
-            author_did: event.author_did || "",
+            author_did: event.author_did || (isCurrentUser ? (window.userDid || window.CURRENT_SESSION_DID || "") : ""),
+            author_handle: eventAuthorHandle,
+            author_url: eventAuthorUrl,
             npub: eventNpub,
             author_name: eventAuthorName,
+            author_display_name: eventAuthorName,
             author_avatar: eventAuthorAvatar,
             content: event.content,
             display_content: event.display_content,
@@ -1342,7 +1366,7 @@
             media_url: mediaUrl,
             mime_type: mimeType,
             is_sovereign: isSovereign,
-            is_iyou_native: !!event.is_iyou_native,
+            is_iyou_native: !!(event.is_iyou_native || isSovereign),
             reactions: [],
             reply_count: 0
         };
@@ -3735,7 +3759,7 @@
         if (composerBadge) {
             var level = profile.level !== undefined ? profile.level : profile.derivation_index;
             var levelStr = (level === 1) ? 'L1' : (level ? 'L' + level : 'L2');
-            var nameStr = profile.name || profile.profile_name || (profile.handle ? '@' + profile.handle : 'Primary');
+            var nameStr = profile.display_name || profile.profile_name || profile.name || (profile.handle ? '@' + profile.handle : 'Primary');
             composerBadge.textContent = 'Posting as: ' + nameStr + ' (' + levelStr + ')';
         }
     });
