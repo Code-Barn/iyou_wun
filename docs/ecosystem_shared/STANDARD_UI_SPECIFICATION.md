@@ -434,14 +434,14 @@ To optimize performance and eliminate loading high-res square master assets (~51
   ```
   This ensures satellites that haven't generated `logo_square_sm.png` yet safely resolve to `logo_square.png` without displaying a broken image box.
 
-**Dual Light/Dark Logos (`dual_logo=True`, e.g. `iyou_dine` with `logo_light.png` + `logo_dark.png` in `../iyou_dine/static/img/`)**: When `APP_FEATURE_MATRIX[slug]["dual_logo"]` is `True`, the generator emits two images with pure-CSS theme toggling in both Layer 1 and Layer 3 (no JS):
+**Dual Light/Dark Logos (`dual_logo=True`, e.g. `iyou_dine` and `iyou_clar` with `logo_light.png`/`logo_square_light.png` + `logo_dark.png`/`logo_square_dark.png`)**: When `APP_FEATURE_MATRIX[slug]["dual_logo"]` is `True`, the generator emits two images with pure-CSS theme toggling in both Layer 1 and Layer 3 (no JS):
 ```html
 <img src="{% static 'img/logo_light.png' %}" class="block dark:hidden h-8 w-8 rounded-lg object-contain shadow-sm border border-slate-200" alt="dine">
 <img src="{% static 'img/logo_dark.png' %}" class="hidden dark:block h-8 w-8 rounded-lg object-contain shadow-sm border border-slate-800" alt="dine">
 ```
-- `logo_light.png` (`block dark:hidden`) renders on light surfaces; `logo_dark.png` (`hidden dark:block`) renders on dark surfaces.
+- `logo_light.png` / `logo_square_light.png` (`block dark:hidden`) renders on light surfaces; `logo_dark.png` / `logo_square_dark.png` (`hidden dark:block`) renders on dark surfaces.
 - Layer 3 (`_footer.html`) mirrors the same pair at footer scale (`h-20 w-20 sm:h-24 sm:w-24 rounded-2xl`).
-- When `dual_logo` is `False` (default, e.g. `poly`, `wun`), the generator retains the canonical single `logo_square_sm.png` (+ `onerror` fallback to `logo_square.png`) image tag. This preserves backward compatibility while enabling `iyou_dine`'s dual assets (see `BRAND_ASSET_STANDARDIZATION_SPEC`, ca388a3, for the fleet filename grammar: `<subject>[_<shape>][_<variant>][_<size>]` with pure-CSS `block dark:hidden` / `hidden dark:block` switching and no `onerror` for dual assets).
+- When `dual_logo` is `False` (default, e.g. `poly`, `wun`), the generator retains the canonical single `logo_square_sm.png` (+ `onerror` fallback to `logo_square.png`) image tag. This preserves backward compatibility while enabling dual assets in `iyou_dine` and `iyou_clar` (see `BRAND_ASSET_STANDARDIZATION_SPEC`, ca388a3, for the fleet filename grammar: `<subject>[_<shape>][_<variant>][_<size>]` with pure-CSS `block dark:hidden` / `hidden dark:block` switching and no `onerror` for dual assets).
 
 ### 3.7 Unified Standard Header — Deprecation of PRESERVE_LAYER_1_APPS
 All 20 applications (19 relying-party satellites + sovereign hub) now receive the standardized canonical `_standard_header.html` from `generate_templates.py` — no custom exceptions are preserved. The domain badge (`#domain-badge` via `APP_FEATURE_MATRIX[slug]["domain_badge"]`, or `#brand-descriptor-pill` via `APP_METADATA.badge` / `APP_DESCRIPTORS`) provides the per-app semantic classification.
