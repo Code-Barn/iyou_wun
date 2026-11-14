@@ -27,6 +27,16 @@
         "wss://relay.nostr.band"
     ]);
 
+    const LEGACY_DEFAULT_WAN_RELAYS = new Set([
+        "wss://offchain.pub",
+        "wss://relay.damus.io",
+        "wss://relay.primal.net",
+        "wss://nostr.mom",
+        "wss://relay.snort.social",
+        "wss://relay.wellorder.net",
+        "wss://nostr.oxtr.dev"
+    ]);
+
     /**
      * True when a relay URL is on the exclusion list. Declared as a hoisted
      * function (not a const arrow) because buildBootstrapRelays() runs at
@@ -35,6 +45,10 @@
      */
     function isExcludedRelay(url) {
         return EXCLUDED_CLIENT_RELAYS.has(normalizeUrl(url));
+    }
+
+    function isLegacyDefaultWanRelay(url) {
+        return LEGACY_DEFAULT_WAN_RELAYS.has(normalizeUrl(url));
     }
 
     /**
@@ -171,23 +185,29 @@
 
         // 2. Load stored custom relays from localStorage
         var enabledMap = {};
+        var customList = [];
+        var explicitCustomUrls = new Set();
         try {
             var stored = localStorage.getItem(STORAGE_KEY);
             try {
                 var customStored = localStorage.getItem(CUSTOM_STORAGE_KEY);
                 if (customStored) {
-                    var customList = JSON.parse(customStored);
+                    customList = JSON.parse(customStored);
                     if (Array.isArray(customList)) {
                         customList.forEach(function (entry) {
                             var url = typeof entry === "string" ? entry : (entry && entry.url);
                             if (!url) return;
                             if (isExcludedRelay(url)) return;
+                            var norm = normalizeUrl(url);
                             // Only an explicit boolean is a stored preference. A bare
                             // string is a legacy URL-only entry, and treating it as
                             // "enabled" would silently switch a cataloged
                             // disabled-by-default public relay back on.
                             if (entry && typeof entry === "object" && typeof entry.enabled === "boolean") {
-                                enabledMap[normalizeUrl(url)] = entry.enabled;
+                                enabledMap[norm] = entry.enabled;
+                                if (entry.enabled === true) {
+                                    explicitCustomUrls.add(norm);
+                                }
                             }
                         });
                     }
@@ -209,6 +229,11 @@
                         // Scrub excluded relays out of the persisted list as we read
                         // it, so a stale wun_relays entry can never re-seed the pool.
                         if (isExcludedRelay(url)) {
+                            scrubbed = true;
+                            return;
+                        }
+                        // Automatically strip legacy default WAN relays unless explicitly saved in wun_custom_relays
+                        if (isLegacyDefaultWanRelay(url) && !explicitCustomUrls.has(norm) && enabledMap[norm] !== true) {
                             scrubbed = true;
                             return;
                         }
@@ -252,6 +277,11 @@
                     if (!url) return;
                     var norm = normalizeUrl(url);
                     if (isExcludedRelay(url)) {
+                        scrubbedCustom = true;
+                        delete enabledMap[norm];
+                        return;
+                    }
+                    if (isLegacyDefaultWanRelay(url) && !explicitCustomUrls.has(norm) && enabledMap[norm] !== true) {
                         scrubbedCustom = true;
                         delete enabledMap[norm];
                         return;
@@ -473,13 +503,20 @@
         var total = 0;
         var online = 0;
         var quarantined = 0;
+        var isHttps = (typeof window !== "undefined" && window.location && String(window.location.protocol || "").toLowerCase() === "https:");
         this.relays.forEach(function (r) {
             if (r.enabled === false) return;
+            // On https: origins, do not count blocked loopback ws://127.0.0.1:9003 as a degraded failure
+            if (isHttps && (r.isLocal || (r.url && (r.url.indexOf("ws://127.0.0.1") === 0 || r.url.indexOf("ws://localhost") === 0)))) return;
             total++;
             if (r.status === "online") online++;
             else if (r.status === "quarantined") quarantined++;
         });
         return { online: online, total: total, quarantined: quarantined };
+    };
+
+    RelayPool.prototype.getCounts = function () {
+        return this.getActiveRelayCount();
     };
 
     /**

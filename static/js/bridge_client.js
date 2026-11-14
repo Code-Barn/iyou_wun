@@ -242,6 +242,8 @@
         this.isProcessing = false;
         this.pendingSignedPayload = null;
         this._onMessage = null;
+        this._pendingSignRequests = new Map();  // reqId -> { reqId, resolve, event, fallbackTimer }
+        this._signResolvers = [];               // FIFO fallback queue
         // Project Zero Trust Lens alias store (purely in-memory, never persisted)
         this._aliasCache = new Map();          // normalized key -> { nickname, trust_level, badge } | null
         this._aliasQueue = new Set();          // normalized keys awaiting dispatch
@@ -936,18 +938,55 @@
             }
 
             if (message.type === "signed_event") {
-                var signedEvent = message.event;
-                if (this.pendingEvent && signedEvent) {
-                    this.pendingEvent.id = signedEvent.id;
-                    this.pendingEvent.sig = signedEvent.sig;
+                this.isProcessing = false;
+                var signedEvent = message.event || message;
+                var reqId = message.req_id || message.request_id || "";
+                var entry = null;
+
+                if (reqId && this._pendingSignRequests && this._pendingSignRequests.has(reqId)) {
+                    entry = this._pendingSignRequests.get(reqId);
+                    this._pendingSignRequests.delete(reqId);
+                    if (this._signResolvers) {
+                        var idx = this._signResolvers.indexOf(entry);
+                        if (idx !== -1) this._signResolvers.splice(idx, 1);
+                    }
+                } else if (this._pendingSignRequests && this._pendingSignRequests.size > 0) {
+                    var firstKey = this._pendingSignRequests.keys().next().value;
+                    entry = this._pendingSignRequests.get(firstKey);
+                    this._pendingSignRequests.delete(firstKey);
+                    if (this._signResolvers) {
+                        var idx2 = this._signResolvers.indexOf(entry);
+                        if (idx2 !== -1) this._signResolvers.splice(idx2, 1);
+                    }
+                } else if (this._signResolvers && this._signResolvers.length) {
+                    entry = this._signResolvers.shift();
                 }
+
+                if (entry && entry.fallbackTimer) {
+                    clearTimeout(entry.fallbackTimer);
+                }
+
+                var targetEvent = (entry && entry.event) ? entry.event : (this.pendingEvent || {});
+                if (signedEvent) {
+                    if (signedEvent.id) targetEvent.id = signedEvent.id;
+                    if (signedEvent.sig) targetEvent.sig = signedEvent.sig;
+                    if (signedEvent.pubkey) targetEvent.pubkey = signedEvent.pubkey;
+                    if (signedEvent.tags && (!targetEvent.tags || !targetEvent.tags.length)) {
+                        targetEvent.tags = signedEvent.tags;
+                    }
+                }
+                this.pendingEvent = targetEvent;
+
                 if (this._onMessage) {
-                    this._onMessage(this.pendingEvent || signedEvent, signedEvent);
+                    this._onMessage(targetEvent, signedEvent);
                 }
-                if (this._signResolvers && this._signResolvers.length) {
-                    var resolver = this._signResolvers.shift();
-                    resolver(this.pendingEvent || signedEvent);
+
+                if (entry && typeof entry.resolve === "function") {
+                    entry.resolve(targetEvent);
+                } else if (typeof entry === "function") {
+                    entry(targetEvent);
                 }
+                return;
             }
 
             if (message.type === "OMNI_SIGN_RESPONSE") {
@@ -1004,42 +1043,68 @@
     };
 
     TauriBridgeClient.prototype.signEvent = function (event) {
+        this.isProcessing = true;
         this.pendingEvent = event;
         var self = this;
+        var reqId = "req_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+
+        this._pendingSignRequests = this._pendingSignRequests || new Map();
+        this._signResolvers = this._signResolvers || [];
+
+        var checkSocket = null;
+        var fallbackTimer = null;
+        var reqEntry = null;
+
         var promise = new Promise(function (resolve) {
-            self._signResolvers = self._signResolvers || [];
-            self._signResolvers.push(resolve);
-            setTimeout(function () {
-                var idx = self._signResolvers.indexOf(resolve);
-                if (idx !== -1) {
-                    self._signResolvers.splice(idx, 1);
-                    resolve(self.pendingEvent || event);
+            fallbackTimer = setTimeout(function () {
+                if (self._pendingSignRequests && self._pendingSignRequests.has(reqId)) {
+                    var pending = self._pendingSignRequests.get(reqId);
+                    self._pendingSignRequests.delete(reqId);
+                    if (checkSocket) clearInterval(checkSocket);
+                    if (self._signResolvers) {
+                        var idx = self._signResolvers.indexOf(reqEntry);
+                        if (idx !== -1) self._signResolvers.splice(idx, 1);
+                    }
+                    if (self.isProcessing) {
+                        self.showFallbackModal();
+                    }
+                    resolve((pending && pending.event) || self.pendingEvent || event);
                 }
-            }, SIGN_TIMEOUT_MS + 1000);
+            }, SIGN_TIMEOUT_MS);
+
+            reqEntry = {
+                reqId: reqId,
+                resolve: resolve,
+                event: event,
+                fallbackTimer: fallbackTimer
+            };
+            self._pendingSignRequests.set(reqId, reqEntry);
+            self._signResolvers.push(reqEntry);
         });
 
         if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
             this.connect();
         }
 
-        var request = { type: "sign_event", event: event };
-        var checkSocket = setInterval(function () {
+        var request = { type: "sign_event", req_id: reqId, event: event };
+        checkSocket = setInterval(function () {
             if (self.socket && self.socket.readyState === WebSocket.OPEN) {
                 clearInterval(checkSocket);
                 try {
                     self.socket.send(JSON.stringify(request));
                 } catch (err) {
                     clearInterval(checkSocket);
+                    if (fallbackTimer) clearTimeout(fallbackTimer);
+                    if (self._pendingSignRequests) self._pendingSignRequests.delete(reqId);
+                    if (self._signResolvers) {
+                        var idx = self._signResolvers.indexOf(reqEntry);
+                        if (idx !== -1) self._signResolvers.splice(idx, 1);
+                    }
                     self.showFallbackModal();
                 }
             }
         }, SOCKET_POLL_INTERVAL);
-        setTimeout(function () {
-            if (self.isProcessing) {
-                clearInterval(checkSocket);
-                self.showFallbackModal();
-            }
-        }, SIGN_TIMEOUT_MS);
+
         return promise;
     };
 
@@ -1412,6 +1477,13 @@
     TauriBridgeClient.prototype._resetProcessing = function () {
         this.isProcessing = false;
         this.pendingEvent = null;
+        if (this._pendingSignRequests) {
+            this._pendingSignRequests.forEach(function (entry) {
+                if (entry && entry.fallbackTimer) clearTimeout(entry.fallbackTimer);
+            });
+            this._pendingSignRequests.clear();
+        }
+        this._signResolvers = [];
         var btnText = document.getElementById("profileBtnText");
         var btnLoading = document.getElementById("profileBtnLoading");
         var saveBtn = document.getElementById("profileSaveBtn");
@@ -1425,6 +1497,13 @@
         this.pendingEvent = null;
         this.pendingVote = null;
         this.pendingPoll = false;
+        if (this._pendingSignRequests) {
+            this._pendingSignRequests.forEach(function (entry) {
+                if (entry && entry.fallbackTimer) clearTimeout(entry.fallbackTimer);
+            });
+            this._pendingSignRequests.clear();
+        }
+        this._signResolvers = [];
         if (typeof window.pendingReply !== "undefined") window.pendingReply = null;
 
         var btn = document.getElementById("postButton");
