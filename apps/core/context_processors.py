@@ -110,6 +110,13 @@ def user_identity(request):
     limit = dep_ctx["wot_distance_limit"]
     limit_json = "Infinity" if limit == float("inf") else str(limit)
 
+    from django.urls import reverse
+    profile_target = legacy_handle or npub or pubkey or request.user.username
+    try:
+        user_profile_url = reverse("profile", kwargs={"npub": profile_target}) if profile_target else "/dashboard"
+    except Exception:
+        user_profile_url = f"/profile/{profile_target}/" if profile_target else "/dashboard"
+
     context.update(
         user_display_label=display_label,
         user_display_name=display_name,
@@ -120,7 +127,7 @@ def user_identity(request):
         user_pubkey_hex=pubkey,
         user_npub=npub,
         user_handle=legacy_handle,
-        user_profile_url=f"/profile/{npub}/" if npub else "/dashboard",
+        user_profile_url=user_profile_url,
         user_avatar_url=avatar_url,
         is_dependent=dep_ctx["is_dependent"],
         dependent_bracket=dep_ctx["bracket"],

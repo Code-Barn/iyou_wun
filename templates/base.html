@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block head_title %}{% block title %}iyou_wun — Sovereign Social Hub{% endblock %}{% endblock %}</title>
+    <link rel="icon" type="image/png" href="{% static 'img/logo_square.png' %}">
+    <link rel="shortcut icon" href="{% static 'img/logo_square.png' %}">
     <script>
       (function() {
         const cookieMatch = document.cookie.match(/(?:^|; )wun_theme=([^;]*)/);
@@ -187,8 +189,8 @@
     {% if user.is_authenticated %}
       <!-- iyou_chat Sovereign Dock Integration -->
       <script 
-        src="{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}/static/js/dock_embed.js" 
-        data-chat-origin="{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}"
+        src="{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}/static/js/dock_embed.js" 
+        data-chat-origin="{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}"
         defer>
       </script>
       <script>
@@ -196,7 +198,7 @@
           if (window.IyouChatDock) {
             window.IyouChatDock.openPeer(peer);
           } else {
-            const chatOrigin = "{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}";
+            const chatOrigin = "{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}";
             window.open(chatOrigin + "/?peer=" + encodeURIComponent(peer), "_blank");
           }
         };

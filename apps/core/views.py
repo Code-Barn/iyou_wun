@@ -349,8 +349,8 @@ def api_sync_keys(request):
         try:
             deck = claim_handle(request.user, base)
         except Exception:
-            deck = UserLinkDeck.objects.filter(user=request.user).first() or UserLinkDeck.objects.create(
-                user=request.user, handle=base[:32]
+            deck, _ = UserLinkDeck.objects.get_or_create(
+                user=request.user, defaults={"handle": base[:32]}
             )
 
     previous_pubkey = (deck.nostr_pubkey or "").strip().lower()
@@ -384,8 +384,9 @@ def api_sync_keys(request):
 def get_effective_user_pubkey(request=None):
     """Resolve the authenticated user's authoritative Secp256k1 hex pubkey.
 
-    Prefers the enclave-synced key (session snapshot or UserLinkDeck), and only
-    falls back to the OIDC DID-derived key while no explicit key has been synced.
+    Prefers the enclave-synced key (session snapshot or UserLinkDeck). If no
+    Secp256k1 pubkey is synced yet, returns "" (never masquerades Ed25519 DID
+    bytes as a Nostr Secp256k1 key).
     """
     if not request or not getattr(request, "user", None) or not request.user.is_authenticated:
         return ""
@@ -393,7 +394,7 @@ def get_effective_user_pubkey(request=None):
     synced = ""
     if hasattr(request, "session"):
         synced = str(request.session.get("nostr_pubkey_hex") or "").strip()
-    if not re.fullmatch(r"[0-9a-f]{64}", synced):
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", synced):
         deck_synced = ""
         try:
             deck = UserLinkDeck.objects.filter(user=request.user).first()
@@ -402,9 +403,18 @@ def get_effective_user_pubkey(request=None):
             deck_synced = ""
         synced = deck_synced
 
-    if re.fullmatch(r"[0-9a-f]{64}", synced):
+    if re.fullmatch(r"[0-9a-fA-F]{64}", synced):
         return synced.lower()
-    return did_to_pubkey(request.user.username) or ""
+
+    uname = getattr(request.user, "username", "") or ""
+    if re.fullmatch(r"[0-9a-fA-F]{64}", uname):
+        return uname.lower()
+    if uname.startswith("did:iyou:0x"):
+        hex_part = uname.split("did:iyou:0x", 1)[1].strip()
+        if re.fullmatch(r"[0-9a-fA-F]{64}", hex_part):
+            return hex_part.lower()
+
+    return ""
 
 
 def _backfill_deck_pubkey_from_session(request):
@@ -540,14 +550,15 @@ def _deck_nostr_hex(deck):
     return ""
 
 
-def _author_candidates_for_deck(deck, username):
+def _author_candidates_for_deck(deck, username, session_pubkey=None):
     """Ordered, de-duplicated relay author candidates for a deck + its user.
 
     Both identities are queried, deck key first:
 
       1. ``deck.nostr_pubkey`` -- the clean secp256k1 key, preferred because a
          conformant public relay will actually match it.
-      2. the DID-derived key -- covers the early enclave transition, where notes
+      2. ``session_pubkey`` -- active session Nostr pubkey if synced.
+      3. the DID-derived key -- covers the early enclave transition, where notes
          were published under the DID-derived author value and no deck key was
          ever configured.
 
@@ -555,7 +566,10 @@ def _author_candidates_for_deck(deck, username):
     synced deck key takes over as the canonical signer.
     """
     ordered = []
-    for candidate in (_deck_nostr_hex(deck), _did_author_key_for_relays(username or "")):
+    clean_session = str(session_pubkey or "").strip().lower()
+    if clean_session and not re.fullmatch(r"[0-9a-fA-F]{64}", clean_session):
+        clean_session = ""
+    for candidate in (_deck_nostr_hex(deck), clean_session, _did_author_key_for_relays(username or "")):
         if candidate and candidate not in ordered:
             ordered.append(candidate)
     return ordered
@@ -632,10 +646,11 @@ def _resolve_profile_candidates(identifier):
     # attempt and fail. Ordered by discriminator then pk because uniq_handle_disc
     # permits one handle at several discriminators; the lowest discriminator is the
     # canonical deck, matching what /@<handle>/ resolves to.
-    if "@" not in identifier and HANDLE_PATTERN.match(identifier.lower()):
+    clean_handle = identifier.lstrip("@").lower() if not identifier.startswith("did:") else ""
+    if clean_handle and HANDLE_PATTERN.match(clean_handle):
         deck = (
             UserLinkDeck.objects.select_related("user")
-            .filter(handle__iexact=identifier)
+            .filter(handle__iexact=clean_handle)
             .order_by("discriminator", "pk")
             .first()
         )
@@ -1662,6 +1677,13 @@ def api_profile_notes(request, identifier):
         request.session.save = lambda *args, **kwargs: None
 
     _carried, _owner_user, _owner_deck, hex_pubkey, author_candidates = _resolve_profile_candidates(identifier)
+    session_pk = str(request.session.get("nostr_pubkey_hex") or "").strip().lower() if hasattr(request, "session") else ""
+    if session_pk and re.fullmatch(r"[0-9a-fA-F]{64}", session_pk):
+        if (request.user.is_authenticated and _owner_user == request.user) or (not _owner_user and not hex_pubkey):
+            if session_pk not in author_candidates:
+                author_candidates.insert(0, session_pk)
+            if not hex_pubkey:
+                hex_pubkey = session_pk
     if not hex_pubkey or not author_candidates:
         # A claimed Link Deck with no Nostr key is a valid identity with zero
         # posts, not a bad request. Return an empty 200 so the profile renders
@@ -1710,9 +1732,13 @@ def api_profile_notes(request, identifier):
     
     # Set a 2.0s deadline for the relay request to avoid blocking
     deadline = time.time() + 2.0
-    local_relay = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
+    is_secure = (hasattr(request, "is_secure") and request.is_secure()) or (getattr(request, "META", {}).get("HTTP_X_FORWARDED_PROTO") == "https")
     request_relays = get_relays_for_request(request)
-    relays = list(dict.fromkeys([local_relay, "wss://relay.iyou.me"] + list(request_relays)))
+    base_relays = ["wss://relay.iyou.me"]
+    if not is_secure:
+        local_relay = getattr(settings, "LOCAL_RELAY_URL", "ws://127.0.0.1:9003")
+        base_relays.insert(0, local_relay)
+    relays = list(dict.fromkeys(base_relays + list(request_relays)))
     
     try:
         raw_events = relay_req(filter_obj, relay_urls=relays, deadline=deadline)
@@ -3027,21 +3053,14 @@ def _connect_relay(relay_url, sub_id, filter_obj, timeout):
     return events
 
 
-def order_relays(relay_urls):
+def order_relays(relay_urls, is_secure=False):
     """Order and sanitize a relay query set for fan-out.
 
-    LOCAL_RELAY is pinned at index 0, followed by the host-verified responsive
-    fleet (settings.NOSTR_RELAYS — offchain.pub, damus, wellorder, snort, mom,
-    oxtr, primal, then the read-only ecosystem peer relay), then the caller's own
-    relays. Excluded relays are stripped and the set is deduped while preserving
-    order.
-
-    The fleet is read from DEFAULT_RELAYS rather than hardcoded so the pinned
-    order and the configured fleet can never drift apart.
-
-    The fleet is budget-capped against MAX_RELAY_FANOUT: the caller's relays are
-    reserved slots first, so a full-size fleet can never crowd out NIP-65 outbox
-    hints or a session relay pool via the fan-out truncation in relay_req().
+    When is_secure is False, LOCAL_RELAY is pinned at index 0. When is_secure is True
+    (e.g. production HTTPS), loopback relays are omitted to avoid routing HTTPS clients
+    or container workloads to nonexistent loopback sockets. Followed by the host-verified
+    responsive fleet (settings.NOSTR_RELAYS), then the caller's own relays. Excluded relays
+    are stripped and the set is deduped while preserving order.
     """
     if not relay_urls:
         return []
@@ -3050,13 +3069,19 @@ def order_relays(relay_urls):
     for url in relay_urls:
         if url in EXCLUDED_RELAYS or url in seen:
             continue
+        if is_secure and ("127.0.0.1" in url or "localhost" in url):
+            continue
         seen.add(url)
         caller.append(url)
 
-    fleet_budget = max(0, MAX_RELAY_FANOUT - len(caller) - 1)
-    ordered = [LOCAL_RELAY]
+    ordered = []
+    if not is_secure:
+        ordered.append(LOCAL_RELAY)
+    fleet_budget = max(0, MAX_RELAY_FANOUT - len(caller) - len(ordered))
     for fleet_url in DEFAULT_RELAYS:
-        if len(ordered) - 1 >= fleet_budget:
+        if is_secure and ("127.0.0.1" in fleet_url or "localhost" in fleet_url):
+            continue
+        if len(ordered) - (0 if is_secure else 1) >= fleet_budget:
             break
         if fleet_url not in ordered and fleet_url not in EXCLUDED_RELAYS:
             ordered.append(fleet_url)

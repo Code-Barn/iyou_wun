@@ -14,6 +14,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import re
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
@@ -99,6 +100,10 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                     store_dependent_context(self.request.session, claims)
                 except Exception as e:
                     logger.debug(f"Failed to store dependent context in create_user: {e}")
+        try:
+            self._sync_user_deck(user, claims)
+        except Exception as e:
+            logger.debug(f"Failed to sync user deck in create_user: {e}")
         return self._evaluate_admin_elevation(user, claims)
 
     def update_user(self, user, claims):
@@ -111,7 +116,53 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                     store_dependent_context(self.request.session, claims)
                 except Exception as e:
                     logger.debug(f"Failed to store dependent context in update_user: {e}")
+        try:
+            self._sync_user_deck(user, claims)
+        except Exception as e:
+            logger.debug(f"Failed to sync user deck in update_user: {e}")
         return self._evaluate_admin_elevation(user, claims)
+
+    def _sync_user_deck(self, user, claims=None):
+        if not user or user.is_anonymous:
+            return
+        from .models import UserLinkDeck
+        deck = UserLinkDeck.objects.filter(user=user).first()
+        if not deck:
+            handle = ""
+            if claims and isinstance(claims, dict):
+                handle = claims.get("preferred_username") or claims.get("handle") or claims.get("name") or ""
+            handle = str(handle or user.username or "user")[:32].lstrip("@").lower()
+            try:
+                from .views import claim_handle
+                deck = claim_handle(user, handle)
+            except Exception:
+                deck, _ = UserLinkDeck.objects.get_or_create(user=user, defaults={"handle": handle[:32]})
+
+        nostr_pk = ""
+        if claims and isinstance(claims, dict):
+            nostr_pk = claims.get("nostr_pubkey_hex") or claims.get("nostr_pubkey") or ""
+        if not nostr_pk and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
+            nostr_pk = self.request.session.get("nostr_pubkey_hex") or ""
+
+        nostr_pk = str(nostr_pk or "").strip().lower()
+        if deck and nostr_pk and re.fullmatch(r"[0-9a-f]{64}", nostr_pk):
+            if deck.nostr_pubkey != nostr_pk:
+                deck.nostr_pubkey = nostr_pk
+                deck.save(update_fields=["nostr_pubkey", "updated_at"])
+
+        if deck and claims and isinstance(claims, dict):
+            update_fields = []
+            display_name = claims.get("display_name") or claims.get("name")
+            if display_name and not deck.display_name:
+                deck.display_name = str(display_name)[:80]
+                update_fields.append("display_name")
+            avatar_url = claims.get("avatar_url") or claims.get("picture")
+            if avatar_url and not deck.avatar_url:
+                deck.avatar_url = str(avatar_url)
+                update_fields.append("avatar_url")
+            if update_fields:
+                update_fields.append("updated_at")
+                deck.save(update_fields=update_fields)
 
     def get_username(self, claims):
         return claims.get("sub")

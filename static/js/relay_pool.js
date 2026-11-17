@@ -120,10 +120,10 @@
     var NIP65_STORAGE_KEY = "wun_nip65_relays";
     var PROBE_TIMEOUT_MS = 3500;
     var BROADCAST_TIMEOUT_MS = 4000;
-    var PROBE_INTERVAL_MS = 45000;
+    var PROBE_INTERVAL_MS = 90000;
 
     // --- Keep-Alive & Auto-Reconnect ---
-    var KEEPALIVE_INTERVAL_MS = 25000; // heartbeat every 25s to defeat NAT/edge idle culling
+    var KEEPALIVE_INTERVAL_MS = 45000; // heartbeat every 45s to defeat NAT/edge idle culling
     var RECONNECT_BASE_MS = 2000;      // first reconnect attempt after 2s
     var RECONNECT_MAX_MS = 30000;      // exponential backoff ceiling
 
@@ -897,6 +897,18 @@
             }
         }
 
+        // Avoid parallel probing of already-open managed sockets.
+        var norm = normalizeUrl(url);
+        if (this.connections && this.connections.has(norm)) {
+            var activeConn = this.connections.get(norm);
+            if (activeConn && activeConn.socket && activeConn.socket.readyState === WebSocket.OPEN) {
+                record.status = "online";
+                record.lastProbe = Date.now();
+                record.failCount = 0;
+                return Promise.resolve({ url: record.url, status: "online", latencyMs: record.latencyMs || 25 });
+            }
+        }
+
         var self = this;
         return new Promise(function (resolve) {
             var startTime = Date.now();
@@ -1036,11 +1048,17 @@
 
     RelayPool.prototype._addFilter = function (entry, filter) {
         if (!filter) return;
-        var exists = (entry.filters || []).some(function (f) {
-            return JSON.stringify(f) === JSON.stringify(filter);
+        entry.filters = entry.filters || [];
+        var filterStr = JSON.stringify(filter);
+        var exists = entry.filters.some(function (f) {
+            return JSON.stringify(f) === filterStr;
         });
-        if (!exists) entry.filters.push(filter);
-        this._replaySubscriptions(entry);
+        if (!exists) {
+            entry.filters.push(filter);
+            if (entry.socket && entry.socket.readyState === WebSocket.OPEN) {
+                this._replaySubscriptions(entry);
+            }
+        }
     };
 
     RelayPool.prototype._teardownConnection = function (entry) {

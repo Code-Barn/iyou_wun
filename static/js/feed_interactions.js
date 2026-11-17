@@ -79,8 +79,17 @@
             return;
         }
         var pk;
-        try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast(e.message, true); return; }
+        try {
+            pk = await bridgeClient.getEffectivePubkey();
+        } catch (e) {
+            setButtonLoading(false);
+            if (bridgeClient) {
+                bridgeClient.isProcessing = false;
+                bridgeClient.pendingEvent = null;
+            }
+            showToast(e.message || "Failed to resolve public key", true);
+            return;
+        }
         setButtonLoading(true);
         bridgeClient.isProcessing = true;
         var tags = [];
@@ -129,8 +138,18 @@
             created_at: Math.floor(Date.now() / 1000),
             tags: tags,
         };
-        bridgeClient.signEvent(event);
-        armSignatureWait();
+        try {
+            bridgeClient.signEvent(event);
+            armSignatureWait();
+        } catch (err) {
+            cancelSignatureWait();
+            setButtonLoading(false);
+            if (bridgeClient) {
+                bridgeClient.isProcessing = false;
+                bridgeClient.pendingEvent = null;
+            }
+            showToast(err.message || "Failed to request event signature", true);
+        }
     }
 
     // ---------- Signature Wait Timeout ----------
@@ -930,7 +949,7 @@
             ? "w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-violet-950 p-1 hover:ring-2 hover:ring-violet-400 transition aspect-square"
             : "w-10 h-10 rounded-full object-cover border border-slate-200 dark:border-slate-700 bg-slate-800 p-1 hover:ring-2 hover:ring-violet-400 transition aspect-square";
         var avatarAlt = authorAvatar ? authorName : (isNativePeer ? "iyou Sovereign Peer" : "Mesh Peer");
-        var avatarHtml = '<img src="' + escapeAttr(avatarUrl) + '" alt="' + escapeAttr(avatarAlt) + '" class="' + avatarClasses + '" />';
+        var avatarHtml = '<img src="' + escapeAttr(avatarUrl) + '" alt="' + escapeAttr(avatarAlt) + '" class="' + avatarClasses + '" onerror="this.onerror=null;this.src=\'/static/img/mesh_avatar_default.svg\';" />';
 
         var nip05Badge = nip05 ?
             '<span class="inline-flex items-center gap-1 text-[11px] font-mono text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-950/40 px-1.5 py-0.5 rounded border border-violet-200 dark:border-violet-800/60" title="' + escapeAttr(nip05) + '"><svg class="w-3 h-3 text-violet-500" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 01-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path></svg>' + escapeHtml(nip05) + '</span>' :
@@ -3390,6 +3409,8 @@
 
     // ---------- Public API ----------
 
+    window.setComposerButtonLoading = setButtonLoading;
+    window.cancelSignatureWait = cancelSignatureWait;
     window.postToNostr = postToNostr;
     window.publishPost = postToNostr;
     window.showReplyEditor = showReplyEditor;
@@ -3622,7 +3643,7 @@
             const avatar = prof.picture || "";
             const initialChar = (name[0] || "N").toUpperCase();
             const avatarHtml = avatar
-                ? '<img src="' + avatar + '" alt="" class="w-7 h-7 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0">'
+                ? '<img src="' + escapeAttr(avatar) + '" alt="" onerror="this.onerror=null;this.src=\'/static/img/mesh_avatar_default.svg\';" class="w-7 h-7 rounded-full object-cover border border-slate-200 dark:border-slate-700 shrink-0">'
                 : '<div class="w-7 h-7 rounded-full bg-violet-100 dark:bg-violet-950 text-violet-600 dark:text-violet-400 font-bold flex items-center justify-center text-[10px] shrink-0">' + initialChar + '</div>';
 
             const item = document.createElement("div");

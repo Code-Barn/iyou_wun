@@ -171,7 +171,7 @@ def resolve_author_identity(pubkey_hex) -> dict:
     }
     deck = _deck_for_pubkey(pk)
     if deck is not None:
-        handle = deck.handle or ""
+        handle = (deck.handle or "").lstrip("@")
         identity.update({
             "display_name": deck.display_name or handle or "",
             "handle": handle,
@@ -199,8 +199,11 @@ def decorate_author_identity(note: dict) -> dict:
     """
     pk = (note.get("pubkey") or "").strip().lower()
     identity = resolve_author_identity(pk)
-    existing_name = note.get("author_name") or ""
-    note["author_display_name"] = identity["display_name"] or existing_name or npub_short(pk)
+    existing_name = (note.get("author_name") or "").strip()
+    if existing_name in ("Primary Identity", "Primary Identity (L1)") or existing_name.startswith("did:"):
+        existing_name = ""
+    display_name = identity["display_name"] or (f"@{identity['handle']}" if identity["handle"] else "") or existing_name or npub_short(pk)
+    note["author_display_name"] = display_name
     note["author_handle"] = identity["handle"] or ""
     note["is_ecosystem_member"] = identity["is_member"]
     note["author_avatar"] = identity["avatar_url"] or note.get("author_avatar") or ""

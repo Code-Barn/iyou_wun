@@ -38,7 +38,7 @@
             <div class="px-6 pb-6">
                 <div class="flex items-end gap-4 -mt-10 relative z-10">
                     {% if profile.picture %}
-                    <img src="{{ profile.picture|escape }}" alt="" class="w-20 h-20 rounded-full object-cover border-4 border-white dark:border-gray-900 shadow-lg">
+                    <img src="{{ profile.picture|escape }}" alt="" onerror="this.onerror=null;this.src='{% static 'img/mesh_avatar_default.svg' %}';" class="w-20 h-20 rounded-full object-cover border-4 border-white dark:border-gray-900 shadow-lg">
                     {% else %}
                     <div class="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center border-4 border-white dark:border-gray-900 shadow-lg">
                         <span class="text-indigo-600 text-2xl font-bold">{{ profile.name|default:"?"|first }}</span>
@@ -83,7 +83,7 @@
                         </button>
                         <button
                           type="button"
-                          onclick="if (window.IyouChatDock) { window.IyouChatDock.openPeer('{{ profile_pubkey_hex|default:target_nostr_pubkey_hex }}'); } else { window.open('{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}/?peer={{ profile_pubkey_hex|default:target_nostr_pubkey_hex }}', '_blank'); }"
+                          onclick="if (window.IyouChatDock) { window.IyouChatDock.openPeer('{{ profile_pubkey_hex|default:target_nostr_pubkey_hex }}'); } else { window.open('{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}/?peer={{ profile_pubkey_hex|default:target_nostr_pubkey_hex }}', '_blank'); }"
                           class="action-btn-direct-message px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 border border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800"
                           data-chat-target-pubkey="{{ target_nostr_pubkey_hex }}"
                           data-chat-target-did="{{ target_did }}"
@@ -163,8 +163,8 @@
     {% if user.is_authenticated %}
       <!-- iyou_chat Sovereign Dock Integration -->
       <script 
-        src="{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}/static/js/dock_embed.js" 
-        data-chat-origin="{{ IYOU_CHAT_ORIGIN|default:'http://127.0.0.1:8017' }}"
+        src="{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}/static/js/dock_embed.js" 
+        data-chat-origin="{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}"
         defer>
       </script>
     {% endif %}

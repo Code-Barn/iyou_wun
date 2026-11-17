@@ -210,7 +210,7 @@
         <a href="{% url 'profile' profile_id %}"
            class="flex items-center gap-2 min-w-0 flex-1 py-1 pr-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 active:bg-violet-50 dark:active:bg-violet-950/40 transition-colors no-underline">
           {% if creator.avatar_url %}
-          <img src="{{ creator.avatar_url }}" alt="{{ creator.display_name|default:creator.handle }}" class="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700" />
+          <img src="{{ creator.avatar_url }}" alt="{{ creator.display_name|default:creator.handle }}" class="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-200 dark:border-slate-700" onerror="this.onerror=null;this.src='{% static 'img/mesh_avatar_default.svg' %}';" />
           {% else %}
           <img src="{% static 'img/iyou_symbol.png' %}" alt="Default Avatar" class="w-8 h-8 rounded-full object-cover shrink-0 border border-violet-800/60 bg-violet-950 p-0.5" />
           {% endif %}
@@ -234,14 +234,15 @@
       {% endwith %}
       {% empty %}
       <!-- Fallback Curated Creators -->
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-2 min-w-0">
+      <div class="group flex items-center justify-between gap-2">
+        <a href="/profile/peonylanewine/"
+           class="flex items-center gap-2 min-w-0 flex-1 py-1 pr-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 active:bg-violet-50 dark:active:bg-violet-950/40 transition-colors no-underline">
           <img src="{% static 'img/mesh_avatar_default.svg' %}" alt="Mesh Peer" class="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-700 bg-slate-800 p-0.5" />
           <div class="min-w-0">
             <div class="font-semibold text-slate-900 dark:text-slate-100 truncate text-xs">Ben Justman</div>
-            <div class="text-[10px] text-slate-400 truncate">@peonylanewine</div>
+            <div class="text-[10px] text-slate-400 group-hover:text-violet-500 truncate">@peonylanewine</div>
           </div>
-        </div>
+        </a>
         <button type="button" 
                 class="px-2.5 py-1 bg-violet-600/90 hover:bg-violet-600 text-white rounded text-[10px] font-semibold shrink-0 transition"
                 data-follow-target="npub153xmex42x4chdf757hp3q6zxagykkek7pdgwuwd074964dkyha9s82ryu8"
@@ -250,14 +251,15 @@
         </button>
       </div>
 
-      <div class="flex items-center justify-between gap-2">
-        <div class="flex items-center gap-2 min-w-0">
+      <div class="group flex items-center justify-between gap-2">
+        <a href="/profile/dcbyers13/"
+           class="flex items-center gap-2 min-w-0 flex-1 py-1 pr-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 active:bg-violet-50 dark:active:bg-violet-950/40 transition-colors no-underline">
           <img src="{% static 'img/mesh_avatar_default.svg' %}" alt="Mesh Peer" class="w-8 h-8 rounded-full object-cover shrink-0 border border-slate-700 bg-slate-800 p-0.5" />
           <div class="min-w-0">
             <div class="font-semibold text-slate-900 dark:text-slate-100 truncate text-xs">Dan Byers</div>
-            <div class="text-[10px] text-slate-400 truncate">@dcbyers13</div>
+            <div class="text-[10px] text-slate-400 group-hover:text-violet-500 truncate">@dcbyers13</div>
           </div>
-        </div>
+        </a>
         <button type="button" 
                 class="px-2.5 py-1 bg-violet-600/90 hover:bg-violet-600 text-white rounded text-[10px] font-semibold shrink-0 transition"
                 data-follow-target="npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64qv0jaks43tkvd"

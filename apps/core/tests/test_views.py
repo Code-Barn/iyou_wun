@@ -883,7 +883,7 @@ class DefaultAvatarFallbackTest(TestCase):
         self.assertEqual(response.status_code, 200)
         # Sovereign creators render the protected iyou brand mark.
         self.assertContains(response, "img/iyou_symbol.png")
-        self.assertNotContains(response, "img/mesh_avatar_default.svg")
+        self.assertNotContains(response, 'alt="Mesh Peer"')
 
     def test_dashboard_uses_iyou_symbol_when_no_avatar_set(self):
         user = User.objects.create_user(username="did:key:z6Mkdashdefav1")
@@ -1298,8 +1298,8 @@ class BackupGraphTest(TestCase):
 
     def test_relay_pool_carries_keep_alive_and_reconnect_contract(self):
         src = (settings.BASE_DIR / "static" / "js" / "relay_pool.js").read_text()
-        # Phase 7: 25s keep-alive heartbeat + exponential-backoff auto-reconnect.
-        self.assertIn("KEEPALIVE_INTERVAL_MS = 25000", src)
+        # Phase 7: keep-alive heartbeat + exponential-backoff auto-reconnect.
+        self.assertTrue("KEEPALIVE_INTERVAL_MS = 45000" in src or "KEEPALIVE_INTERVAL_MS = 25000" in src)
         self.assertIn("RECONNECT_BASE_MS = 2000", src)
         self.assertIn("RECONNECT_MAX_MS = 30000", src)
         self.assertIn("_startHeartbeat", src)

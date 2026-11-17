@@ -43,6 +43,7 @@ from django.views.i18n import set_language
 
 urlpatterns = [
     path('favicon.ico', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
+    path('static/favicon.ico', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
     path('apple-touch-icon.png', RedirectView.as_view(url='/static/img/logo_square.png', permanent=True)),
     path('admin/', admin.site.urls),
     path(".well-known/nostr.json", views.nip05_well_known, name="nip05_well_known"),

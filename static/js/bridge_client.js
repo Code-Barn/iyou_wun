@@ -454,7 +454,6 @@
                 if (!connected) {
                     self.connectionLock = "IDLE";
                     try { socket.close(); } catch (x) { /* ignore */ }
-                    if (self.isProcessing) self.showFallbackModal();
                 }
             }, CONNECTION_TIMEOUT);
 
@@ -487,7 +486,6 @@
                 if (!connected) {
                     self.connectionLock = "IDLE";
                     if (self._personaQueryActive) self.markPersonaBridgeOffline();
-                    if (self.isProcessing) self.showFallbackModal();
                 }
             };
             socket.onclose = function () {
@@ -508,7 +506,6 @@
         } catch (err) {
             this.connectionLock = "IDLE";
             if (this._personaQueryActive) this.markPersonaBridgeOffline();
-            if (this.isProcessing) this.showFallbackModal();
         }
     };
 
@@ -727,11 +724,15 @@
      */
     TauriBridgeClient.prototype.queryVaultPersonas = function () {
         var self = this;
-        if (this._personaQueryActive) return;
+        var now = Date.now();
+        if (this._personaQueryActive && (now - (this._personaQueryStartedAt || 0) < 3000)) {
+            return;
+        }
         this._personaQueryActive = true;
+        this._personaQueryStartedAt = now;
 
         var container = document.getElementById("persona-list-container");
-        if (container) {
+        if (container && (!window.enclavePersonas || window.enclavePersonas.length === 0)) {
             container.innerHTML = '<div class="px-2 py-2 text-slate-400 text-center text-[11px] animate-pulse">Querying local vault personas...</div>';
         }
 
@@ -1348,13 +1349,49 @@
     };
 
     TauriBridgeClient.prototype.getEffectivePubkey = async function () {
-        var bridgePk = window.activeProfile ? (window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex || window.activeProfile.pubkey) : null;
-        var templatePk = (typeof window.userPubkey !== "undefined" && window.userPubkey) ? window.userPubkey : null;
-        var pk = (bridgePk && bridgePk.length === 64) ? bridgePk : templatePk;
-        if (!pk || pk.length !== 64 || !/^[a-fA-F0-9]{64}$/.test(pk)) {
-            throw new Error("Identity Synchronization Required: No valid secp256k1 pubkey found");
+        var isValidHex = function (val) {
+            return typeof val === "string" && val.length === 64 && /^[a-fA-F0-9]{64}$/.test(val);
+        };
+
+        var resolveKey = function () {
+            if (window.activeProfile) {
+                var ap = window.activeProfile.nostr_pubkey_hex || window.activeProfile.pubkey_hex || window.activeProfile.pubkey;
+                if (isValidHex(ap)) return ap.toLowerCase();
+            }
+            try {
+                var ls = localStorage.getItem("nostr_pubkey_hex");
+                if (isValidHex(ls)) return ls.toLowerCase();
+            } catch (e) { /* ignore */ }
+            if (typeof window.userPubkey !== "undefined" && isValidHex(window.userPubkey)) {
+                return window.userPubkey.toLowerCase();
+            }
+            return null;
+        };
+
+        var key = resolveKey();
+        if (key) return key;
+
+        // If not found yet and bridge is open or connecting, query active profile and wait up to 1500ms
+        if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+            try {
+                if (this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify({ type: "get_profile" }));
+                }
+            } catch (e) { /* ignore */ }
+
+            var start = Date.now();
+            while (Date.now() - start < 1500) {
+                await new Promise(function (res) { setTimeout(res, 100); });
+                key = resolveKey();
+                if (key) return key;
+            }
         }
-        return pk.toLowerCase();
+
+        var msg = "Unlock iyou_home to sync your Nostr key";
+        if (typeof window.showToast === "function") {
+            window.showToast(msg, true);
+        }
+        throw new Error(msg);
     };
 
     TauriBridgeClient.prototype.broadcastToRelays = function (signedEvent, relayList, onDone) {
@@ -1445,7 +1482,22 @@
     TauriBridgeClient.prototype.closeFallbackModal = function () {
         var modal = document.getElementById("fallbackModal");
         if (modal) modal.classList.add("hidden");
+        this.isProcessing = false;
+        this.pendingEvent = null;
         this.pendingSignedPayload = null;
+        if (this._pendingSignRequests) {
+            this._pendingSignRequests.forEach(function (entry) {
+                if (entry && entry.fallbackTimer) clearTimeout(entry.fallbackTimer);
+            });
+            this._pendingSignRequests.clear();
+        }
+        if (typeof window.setComposerButtonLoading === "function") {
+            window.setComposerButtonLoading(false);
+        }
+        if (typeof window.cancelSignatureWait === "function") {
+            window.cancelSignatureWait();
+        }
+        this.resetPostState();
     };
 
     TauriBridgeClient.prototype.submitSignedEvent = function () {
@@ -1578,6 +1630,9 @@
             dropdown.classList.remove('hidden');
             if (btn) btn.setAttribute('aria-expanded', 'true');
             var client = window.bridgeClient;
+            if (window.enclavePersonas && window.enclavePersonas.length > 0 && client && typeof client.renderPersonaDropdownList === "function") {
+                client.renderPersonaDropdownList(window.enclavePersonas);
+            }
             if (client && typeof client.queryVaultPersonas === "function") {
                 client.queryVaultPersonas();
             }

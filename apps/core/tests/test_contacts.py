@@ -20,6 +20,7 @@ from django.contrib.auth.models import User
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.core.models import UserLinkDeck
 from apps.core.views import (
     claim_handle,
     did_to_npub,
@@ -167,6 +168,7 @@ class ContactFollowAPITests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="did:key:z6Mkfollowuser1")
         self.user_pubkey = did_to_pubkey(self.user.username)
+        UserLinkDeck.objects.create(user=self.user, handle="followuser", nostr_pubkey=self.user_pubkey)
         self.target_pubkey = "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d"
         self.other_target_pubkey = "79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798"
 
