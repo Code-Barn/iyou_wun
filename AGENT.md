@@ -179,3 +179,8 @@ SESSION_COOKIE_SAMESITE = "Lax"
    - `git log -n 1 --oneline`
    - `git status --short`
 5. **No Question-Containing Final Lines:** Any report whose final line is a question ("Want me to...", "Should I...", "Do you want...") is a failed handoff. Never end on an open-ended commit prompt.
+
+## CANONICAL COPY & TEMPLATE SSOT (FEDERATION POINTER)
+1. **Read the canonical roster:** `docs/ecosystem_shared/ECOSYSTEM_CANONICAL_ROSTER.md` (generated from `omni_social/scripts/generate_templates.py`) is the sole source of truth for app names, URLs, colors, statuses, uppercase `descriptor` taglines, and `mission` subtitles. Never guess or paraphrase canonical app copy.
+2. **Never drift canonical copy locally:** Do not alter any `descriptor` or `mission` string without an explicit word-for-word instruction from the user.
+3. **Never hand-edit generated templates:** `_ecosystem_bar.html`, `_standard_header.html`, `_footer.html`, `_persona_enclave.html`, and `_tailwind_safe_init.html` are generated artifacts. Apply approved changes centrally in `omni_social`: edit `ECOSYSTEM_CATALOG`, run `.venv/bin/python scripts/regenerate_all.py`, then `.venv/bin/python scripts/sync_ecosystem_specs.py`.
