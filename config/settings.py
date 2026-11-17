@@ -313,7 +313,7 @@ OIDC_STORE_ID_TOKEN = True
 OIDC_RP_REQUIRED_CLAIMS = []
 
 # Redirects
-LOGIN_REDIRECT_URL = "/"
+LOGIN_REDIRECT_URL = "/?map=open"
 LOGOUT_REDIRECT_URL = "/"
 LOGIN_URL = "oidc_authentication_init"
 

@@ -39,9 +39,9 @@
   >
     <!-- Public Profile Direct Action -->
     <div class="px-2 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/50">
-      <a href="{{ user_profile_url|default:'/feed' }}" class="flex items-center justify-between text-xs text-slate-700 dark:text-slate-200 hover:text-violet-500 dark:hover:text-violet-400 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 transition font-mono">
+      <a href="https://{% if request.geographic_scope %}{{ request.geographic_scope }}.{% endif %}wun.iyou.me/{{ user_display_label|default:user.username }}" target="_blank" class="flex items-center justify-between text-xs text-slate-700 dark:text-slate-200 hover:text-violet-500 dark:hover:text-violet-400 p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800/60 transition font-mono">
         <span class="flex items-center gap-1.5">👤 <span>View Public Profile</span></span>
-        <span class="text-[10px] text-slate-400">→</span>
+        <span class="text-[10px] text-slate-400">↗</span>
       </a>
     </div>
 
@@ -70,6 +70,34 @@
 </div>
 
 <script>
+  function togglePersonaDropdown() {
+    var dropdown = document.getElementById('persona-switcher-dropdown');
+    var btn = document.getElementById('persona-switcher-btn');
+    if (!dropdown) return;
+    var isHidden = dropdown.classList.contains('hidden');
+    if (isHidden) {
+      dropdown.classList.remove('hidden');
+      if (btn) btn.setAttribute('aria-expanded', 'true');
+      if (window.bridgeClient && typeof window.bridgeClient.queryVaultPersonas === 'function') {
+        window.bridgeClient.queryVaultPersonas();
+      }
+    } else {
+      dropdown.classList.add('hidden');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+  }
+  window.togglePersonaDropdown = togglePersonaDropdown;
+
+  document.addEventListener('click', function (e) {
+    var container = document.getElementById('persona-switcher-container');
+    var dropdown = document.getElementById('persona-switcher-dropdown');
+    var btn = document.getElementById('persona-switcher-btn');
+    if (dropdown && container && !container.contains(e.target)) {
+      dropdown.classList.add('hidden');
+      if (btn) btn.setAttribute('aria-expanded', 'false');
+    }
+  });
+
   if (!window.__meshProfileSyncBound) {
     window.__meshProfileSyncBound = true;
     window.addEventListener("meshProfileSync", function(e) {

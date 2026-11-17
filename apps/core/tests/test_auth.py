@@ -177,3 +177,50 @@ class OIDCLogoutViewTest(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertNotIn("_auth_user_id", self.client.session)
 
+
+class PKCEOIDCAuthenticationCallbackViewTest(TestCase):
+    def test_success_url_defaults_to_map_open(self):
+        from apps.core.auth_pkce import PKCEOIDCAuthenticationCallbackView
+        from django.test import RequestFactory
+        from django.contrib.sessions.middleware import SessionMiddleware
+
+        request = RequestFactory().get("/oidc/callback/")
+        middleware = SessionMiddleware(lambda r: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        view = PKCEOIDCAuthenticationCallbackView()
+        view.request = request
+        self.assertEqual(view.success_url, "/?map=open")
+
+    def test_success_url_root_next_defaults_to_map_open(self):
+        from apps.core.auth_pkce import PKCEOIDCAuthenticationCallbackView
+        from django.test import RequestFactory
+        from django.contrib.sessions.middleware import SessionMiddleware
+
+        request = RequestFactory().get("/oidc/callback/")
+        middleware = SessionMiddleware(lambda r: None)
+        middleware.process_request(request)
+        request.session["oidc_login_next"] = "/"
+        request.session.save()
+
+        view = PKCEOIDCAuthenticationCallbackView()
+        view.request = request
+        self.assertEqual(view.success_url, "/?map=open")
+
+    def test_success_url_preserves_explicit_deep_next(self):
+        from apps.core.auth_pkce import PKCEOIDCAuthenticationCallbackView
+        from django.test import RequestFactory
+        from django.contrib.sessions.middleware import SessionMiddleware
+
+        request = RequestFactory().get("/oidc/callback/")
+        middleware = SessionMiddleware(lambda r: None)
+        middleware.process_request(request)
+        request.session["oidc_login_next"] = "/thread/post-123"
+        request.session.save()
+
+        view = PKCEOIDCAuthenticationCallbackView()
+        view.request = request
+        self.assertEqual(view.success_url, "/thread/post-123")
+
+

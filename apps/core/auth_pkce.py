@@ -76,6 +76,13 @@ class PKCEOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
         base_kwargs['pkce_code_verifier'] = self.request.session.pop('pkce_code_verifier', None)
         return base_kwargs
 
+    @property
+    def success_url(self):
+        next_url = self.request.session.get("oidc_login_next")
+        if next_url and next_url not in ("/", ""):
+            return next_url
+        return getattr(settings, "LOGIN_REDIRECT_URL", "/?map=open")
+
     def login_success(self):
         if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
             raw_id_token = self.request.session.get("oidc_id_token")
