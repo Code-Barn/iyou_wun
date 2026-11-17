@@ -277,6 +277,8 @@ Every new app follows the same deployment pipeline:
 | dine.iyou.me | iyou_dine | iyou-dine | Django 6.0 / Restaurant OS |
 | show.iyou.me | iyou_show | iyou-show | Django 6.1 / Video Index |
 | muse.iyou.me | iyou_muse | iyou-muse | Django 6.1 / Exhibition Gallery |
+| hear.iyou.me | iyou_hear | iyou-hear | Django 6.1 / Audio Satellite |
+| meet.iyou.me | iyou_meet | iyou-meet | Django 6.1 / Rendezvous Hub |
 | home.iyou.me | iyou_home | — | Tauri/Rust (local) |
 | relay.iyou.me | Nostr Relay | nostr-relay | Rust |
 | chat.iyou.me | Prosody XMPP | prosody | Prosody |
@@ -337,6 +339,8 @@ Each app gets a unique Tailwind color used in:
 | iyou_dine | amber | Sovereign Restaurant Operating System, 0% Take-Rate Settlement, Line-to-Floor Telemetry |
 | iyou_show | rose | Zero-Custody Video Channel Indexer & Multi-Source Player |
 | iyou_muse | indigo | Attribution-First Public Exhibition Gallery |
+| iyou_hear | amber | Sovereign Audio, Podcast & Value-for-Value Stream Router |
+| iyou_meet | emerald | Sovereign Video Conferencing & Physical Meetup Orchestration |
 
 **Available colors:** `amber` `purple` `emerald` `rose` `cyan` `teal` `indigo` `blue` `pink` `orange` `lime` `sky` `violet` `fuchsia` `red` `green` `yellow` `zinc`
 
@@ -413,9 +417,11 @@ We recognize that "Total Sovereignty" is a high bar. We offer three modes of par
 | iyou_wun | 8001 | HTTP | Feed + social |
 | iyou_poly | 8002 | HTTP | Governance engine |
 | iyou_draw | 8011 | HTTP | Visual Creation Studio |
+| iyou_meet | 8018 | HTTP/WebRTC | Sovereign Video Conferencing & Physical Meetup Hub |
 | iyou_dine | 8028 | HTTP | Sovereign Restaurant Operating System |
 | iyou_show | 8029 | HTTP | Zero-Custody Video Channel Indexer |
 | iyou_muse | 8030 | HTTP | Attribution-First Public Exhibition Gallery |
+| iyou_hear | 8031 | HTTP | Sovereign Audio & V4V Stream Router |
 
 ## Appendix B: Nostr Event Kind Registry
 
@@ -430,7 +436,7 @@ We recognize that "Total Sovereignty" is a high bar. We offer three modes of par
 | 30023 | Long-form / Poll | `iyou_wun` + Poly | Articles + poll definitions |
 | 9112 | Trust attestation | `iyou_safe` | Web-of-Trust graph sync |
 
-## Appendix C: Ecosystem App Links (24-App Absolute Roster)
+## Appendix C: Ecosystem App Links (26-App Absolute Roster)
 
 | Label | URL |
 |-------|-----|
@@ -458,3 +464,5 @@ We recognize that "Total Sovereignty" is a high bar. We offer three modes of par
 | dine | https://dine.iyou.me |
 | show | https://show.iyou.me |
 | muse | https://muse.iyou.me |
+| hear | https://hear.iyou.me |
+| meet | https://meet.iyou.me |
