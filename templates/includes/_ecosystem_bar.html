@@ -248,7 +248,7 @@
               <circle cx="12" cy="12" r="9" stroke-width="1.6" stroke-opacity="0.6"/>
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 3c3.5 3 5 6 5 9s-1.5 6-5 9m0-18C8.5 6 7 9 7 12s1.5 6 5 9M3 12h18"/>
             </svg>
-            <span class="font-bold text-xs sm:text-sm text-slate-100 tracking-wide font-mono shrink-0">iYou Federation Map</span>
+            <span class="font-bold text-xs sm:text-sm text-slate-100 tracking-wide font-mono shrink-0">iyou_ Federation Map</span>
           </div>
 
           <!-- Gatehouse Anchor Pill: iyou_idp -->
@@ -543,6 +543,10 @@
   let selectedSlug = CURRENT_APP_SLUG;
   let lockedSlug = CURRENT_APP_SLUG;
   let nodeCoords = {};
+  // Shared with the map pan/zoom state machine: true once a pointer drag
+  // crosses the 4px threshold. Consumed by the node click handler so panning
+  // never fires an accidental node selection.
+  let didDrag = false;
 
   function updateEnclavePillHighlights(activeEnclaveSlug) {
     const homeBtn = document.getElementById('map-enclave-bridge-pill');
@@ -1027,6 +1031,10 @@
 
   function handleMapNodeClick(slug, e) {
     if (e) e.stopPropagation();
+    // A pan (drag > 4px) retargets the click to the SVG; never select a node.
+    if (didDrag) { didDrag = false; return; }
+    // Clicking any satellite node clears the Gatehouse enclave selection so
+    // mouseleave restores this node instead of reverting to home / mobile.
     if (lockedNode && lockedNode.type === 'app' && lockedNode.slug === slug) {
       executeSatelliteAction(slug, e);
     } else {
@@ -1056,6 +1064,7 @@
     if (!container || !svg) return;
 
     let isPointerDown = false;
+    let hasCapturedPointer = false;
     let startPoint = { x: 0, y: 0 };
     let startViewBox = { ...currentViewBox };
     const minVbSize = defaultViewBox.w / 2.5; // Max zoom: 2.5x
@@ -1083,15 +1092,27 @@
     /* Mouse / Pen Pointer Events (ignore touch pointers to avoid double-handling) */
     svg.addEventListener('pointerdown', (e) => {
       if (e.pointerType === 'touch') return;
+      if (e.button !== 0) return;
+      // Defer pointer capture until movement crosses the drag threshold.
+      // Capturing on pointerdown makes desktop browsers (notably Safari)
+      // retarget the subsequent click to <svg> instead of the clicked node.
       isPointerDown = true;
+      hasCapturedPointer = false;
+      didDrag = false;
       startPoint = { x: e.clientX, y: e.clientY };
       startViewBox = { ...currentViewBox };
-      try { svg.setPointerCapture(e.pointerId); } catch(err) {}
     });
 
     svg.addEventListener('pointermove', (e) => {
       if (e.pointerType === 'touch') return;
       if (!isPointerDown) return;
+      const dist = Math.hypot(e.clientX - startPoint.x, e.clientY - startPoint.y);
+      if (dist <= 4) return;
+      didDrag = true;
+      if (!hasCapturedPointer) {
+        try { svg.setPointerCapture(e.pointerId); } catch(err) {}
+        hasCapturedPointer = true;
+      }
       const rect = svg.getBoundingClientRect();
       const renderedSize = Math.min(rect.width, rect.height) || 1;
       const scale = startViewBox.w / renderedSize;
@@ -1104,8 +1125,11 @@
 
     function endPointer(e) {
       if (e.pointerType === 'touch') return;
+      if (hasCapturedPointer) {
+        try { svg.releasePointerCapture(e.pointerId); } catch(err) {}
+        hasCapturedPointer = false;
+      }
       isPointerDown = false;
-      try { svg.releasePointerCapture(e.pointerId); } catch(err) {}
     }
 
     svg.addEventListener('pointerup', endPointer);
