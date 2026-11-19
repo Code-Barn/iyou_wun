@@ -116,15 +116,28 @@
     }
 
     var _publishIdleLabel = null;
+    var _publishLoadingHtml = null;
 
     function setManagedPublishState(active) {
         var textSpan = document.getElementById('postButtonText');
-        if (!textSpan) return;
-        if (active) {
-            if (_publishIdleLabel === null) _publishIdleLabel = textSpan.textContent;
-            textSpan.textContent = 'Publishing...';
-        } else if (_publishIdleLabel !== null) {
-            textSpan.textContent = _publishIdleLabel;
+        var loadingSpan = document.getElementById('postButtonLoading');
+        if (textSpan) {
+            if (active) {
+                if (_publishIdleLabel === null) _publishIdleLabel = textSpan.textContent;
+                textSpan.textContent = 'Publishing...';
+            } else if (_publishIdleLabel !== null) {
+                textSpan.textContent = _publishIdleLabel;
+            }
+        }
+        if (loadingSpan) {
+            if (active) {
+                if (_publishLoadingHtml === null) _publishLoadingHtml = loadingSpan.innerHTML;
+                // The default spinner caption says "Waiting for Signature...",
+                // which is misleading for custodial accounts with no bridge.
+                loadingSpan.innerHTML = _publishLoadingHtml.replace('Waiting for Signature...', 'Publishing...');
+            } else if (_publishLoadingHtml !== null) {
+                loadingSpan.innerHTML = _publishLoadingHtml;
+            }
         }
     }
 

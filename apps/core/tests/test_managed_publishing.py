@@ -3,6 +3,7 @@
 import json
 from unittest.mock import patch
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -86,6 +87,87 @@ class ManagedKeyProvisioningTests(TestCase):
         self.assertFalse(created_again)
         self.assertEqual(secret, secret_again)
         self.assertEqual(pubkey, pubkey_again)
+
+
+class MobileChromeTemplateTests(TestCase):
+    """Phase 5 mobile chrome contracts (source-level guards)."""
+
+    def test_layer1_header_is_not_sticky(self):
+        src = (settings.BASE_DIR / "templates" / "includes" / "_standard_header.html").read_text()
+        header_line = next(
+            line for line in src.splitlines() if 'id="layer-1-standard-header"' in line
+        )
+        self.assertIn("relative z-30", header_line)
+        self.assertNotIn("sticky", header_line)
+        self.assertNotIn("top-0", header_line)
+
+    def test_compact_mobile_persona_symbol_and_identity_card(self):
+        src = (settings.BASE_DIR / "templates" / "includes" / "_persona_enclave.html").read_text()
+        self.assertIn('sm:hidden text-xs leading-none', src)
+        self.assertIn("🪪", src)
+        self.assertIn("hidden sm:inline truncate max-w-[180px]", src)
+        self.assertIn("Signed-In Identity", src)
+        self.assertIn("break-all", src)
+        self.assertIn("Copy DID", src)
+
+    def test_mobile_dock_chat_route_and_scroll_autohide(self):
+        src = (settings.BASE_DIR / "templates" / "includes" / "_mobile_bottom_dock.html").read_text()
+        self.assertIn("window.innerWidth < 768", src)
+        self.assertIn("has-mobile-bottom-nav", src)
+        self.assertIn("DELTA_THRESHOLD = 12", src)
+        self.assertIn("translate-y-full", src)
+        self.assertIn("requestAnimationFrame", src)
+
+    def test_toast_stack_clears_mobile_dock(self):
+        src = (settings.BASE_DIR / "templates" / "includes" / "_toast_container.html").read_text()
+        self.assertIn("bottom-20 md:bottom-6", src)
+        self.assertIn("z-50", src)
+
+
+class ManagedBroadcastAckTests(TestCase):
+    @patch("apps.core.views.create_connection")
+    def test_broadcast_waits_for_ok_acknowledgement(self, create_connection):
+        from apps.core.views import _broadcast_signed_event
+
+        class FakeSocket:
+            def __init__(self):
+                self.frame = json.dumps(["OK", "event-id", True])
+                self.sent = None
+                self.closed = False
+
+            def send(self, payload):
+                self.sent = payload
+
+            def recv(self):
+                frame, self.frame = self.frame, None
+                if frame is None:
+                    raise TimeoutError()
+                return frame
+
+            def close(self):
+                self.closed = True
+
+        socket = FakeSocket()
+        create_connection.return_value = socket
+        signed_event = {"id": "event-id", "kind": 1, "tags": [], "content": "x"}
+        published = _broadcast_signed_event(signed_event, ["wss://relay.iyou.me"], timeout=1.0)
+        self.assertEqual(published, ["wss://relay.iyou.me"])
+        self.assertIn('"EVENT"', socket.sent)
+        self.assertTrue(socket.closed)
+
+
+class ManagedProfilePersistenceTests(TestCase):
+    def test_deck_key_is_ecosystem_member_and_profile_author(self):
+        user = User.objects.create_user(username="did:web:iyou.me:user:persist")
+        _secret, pubkey, _created = get_or_create_custodial_keypair(user)
+        from apps.core.identity import get_ecosystem_pubkeys
+        from apps.core.views import _resolve_profile_candidates
+
+        self.assertIn(pubkey, get_ecosystem_pubkeys(force_refresh=True))
+        _carried, owner, deck, hex_pubkey, candidates = _resolve_profile_candidates(user.username)
+        self.assertEqual(owner, user)
+        self.assertEqual(hex_pubkey, pubkey)
+        self.assertIn(pubkey, candidates)
 
 
 class ManagedContextTests(TestCase):

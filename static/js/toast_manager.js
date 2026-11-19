@@ -61,6 +61,10 @@
       return;
     }
 
+    // Keep toasts clear of the auto-hiding mobile bottom dock.
+    container.classList.remove('bottom-4');
+    container.classList.add('bottom-20', 'md:bottom-6', 'z-50');
+
     const messageText = String(message);
 
     // Identical toasts collapse into one live node. A repeated signal (e.g. four

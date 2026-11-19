@@ -6,7 +6,7 @@
   locked decisions:
     - h-14 (56px) + env(safe-area-inset-bottom); slat z-40 md:hidden glass.
     - dot-not-count for Feed/Gallery/Notifications; numeric rose pill for Chat ONLY.
-    - Never jitters: static, no handleScrollHide; 24px icons + min-h-[44px] targets.
+    - X/Twitter-style scroll auto-hide with a 12px dead zone; 24px icons + min-h-[44px] targets.
     - FAB cell (5th) opens composer via global openPostComposer().
 
   DOM contract:
@@ -26,7 +26,8 @@
 {% if user.is_authenticated or request.user.is_authenticated %}
 <nav id="mobile-bottom-dock" aria-label="Primary"
      class="fixed bottom-0 inset-x-0 z-40 md:hidden border-t border-slate-200
-            dark:border-gray-800/80 bg-white/85 dark:bg-[#0B0F19]/85 backdrop-blur-md font-mono">
+            dark:border-gray-800/80 bg-white/85 dark:bg-[#0B0F19]/85 backdrop-blur-md font-mono
+            transition-all duration-200 ease-out transform translate-y-0 opacity-100 pointer-events-auto">
   <div class="mx-auto grid max-w-screen-sm grid-cols-5 items-stretch h-14 pb-[env(safe-area-inset-bottom)]">
 
     {# ---- 1 · Stream / Feed (dot) ---- #}
@@ -66,7 +67,7 @@
 
     {# ---- 4 · Chat / DMs (NUMERIC pill — iyou:chat:unread_update) ---- #}
     <a href="{% url 'chat' %}"
-       onclick="if (window.IyouChatDock) { event.preventDefault(); window.IyouChatDock.toggle(); }"
+       onclick="if (!(window.innerWidth < 768 || document.body.classList.contains('has-mobile-bottom-nav'))) { if (window.IyouChatDock) { event.preventDefault(); window.IyouChatDock.toggle(); } }"
        {% if request.resolver_match.url_name == 'chat' %}aria-current="page"{% endif %}
        aria-label="{% if request.resolver_match.url_name == 'chat' %}Chat, current page{% else %}Chat{% endif %}"
        title="Chat &amp; Direct Messages"
@@ -92,6 +93,51 @@
 </nav>
 {% endif %}
 <script>
+  // X/Twitter-style scroll-aware dock: hide on downward scroll, reveal on any
+  // upward gesture, near the top, or at the bottom of the document. A 12px dead
+  // zone prevents jitter, and rAF throttling keeps the passive listener cheap.
+  (function (global) {
+    "use strict";
+    if (global.__wunDockAutoHideBound) return;
+    global.__wunDockAutoHideBound = true;
+    var nav = document.getElementById('mobile-bottom-dock');
+    if (!nav) return;
+
+    var lastScrollY = global.scrollY;
+    var isHidden = false;
+    var DELTA_THRESHOLD = 12;
+    var ticking = false;
+
+    function setVisible(visible) {
+      isHidden = !visible;
+      nav.classList.toggle('translate-y-full', !visible);
+      nav.classList.toggle('opacity-0', !visible);
+      nav.classList.toggle('pointer-events-none', !visible);
+      nav.classList.toggle('translate-y-0', visible);
+      nav.classList.toggle('opacity-100', visible);
+      nav.classList.toggle('pointer-events-auto', visible);
+    }
+
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      global.requestAnimationFrame(function () {
+        var currentY = global.scrollY;
+        var deltaY = currentY - lastScrollY;
+        var nearTop = currentY <= 48;
+        var nearBottom = (global.innerHeight + currentY >= document.documentElement.scrollHeight - 96);
+        if (nearTop || deltaY < -8 || nearBottom) {
+          setVisible(true);
+        } else if (deltaY > DELTA_THRESHOLD && currentY > 80) {
+          setVisible(false);
+        }
+        lastScrollY = currentY;
+        ticking = false;
+      });
+    }
+    global.addEventListener('scroll', onScroll, { passive: true });
+  })(typeof window !== 'undefined' ? window : globalThis);
+
   // Mobile dock badge mirror: hydrate the dock dots/pill from authoritative
   // client-side sources (idempotent + source-absent safe):
   //   - chat numeric pill      <- #floating-chat-unread-badge (floating_chat)

@@ -381,12 +381,14 @@ def api_sync_keys(request):
     })
 
 
-def _broadcast_signed_event(signed_event, relay_urls=None, timeout=1.5):
+def _broadcast_signed_event(signed_event, relay_urls=None, timeout=2.5):
     """Send ``["EVENT", event]`` to first-party relays; return acking URLs.
 
-    The ecosystem peer relay is always included in the fan-out so a managed
-    note is never only local; the loopback relay is attempted when reachable
-    (it is harmlessly skipped on HTTPS / remote deployments).
+    The socket stays open until the relay answers with a NIP-01 ``OK`` frame
+    (or the short timeout expires) so a send is never mistaken for a successful
+    publish. The ecosystem peer relay is always included in the fan-out so a
+    managed note is never only local; the loopback relay is attempted when
+    reachable (harmlessly skipped on HTTPS / remote deployments).
     """
     targets = list(relay_urls or ["wss://relay.iyou.me", "ws://127.0.0.1:9003"])
     if "wss://relay.iyou.me" not in targets:
@@ -404,6 +406,7 @@ def _broadcast_signed_event(signed_event, relay_urls=None, timeout=1.5):
             )
         except Exception:
             continue
+        acknowledged = False
         try:
             ws.send(json.dumps(["EVENT", signed_event]))
             deadline = time.time() + timeout
@@ -417,9 +420,25 @@ def _broadcast_signed_event(signed_event, relay_urls=None, timeout=1.5):
                 except (ValueError, TypeError):
                     continue
                 if isinstance(message, list) and message and message[0] == "OK":
+                    acknowledged = True
                     if len(message) > 2 and message[2]:
                         published.append(relay_url)
+                    else:
+                        reason = message[3] if len(message) > 3 else "unspecified"
+                        logger.warning(
+                            "Relay %s rejected event %s: %s",
+                            relay_url,
+                            signed_event.get("id", ""),
+                            reason,
+                        )
                     break
+            if not acknowledged:
+                logger.debug(
+                    "Relay %s did not acknowledge event %s within %.1fs",
+                    relay_url,
+                    signed_event.get("id", ""),
+                    timeout,
+                )
         finally:
             try:
                 ws.close()
