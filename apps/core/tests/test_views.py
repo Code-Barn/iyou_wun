@@ -960,6 +960,79 @@ class PersonaSessionSwitchTest(TestCase):
         user1.refresh_from_db()
         self.assertEqual(UserLinkDeck.objects.get(user=user1).handle, "alice_sov")
 
+    def test_api_persona_switch_isolates_dashboard_from_l1_deck_leakage(self):
+        """Switching from L1 user with populated deck to L2 DID renders L2 DID with zero L1 field leakage."""
+        from apps.core.models import UserLinkItem
+
+        did_l1 = "did:key:z6Mkl1populateduser001"
+        did_l2 = "did:key:z6Mkl2burnerdid002"
+        user_l1 = User.objects.create_user(username=did_l1)
+        deck_l1 = UserLinkDeck.objects.create(
+            user=user_l1,
+            handle="l1_handle",
+            display_name="L1 Sovereign Creator",
+            headline="Original sovereign headline and bio",
+        )
+        UserLinkItem.objects.create(
+            user=user_l1,
+            title="L1 Site",
+            url="https://l1.example.com",
+        )
+
+        self.client.force_login(user_l1)
+        session = self.client.session
+        session["active_persona_level"] = 1
+        session["active_persona_name"] = "L1 Sovereign Creator"
+        session.save()
+
+        # Confirm dashboard initially renders L1 fields
+        dash_l1 = self.client.get(reverse("dashboard"))
+        self.assertEqual(dash_l1.status_code, 200)
+        self.assertContains(dash_l1, did_l1)
+        self.assertContains(dash_l1, "L1 Sovereign Creator")
+        self.assertContains(dash_l1, "Original sovereign headline and bio")
+        self.assertContains(dash_l1, "l1_handle")
+
+        # Manually switch to L2 DID
+        switch_resp = self.client.post(
+            reverse("api_persona_switch"),
+            data=json.dumps({
+                "did": did_l2,
+                "persona_name": "Burner Persona",
+                "level": 2,
+                "manual_switch": True,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(switch_resp.status_code, 200)
+        data = switch_resp.json()
+        self.assertTrue(data["success"])
+        self.assertTrue(data["reanchored"])
+        self.assertEqual(data["did"], did_l2)
+
+        # Inspect DashboardView for the new L2 session
+        dash_l2 = self.client.get(reverse("dashboard"))
+        self.assertEqual(dash_l2.status_code, 200)
+
+        # Renders the L2 DID
+        self.assertContains(dash_l2, did_l2)
+        # Does NOT render the L1 DID
+        self.assertNotContains(dash_l2, did_l1)
+
+        # Zero leakage of L1 deck fields (display_name, bio/headline, handle, links)
+        self.assertNotContains(dash_l2, "L1 Sovereign Creator")
+        self.assertNotContains(dash_l2, "Original sovereign headline and bio")
+        self.assertNotContains(dash_l2, "l1_handle")
+        self.assertNotContains(dash_l2, "https://l1.example.com")
+
+        # Confirm L2 deck is clean and isolated
+        user_l2 = User.objects.get(username=did_l2)
+        deck_l2 = UserLinkDeck.objects.get(user=user_l2)
+        self.assertEqual(deck_l2.display_name, "")
+        self.assertEqual(deck_l2.headline, "")
+        self.assertEqual(user_l2.link_items.count(), 0)
+        self.assertNotEqual(deck_l2.handle, deck_l1.handle)
+
     def test_api_persona_switch_preserves_l1_session_when_not_manual(self):
         did1 = f"did:iyou:0x{self.ANCHOR_PK}"
         did2 = "did:key:z6Mkpersonaswtest22"

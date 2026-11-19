@@ -294,6 +294,11 @@ def api_persona_switch(request):
             deck = claim_handle(target_user, f"{base[:20]}_{digest}")
         except Exception:
             deck = UserLinkDeck.objects.filter(user=target_user).first()
+            if deck is None:
+                deck, _ = UserLinkDeck.objects.get_or_create(
+                    user=target_user,
+                    defaults={"handle": f"{base[:20]}_{digest}"[:32]},
+                )
 
     login(request, target_user, backend="django.contrib.auth.backends.ModelBackend")
     request.session["active_persona_name"] = persona_name

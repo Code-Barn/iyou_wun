@@ -583,8 +583,8 @@
      * Fires whenever the bridge reports a persona whose DID diverges from the
      * server-rendered session DID (`window.CURRENT_SESSION_DID`). On success the
      * session is re-anchored to the persona's isolated link deck; the page is
-     * refreshed except on the dashboard, which self-heals via the
-     * `persona:session-reanchored` event so the bridge socket is never dropped.
+     * refreshed across all routes (including /dashboard) to eliminate cross-persona
+     * DOM state leakage.
      */
     TauriBridgeClient.prototype.handlePersonaChanged = function (profile, manualSwitch) {
         if (!profile) return;
@@ -639,14 +639,25 @@
             }).then(function (data) {
                 if (data && data.success) {
                     window.CURRENT_SESSION_DID = did;
+                    var activeHandle = data.handle || profile.handle || "";
+                    try {
+                        localStorage.setItem('wun_active_persona', JSON.stringify({
+                            did: did,
+                            name: String(name),
+                            handle: String(activeHandle),
+                            level: level
+                        }));
+                    } catch (e) { /* ignore storage quotas */ }
                     window.dispatchEvent(new CustomEvent("persona:session-reanchored", { detail: data }));
-                    var label = data.handle ? "@" + String(data.handle).replace(/^@/, "") : (name || did);
+                    var label = activeHandle ? "@" + String(activeHandle).replace(/^@/, "") : (name || did);
                     if (typeof showToast === "function") {
                         showToast("Session re-anchored to " + label);
                     }
-                    if (window.location.pathname !== "/dashboard") {
-                        window.location.reload();
+                    var currentHash = window.location.hash;
+                    if (currentHash && !window.location.hash) {
+                        window.location.hash = currentHash;
                     }
+                    window.location.reload();
                 } else {
                     console.warn("Persona re-anchor rejected:", data && data.error ? data.error : "unknown response");
                 }
