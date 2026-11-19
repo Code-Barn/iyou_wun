@@ -20,6 +20,10 @@
       // Global auth signal for client identity guards (quiet passive probes vs.
       // explicit "unlock iyou_home" prompts).
       window.IS_AUTHENTICATED = {% if request.user.is_authenticated or user.is_authenticated %}true{% else %}false{% endif %};
+      // Tier 1 (did:web) sessions publish through the managed custodial signer;
+      // sovereign (did:key) sessions keep the local iyou_home bridge path.
+      window.USER_ACCOUNT_TIER = "{{ user_account_tier|default:''|escapejs }}";
+      window.USER_DID = "{{ user_did|default:''|escapejs }}";
     </script>
     <style>
       :root {

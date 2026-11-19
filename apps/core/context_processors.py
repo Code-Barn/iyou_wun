@@ -61,6 +61,10 @@ def user_identity(request):
         context["user_display_label"] = ""
         context["current_session_did"] = ""
         context["user_avatar_url"] = ""
+        context["user_account_tier"] = ""
+        context["user_did"] = ""
+        context["user_pubkey"] = ""
+        context["is_custodial"] = False
         return context
     from .views import hex_to_npub
     from .models import UserLinkDeck
@@ -96,8 +100,24 @@ def user_identity(request):
     else:
         display_name = ""
 
+    from .custodial_keys import (
+        get_custodial_pubkey,
+        get_or_create_custodial_keypair,
+        is_managed_account,
+    )
     from .views import get_effective_user_pubkey
+
     pubkey = get_effective_user_pubkey(request)
+    is_custodial = is_managed_account(request.user, request)
+    if is_custodial:
+        # Tier 1 accounts have no enclave key. Provision lazily (idempotent) and
+        # fall back to their custodial secp256k1 key when no enclave key exists.
+        try:
+            get_or_create_custodial_keypair(request.user)
+        except Exception:
+            pass
+        if not pubkey:
+            pubkey = get_custodial_pubkey(request.user)
     npub = hex_to_npub(pubkey) if pubkey else ""
     legacy_handle = ""
     if deck and deck.handle:
@@ -124,6 +144,10 @@ def user_identity(request):
         active_persona_level=level,
         active_persona_name=persona_name,
         current_session_did=request.user.username,
+        user_account_tier="L1" if is_custodial else "L2",
+        user_did=request.session.get("custodial_did") or request.user.username,
+        user_pubkey=pubkey,
+        is_custodial=is_custodial,
         user_pubkey_hex=pubkey,
         user_npub=npub,
         user_handle=legacy_handle,

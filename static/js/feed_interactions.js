@@ -80,6 +80,97 @@
         return false;
     }
 
+    // Tier 1 (did:web / managed) accounts sign server-side with their custodial
+    // secp256k1 key. Sovereign (did:key) accounts keep the local iyou_home /
+    // NIP-07 bridge path untouched.
+    function isManagedCustodialAccount() {
+        var tier = String(window.USER_ACCOUNT_TIER || '').toLowerCase();
+        var did = String(window.USER_DID || window.CURRENT_SESSION_DID || '');
+        var localOverride = window.USE_LOCAL_ENCLAVE === true || window.FORCE_ENCLAVE_SIGNING === true;
+        if (localOverride) return false;
+        return tier === 'l1' || tier === 'custodial' ||
+            tier === 'managed_free' || tier === 'managed_premium' ||
+            did.indexOf('did:web:') === 0;
+    }
+
+    var _publishIdleLabel = null;
+
+    function setManagedPublishState(active) {
+        var textSpan = document.getElementById('postButtonText');
+        if (!textSpan) return;
+        if (active) {
+            if (_publishIdleLabel === null) _publishIdleLabel = textSpan.textContent;
+            textSpan.textContent = 'Publishing...';
+        } else if (_publishIdleLabel !== null) {
+            textSpan.textContent = _publishIdleLabel;
+        }
+    }
+
+    async function publishManagedNote(payload, onSuccess, onFinally) {
+        try {
+            var response = await fetch('/api/notes/publish/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify(payload)
+            });
+            var data = await response.json().catch(function () { return {}; });
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Could not publish note');
+            }
+            if (typeof onSuccess === 'function') onSuccess(data.event);
+        } catch (err) {
+            window.showToast(err.message || 'Could not publish note', 'error');
+        } finally {
+            setButtonLoading(false);
+            setManagedPublishState(false);
+            if (bridgeClient) {
+                bridgeClient.isProcessing = false;
+                bridgeClient.pendingEvent = null;
+            }
+            if (typeof onFinally === 'function') onFinally();
+        }
+    }
+
+    function renderManagedOwnNote(event) {
+        var container = document.getElementById('feed-container');
+        if (!event || !event.id) return;
+        event._relay_url = 'wss://relay.iyou.me';
+        event.primary_relay = 'wss://relay.iyou.me';
+        event.author_did = event.author_did || window.USER_DID || '';
+        event.author_handle = event.author_handle || window.userHandle || '';
+        event.author_name = event.author_name || window.userDisplayName || '';
+        if (container) {
+            if (addNoteToFeed(event)) highlightFreshNoteCard(String(event.id));
+            var emptyState = document.getElementById('feed-empty-state');
+            if (emptyState) { emptyState.classList.add('hidden'); emptyState.style.display = 'none'; }
+            var circleEmpty = document.getElementById('circle-empty-state');
+            if (circleEmpty) circleEmpty.remove();
+            container.removeAttribute('data-hydrate');
+        }
+        var timeMap = window.wunFeedTimeMap;
+        if (timeMap) {
+            timeMap.renderedIds.add(event.id);
+            timeMap.stagedMap.delete(event.id);
+            var ts = Number(event.created_at) || 0;
+            if (ts > timeMap.snapshotMaxTs) timeMap.snapshotMaxTs = ts;
+            updateNewPostsPill();
+        }
+    }
+
+    function resetManagedComposer() {
+        var content = document.getElementById('postContent');
+        if (content) content.value = '';
+        if (typeof clearQuoteAttachment === 'function') clearQuoteAttachment();
+        if (typeof clearMediaAttachment === 'function') clearMediaAttachment();
+        if (typeof clearComposerStagedMedia === 'function') clearComposerStagedMedia();
+        attachedMedia = null;
+        stagedMedia = [];
+        quotedTarget = null;
+    }
+
     function isKnownIyouAuthor(event) {
         if (!event) return false;
         var pk = String(event.pubkey_hex || event.pubkey || '').toLowerCase();
@@ -320,20 +411,24 @@
             showToast("Please enter some content or attach media to post.", true);
             return;
         }
-        var pk;
-        try {
-            pk = await bridgeClient.getEffectivePubkey();
-        } catch (e) {
-            setButtonLoading(false);
-            if (bridgeClient) {
-                bridgeClient.isProcessing = false;
-                bridgeClient.pendingEvent = null;
+        var isManaged = isManagedCustodialAccount();
+        var pk = isManaged ? String(window.userPubkey || '') : '';
+        if (!isManaged) {
+            try {
+                pk = await bridgeClient.getEffectivePubkey();
+            } catch (e) {
+                setButtonLoading(false);
+                if (bridgeClient) {
+                    bridgeClient.isProcessing = false;
+                    bridgeClient.pendingEvent = null;
+                }
+                showToast(e.message || "Failed to resolve public key", true);
+                return;
             }
-            showToast(e.message || "Failed to resolve public key", true);
-            return;
         }
         setButtonLoading(true);
-        bridgeClient.isProcessing = true;
+        if (isManaged) setManagedPublishState(true);
+        else bridgeClient.isProcessing = true;
         var tags = [];
         if (quotedTarget && quotedTarget.id) {
             tags.push(["q", quotedTarget.id, "wss://relay.iyou.me", quotedTarget.pubkey || ""]);
@@ -380,6 +475,21 @@
             created_at: Math.floor(Date.now() / 1000),
             tags: tags,
         };
+        if (isManaged) {
+            // No Port 9001 handshake for custodial accounts: the server holds
+            // the secp256k1 key and returns an already-signed NIP-01 event.
+            await publishManagedNote({
+                content: text,
+                kind: kind,
+                tags: tags,
+                geo_scope: window.GEOGRAPHIC_SCOPE || ''
+            }, function (signedEvent) {
+                renderManagedOwnNote(signedEvent);
+                resetManagedComposer();
+                window.showToast('Note published to iyou network');
+            });
+            return;
+        }
         try {
             bridgeClient.signEvent(event);
             armSignatureWait();
@@ -706,9 +816,12 @@
         var btn = document.getElementById("reply-btn-" + rootId);
         if (!textarea || !textarea.value.trim()) return;
 
-        var pk;
-        try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast(e.message, true); return; }
+        var isManaged = isManagedCustodialAccount();
+        var pk = isManaged ? String(window.userPubkey || '') : '';
+        if (!isManaged) {
+            try { pk = await bridgeClient.getEffectivePubkey(); }
+            catch (e) { showToast(e.message, true); return; }
+        }
 
         var timestamp = Math.floor(Date.now() / 1000);
         var tags = [
@@ -728,6 +841,28 @@
             created_at: timestamp,
             tags: tags,
         };
+
+        if (isManaged) {
+            if (btn) { btn.disabled = true; btn.textContent = "Publishing..."; }
+            await publishManagedNote({
+                content: event.content,
+                kind: 1111,
+                tags: tags,
+                geo_scope: window.GEOGRAPHIC_SCOPE || ''
+            }, function (signedEvent) {
+                appendReplyToThread(signedEvent, rootId);
+                var timeMap = window.wunFeedTimeMap;
+                if (timeMap) {
+                    timeMap.renderedIds.add(signedEvent.id);
+                    timeMap.stagedMap.delete(signedEvent.id);
+                }
+                if (textarea) textarea.value = "";
+                window.showToast('Reply published to iyou network');
+            }, function () {
+                if (btn) { btn.disabled = false; btn.textContent = "Reply"; }
+            });
+            return;
+        }
 
         pendingReply = { rootId: rootId, parentPubkey: parentPubkey };
         window.pendingReply = pendingReply;

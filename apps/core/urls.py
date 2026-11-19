@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/backup/import/', views.api_backup_import, name='api_backup_import'),
     path('api/auth/persona-switch/', views.api_persona_switch, name='api_persona_switch'),
     path('api/auth/sync-keys/', views.api_sync_keys, name='api_sync_keys'),
+    path('api/notes/publish/', views.api_publish_note, name='api_publish_note'),
     path('.well-known/nostr.json', views.nip05_well_known, name='nip05_well_known'),
 ]
 

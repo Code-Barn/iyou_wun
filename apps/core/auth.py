@@ -83,7 +83,41 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 return None
             except Exception:
                 pass
-        return super().get_or_create_user(access_token, id_token, payload)
+        user = super().get_or_create_user(access_token, id_token, payload)
+        if user and not getattr(user, "is_anonymous", False):
+            self._sync_account_tier(user, payload if isinstance(payload, dict) else {})
+        return user
+
+    def _sync_account_tier(self, user, claims=None):
+        """Mirror canonical Tier 1 / sovereign claims into the Django session.
+
+        ``did:web:`` subjects are managed (custodial) accounts without a local
+        enclave; ``did:key:`` subjects are sovereign. Provisioning their Nostr
+        keypair here means the feed can recognise their notes immediately.
+        """
+        if not user or getattr(user, "is_anonymous", False):
+            return
+        session = getattr(getattr(self, "request", None), "session", None)
+        if session is None:
+            return
+        claims = claims if isinstance(claims, dict) else {}
+        subject = str(claims.get("sub") or getattr(user, "username", "") or "")
+        is_web = subject.startswith("did:web:")
+        tier = claims.get("account_tier") or ("managed_free" if is_web else "sovereign")
+        session["account_tier"] = tier
+        session["did_method"] = claims.get("did_method") or ("web" if is_web else "key")
+        custodial_did = claims.get("custodial_did") or (subject if is_web else "")
+        if custodial_did:
+            session["custodial_did"] = custodial_did
+        session.modified = True
+
+        if is_web or str(tier).lower() in {"managed_free", "managed_premium", "l1", "custodial", "tier1"}:
+            try:
+                from .custodial_keys import get_or_create_custodial_keypair
+
+                get_or_create_custodial_keypair(user)
+            except Exception as e:
+                logger.debug(f"Managed Nostr key provisioning failed: {e}")
 
     def create_user(self, claims):
         sub = claims.get("sub")
@@ -104,6 +138,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             self._sync_user_deck(user, claims)
         except Exception as e:
             logger.debug(f"Failed to sync user deck in create_user: {e}")
+        self._sync_account_tier(user, claims)
         return self._evaluate_admin_elevation(user, claims)
 
     def update_user(self, user, claims):
@@ -120,6 +155,7 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
             self._sync_user_deck(user, claims)
         except Exception as e:
             logger.debug(f"Failed to sync user deck in update_user: {e}")
+        self._sync_account_tier(user, claims)
         return self._evaluate_admin_elevation(user, claims)
 
     def _sync_user_deck(self, user, claims=None):

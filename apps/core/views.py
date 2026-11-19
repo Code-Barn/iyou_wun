@@ -381,6 +381,143 @@ def api_sync_keys(request):
     })
 
 
+def _broadcast_signed_event(signed_event, relay_urls=None, timeout=1.5):
+    """Send ``["EVENT", event]`` to first-party relays; return acking URLs.
+
+    The ecosystem peer relay is always included in the fan-out so a managed
+    note is never only local; the loopback relay is attempted when reachable
+    (it is harmlessly skipped on HTTPS / remote deployments).
+    """
+    targets = list(relay_urls or ["wss://relay.iyou.me", "ws://127.0.0.1:9003"])
+    if "wss://relay.iyou.me" not in targets:
+        targets.insert(0, "wss://relay.iyou.me")
+
+    published = []
+    for relay_url in targets:
+        if relay_url in EXCLUDED_RELAYS:
+            continue
+        try:
+            ws = create_connection(
+                relay_url,
+                timeout=timeout,
+                sslopt={"cert_reqs": ssl.CERT_NONE},
+            )
+        except Exception:
+            continue
+        try:
+            ws.send(json.dumps(["EVENT", signed_event]))
+            deadline = time.time() + timeout
+            while time.time() < deadline:
+                try:
+                    raw = ws.recv()
+                except Exception:
+                    break
+                try:
+                    message = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                if isinstance(message, list) and message and message[0] == "OK":
+                    if len(message) > 2 and message[2]:
+                        published.append(relay_url)
+                    break
+        finally:
+            try:
+                ws.close()
+            except Exception:
+                pass
+    return published
+
+
+@login_required
+@require_POST
+def api_publish_note(request):
+    """Sign and broadcast a note/reply with a managed Tier 1 custodial key."""
+    from .custodial_keys import is_managed_account, sign_as_managed
+
+    if not is_managed_account(request.user, request):
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Sovereign accounts must sign via local enclave or NIP-07",
+            },
+            status=403,
+        )
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
+
+    content = payload.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return JsonResponse(
+            {"ok": False, "error": "content must be a non-empty string"}, status=400
+        )
+    content = content.strip()[:10000]
+
+    try:
+        kind = int(payload.get("kind", 1))
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Invalid kind"}, status=400)
+    if kind not in (1, 1111):
+        return JsonResponse({"ok": False, "error": "Unsupported note kind"}, status=400)
+
+    raw_tags = payload.get("tags") or []
+    if not isinstance(raw_tags, list) or len(raw_tags) > 200:
+        return JsonResponse({"ok": False, "error": "tags must be a bounded list"}, status=400)
+    tags = []
+    for tag in raw_tags:
+        if not isinstance(tag, (list, tuple)) or not tag or len(tag) > 16:
+            return JsonResponse({"ok": False, "error": "Invalid tag"}, status=400)
+        if not all(isinstance(value, str) for value in tag):
+            return JsonResponse({"ok": False, "error": "Tag values must be strings"}, status=400)
+        tags.append([str(value)[:1000] for value in tag])
+
+    def _has_tag(name):
+        return any(tag and tag[0] == name for tag in tags)
+
+    # Strict ecosystem envelope: managed notes must always be attributable to
+    # the iyou circle even if a client omits the tags.
+    if not any(tag and tag[0] == "t" and len(tag) > 1 and tag[1] == "iyou" for tag in tags):
+        tags.append(["t", "iyou"])
+    if not any(
+        tag and tag[0] == "client" and len(tag) > 1 and str(tag[1]).startswith("iyou") for tag in tags
+    ):
+        tags.append(["client", "iyou_wun"])
+    geo_scope = str(payload.get("geo_scope") or "").strip()
+    if geo_scope and not _has_tag("geo"):
+        tags.append(["geo", geo_scope[:200]])
+
+    unsigned_event = {
+        "created_at": int(time.time()),
+        "kind": kind,
+        "tags": tags,
+        "content": content,
+    }
+    try:
+        signed_event = sign_as_managed(request.user, unsigned_event)
+    except Exception as exc:
+        logger.exception("Managed note signing failed: %s", exc)
+        return JsonResponse({"ok": False, "error": "Unable to sign note"}, status=500)
+
+    relays_published = _broadcast_signed_event(signed_event)
+    try:
+        invalidate_author_identity(signed_event["pubkey"])
+        invalidate_ecosystem_cache()
+    except Exception:
+        pass
+
+    return JsonResponse(
+        {
+            "ok": True,
+            "event": signed_event,
+            "relays_published": relays_published,
+        }
+    )
+
+
 def get_effective_user_pubkey(request=None):
     """Resolve the authenticated user's authoritative Secp256k1 hex pubkey.
 

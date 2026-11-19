@@ -45,6 +45,11 @@ class UserLinkDeck(models.Model):
     nip05 = models.CharField(max_length=300, blank=True, default="")
     lud16 = models.CharField(max_length=300, blank=True, default="")
     nostr_pubkey = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # Tier 1 (did:web) users have no local iyou_home enclave. WUN holds their
+    # secp256k1 signing key, Fernet-encrypted at rest with a key derived from
+    # settings.SECRET_KEY; never expose custodial_private_key_enc to clients.
+    custodial_private_key_enc = models.TextField(blank=True, default="")
+    custodial_pubkey_hex = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
     default_view = models.CharField(
         max_length=8,
