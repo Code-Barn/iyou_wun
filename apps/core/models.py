@@ -50,6 +50,10 @@ class UserLinkDeck(models.Model):
     # settings.SECRET_KEY; never expose custodial_private_key_enc to clients.
     custodial_private_key_enc = models.TextField(blank=True, default="")
     custodial_pubkey_hex = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    # Server-maintained NIP-02 roster for managed accounts. Each entry is
+    # {"pubkey": "<64-hex>", "relay": "...", "petname": "..."}; updates are
+    # additive/non-destructive so a Kind 3 rebuild never loses prior follows.
+    custodial_contacts = models.JSONField(default=list, blank=True)
 
     default_view = models.CharField(
         max_length=8,

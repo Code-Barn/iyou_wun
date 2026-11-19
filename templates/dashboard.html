@@ -693,7 +693,7 @@
     }
   }
 
-  function fallbackServerSave() {
+  function fallbackServerSave(managed) {
     var name = (document.getElementById("profileName") ? document.getElementById("profileName").value : "").trim();
     var about = (document.getElementById("profileAbout") ? document.getElementById("profileAbout").value : "").trim();
     var picture = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
@@ -721,8 +721,8 @@
     .then(function (r) { return r.json(); })
     .then(function (res) {
       if (res.success) {
-        showToast("Profile saved successfully.");
-        applyOptimisticRefresh({ content: JSON.stringify(contentObj) });
+        showToast(managed ? "Profile saved & broadcast to iyou network" : "Profile saved successfully.");
+        applyOptimisticRefresh(res.kind0_event || { content: JSON.stringify(contentObj) });
       } else {
         showToast(res.error || "Failed to save profile.", true);
       }
@@ -780,6 +780,16 @@
     var picture = (document.getElementById("profilePicture") ? document.getElementById("profilePicture").value : "").trim();
     var banner = (document.getElementById("profileBanner") ? document.getElementById("profileBanner").value : "").trim();
     var lud16 = (document.getElementById("profileLud16") ? document.getElementById("profileLud16").value : "").trim();
+
+    // Tier 1 (did:web) accounts have no Port 9001 bridge: save and sign the
+    // Kind 0 metadata event server-side with their custodial key.
+    var isManagedProfile = window.USER_ACCOUNT_TIER === 'L1' || (window.USER_DID || '').indexOf('did:web:') === 0;
+    if (isManagedProfile) {
+      pendingEvent = null;
+      isProcessing = false;
+      fallbackServerSave(true);
+      return false;
+    }
 
     var contentObj = {
       name: name,

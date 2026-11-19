@@ -47,6 +47,11 @@ def decrypt_secret(ciphertext):
         raise ValueError("custodial key ciphertext is invalid or was encrypted with a different SECRET_KEY")
 
 
+def is_custodial_user(user, request=None):
+    """Alias used by parity endpoints: True for Tier 1 / did:web accounts."""
+    return is_managed_account(user, request)
+
+
 def is_managed_account(user, request=None):
     """True for Tier 1 / custodial sessions; False for sovereign enclave users."""
     username = str(getattr(user, "username", "") or "")
@@ -75,6 +80,11 @@ def _ensure_deck(user):
     handle = "web_" + hashlib.sha256(str(user.username).encode("utf-8")).hexdigest()[:12]
     deck, _created = UserLinkDeck.objects.get_or_create(user=user, defaults={"handle": handle[:32]})
     return deck
+
+
+def ensure_deck(user):
+    """Public accessor for the user's LinkDeck (created on demand)."""
+    return _ensure_deck(user)
 
 
 def get_or_create_custodial_keypair(user):

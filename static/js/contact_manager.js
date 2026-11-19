@@ -122,7 +122,49 @@
     }
 
 
+    function isManagedCustodialAccount() {
+        var tier = String(global.USER_ACCOUNT_TIER || "").toLowerCase();
+        var did = String(global.USER_DID || global.CURRENT_SESSION_DID || "");
+        return tier === "l1" || tier === "custodial" ||
+            tier === "managed_free" || tier === "managed_premium" ||
+            did.indexOf("did:web:") === 0;
+    }
+
+    function contactsFromApi(data) {
+        return (data && Array.isArray(data.contacts) ? data.contacts : []).map(function (entry) {
+            return ["p", entry.pubkey, entry.relay || "wss://relay.iyou.me", entry.petname || ""];
+        }).filter(function (tag) { return /^[0-9a-fA-F]{64}$/.test(tag[1]); });
+    }
+
+    async function managedToggleFollow(targetPubkey, petname, action) {
+        const resp = await fetch("/api/contacts/follow/", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRFToken": (global.csrfToken || (document.querySelector('[name=csrfmiddlewaretoken]') || {}).value) || ""
+            },
+            credentials: "same-origin",
+            body: JSON.stringify({ target_pubkey: targetPubkey, action: action, petname: petname || "" })
+        });
+        const data = await resp.json().catch(function () { return {}; });
+        if (!resp.ok || !data.ok) {
+            throw new Error(data.error || "Follow action failed.");
+        }
+        if (data.event && Array.isArray(data.event.tags)) {
+            currentContactList = data.event.tags.filter(function (tag) {
+                return Array.isArray(tag) && tag[0] === "p" && tag[1];
+            });
+            currentContactEvent = data.event;
+        }
+        targetFollowsCache.delete(targetPubkey);
+        await updateButtonsForTarget(targetPubkey);
+        return data;
+    }
+
     async function getCurrentUserPubkey(options) {
+        if (isManagedCustodialAccount()) {
+            return normalizePubkey(global.userPubkey || (global.activeProfile && global.activeProfile.nostr_pubkey_hex) || "");
+        }
         if (global.bridgeClient && typeof global.bridgeClient.getEffectivePubkey === "function") {
             try {
                 const pk = await global.bridgeClient.getEffectivePubkey(options || {});
@@ -388,12 +430,21 @@
 
         initPromise = (async () => {
             try {
-                const myPubkey = await getCurrentUserPubkey({ silent: true });
-                if (myPubkey) {
-                    const event = await queryKind3FromRelays(myPubkey);
-                    if (event && Array.isArray(event.tags)) {
-                        currentContactEvent = event;
-                        currentContactList = event.tags.filter(t => Array.isArray(t) && t[0] === "p" && t[1]);
+                if (isManagedCustodialAccount()) {
+                    // No Port 9001 probe for Tier 1: the roster is server-side.
+                    const resp = await fetch("/api/contacts/", { credentials: "same-origin" });
+                    const data = await resp.json().catch(function () { return {}; });
+                    if (resp.ok && data.ok) {
+                        currentContactList = contactsFromApi(data);
+                    }
+                } else {
+                    const myPubkey = await getCurrentUserPubkey({ silent: true });
+                    if (myPubkey) {
+                        const event = await queryKind3FromRelays(myPubkey);
+                        if (event && Array.isArray(event.tags)) {
+                            currentContactEvent = event;
+                            currentContactList = event.tags.filter(t => Array.isArray(t) && t[0] === "p" && t[1]);
+                        }
                     }
                 }
             } catch (e) {
@@ -481,6 +532,21 @@
         const isCurrentlyFollowing = currentContactList.some(
             tag => tag[0] === "p" && tag[1] && normalizePubkey(tag[1]) === cleanTarget
         );
+
+        if (isManagedCustodialAccount()) {
+            try {
+                await managedToggleFollow(cleanTarget, petname, isCurrentlyFollowing ? "unfollow" : "follow");
+                notifyToast(
+                    isCurrentlyFollowing ? "Unfollowed contact" : "Follow list updated (Kind 3)",
+                    "success"
+                );
+            } catch (err) {
+                notifyToast("Follow action failed: " + err.message, "error");
+            } finally {
+                setButtonLoadingState(cleanTarget, false);
+            }
+            return;
+        }
 
         let updatedTags;
         if (isCurrentlyFollowing) {
@@ -577,6 +643,26 @@
         if (button) {
             button.disabled = true;
             button.innerText = "⏳ Updating...";
+        }
+
+        if (isManagedCustodialAccount()) {
+            try {
+                await managedToggleFollow(cleanTarget, targetName || "", action);
+                if (global.showToast) {
+                    global.showToast(action === "follow" ? "Followed peer successfully" : "Unfollowed peer", "success");
+                }
+            } catch (err) {
+                if (button) {
+                    button.disabled = false;
+                    button.innerText = prevText;
+                    button.className = prevClasses;
+                    button.dataset.following = prevFollowing;
+                }
+                if (global.showToast) {
+                    global.showToast("Follow action failed: " + err.message, "error");
+                }
+            }
+            return;
         }
 
         let payload;

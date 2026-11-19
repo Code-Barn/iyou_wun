@@ -178,3 +178,162 @@ class ApiPublishNoteTests(TestCase):
             response.json()["error"],
             "Sovereign accounts must sign via local enclave or NIP-07",
         )
+
+    @patch("apps.core.views._broadcast_signed_event", return_value=["wss://relay.iyou.me"])
+    def test_tier1_poll_and_media_authoring_kinds(self, _broadcast):
+        self._login_managed()
+        for kind, content in ((30023, "Civic poll description"), (1063, "Media announcement")):
+            response = self.client.post(
+                self.url,
+                data=json.dumps(
+                    {
+                        "content": content,
+                        "kind": kind,
+                        "tags": [["d", "poll-1"], ["title", "Poll"], ["option", "Yes"], ["option", "No"]],
+                    }
+                ),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            event = response.json()["event"]
+            self.assertEqual(event["kind"], kind)
+            self.assertTrue(nostr_signer.verify_event(event))
+            self.assertIn(["t", "iyou"], event["tags"])
+            self.assertIn(["client", "iyou_wun"], event["tags"])
+
+    @patch("apps.core.views._broadcast_signed_event", return_value=["wss://relay.iyou.me"])
+    def test_oversized_content_rejected(self, _broadcast):
+        self._login_managed()
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"content": "x" * 2501, "kind": 1}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+
+class ApiInteractNoteTests(TestCase):
+    url = reverse("api_interact_note")
+
+    def setUp(self):
+        self.managed = User.objects.create_user(username="did:web:iyou.me:user:interactor")
+        self.sovereign = User.objects.create_user(username="did:key:z6Mkinteractor")
+        self.target = "ab" * 32
+        self.author = "cd" * 32
+
+    def _login_managed(self):
+        self.client.force_login(self.managed)
+        session = self.client.session
+        session["account_tier"] = "managed_free"
+        session.save()
+
+    @patch("apps.core.views._broadcast_signed_event", return_value=["wss://relay.iyou.me"])
+    def test_managed_interaction_kinds(self, _broadcast):
+        self._login_managed()
+        for kind, content in ((7, ""), (6, ""), (1112, '{"poll_id":"x"}'), (1984, "Report: SPAM")):
+            response = self.client.post(
+                self.url,
+                data=json.dumps(
+                    {
+                        "kind": kind,
+                        "content": content,
+                        "tags": [["e", self.target], ["p", self.author]],
+                    }
+                ),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            data = response.json()
+            self.assertTrue(data["ok"])
+            self.assertTrue(nostr_signer.verify_event(data["event"]))
+            self.assertEqual(data["event"]["kind"], kind)
+            if kind == 7:
+                self.assertEqual(data["event"]["content"], "+")
+
+    def test_invalid_hex_reference_rejected(self):
+        self._login_managed()
+        response = self.client.post(
+            self.url,
+            data=json.dumps({"kind": 7, "tags": [["e", "not-hex"]]}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_sovereign_rejected(self):
+        self.client.force_login(self.sovereign)
+        session = self.client.session
+        session["account_tier"] = "sovereign"
+        session.save()
+        response = self.client.post(
+            self.url, data=json.dumps({"kind": 7, "tags": []}), content_type="application/json"
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+class ManagedContactsAndBroadcastTests(TestCase):
+    def setUp(self):
+        self.managed = User.objects.create_user(username="did:web:iyou.me:user:contacts")
+        self.client.force_login(self.managed)
+        session = self.client.session
+        session["account_tier"] = "managed_free"
+        session.save()
+        self.first = "ab" * 32
+        self.second = "cd" * 32
+
+    @patch("apps.core.views._broadcast_signed_event", return_value=["wss://relay.iyou.me"])
+    def test_follow_unfollow_is_non_destructive_and_signed(self, broadcast):
+        follow_url = reverse("api_contacts_follow")
+        for target in (self.first, self.second):
+            response = self.client.post(
+                follow_url,
+                data=json.dumps({"target_pubkey": target, "action": "follow", "petname": "peer"}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 200, response.content)
+            data = response.json()
+            self.assertTrue(data["ok"])
+            self.assertTrue(nostr_signer.verify_event(data["event"]))
+            self.assertEqual(data["event"]["kind"], 3)
+            self.assertIn(["p", target, "wss://relay.iyou.me", "peer"], data["event"]["tags"])
+
+        response = self.client.post(
+            follow_url,
+            data=json.dumps({"target_pubkey": self.first, "action": "unfollow"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["count"], 1)
+
+        listing = self.client.get(reverse("api_get_contacts")).json()
+        self.assertEqual(listing["following"], [self.second])
+        self.assertEqual(len(listing["contacts"]), 1)
+        self.assertTrue(broadcast.called)
+
+    @patch("apps.core.views._broadcast_signed_event", return_value=["wss://relay.iyou.me"])
+    def test_profile_save_signs_kind0(self, _broadcast):
+        response = self.client.post(
+            reverse("api_save_profile"),
+            data=json.dumps({"name": "Managed User", "about": "hello", "picture": "", "banner": "", "lud16": ""}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        event = response.json()["kind0_event"]
+        self.assertEqual(event["kind"], 0)
+        self.assertTrue(nostr_signer.verify_event(event))
+        metadata = json.loads(event["content"])
+        self.assertEqual(metadata["name"], "Managed User")
+        self.assertTrue(metadata["nip05"])
+
+    @patch("apps.core.views._broadcast_signed_event", return_value=["wss://relay.iyou.me"])
+    def test_bookmark_toggle_signs_kind10004(self, broadcast):
+        response = self.client.post(
+            reverse("api_toggle_bookmark"),
+            data=json.dumps({"event_id": "ef" * 32}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["bookmarked"])
+        signed_event = broadcast.call_args[0][0]
+        self.assertEqual(signed_event["kind"], 10004)
+        self.assertEqual(signed_event["tags"], [["e", "ef" * 32]])
+        self.assertTrue(nostr_signer.verify_event(signed_event))

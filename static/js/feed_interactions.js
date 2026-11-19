@@ -93,6 +93,28 @@
             did.indexOf('did:web:') === 0;
     }
 
+    async function custodialInteract(kind, content, tags, onSuccess, onFinally) {
+        try {
+            var response = await fetch('/api/notes/interact/', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': getCsrfToken()
+                },
+                body: JSON.stringify({ kind: kind, content: content, tags: tags })
+            });
+            var data = await response.json().catch(function () { return {}; });
+            if (!response.ok || !data.ok) {
+                throw new Error(data.error || 'Action could not be published');
+            }
+            if (typeof onSuccess === 'function') onSuccess(data.event);
+        } catch (err) {
+            window.showToast(err.message || 'Action could not be published', 'error');
+        } finally {
+            if (typeof onFinally === 'function') onFinally();
+        }
+    }
+
     var _publishIdleLabel = null;
 
     function setManagedPublishState(active) {
@@ -134,7 +156,7 @@
         }
     }
 
-    function renderManagedOwnNote(event) {
+    function renderManagedOwnNote(event, useApiRenderer) {
         var container = document.getElementById('feed-container');
         if (!event || !event.id) return;
         event._relay_url = 'wss://relay.iyou.me';
@@ -143,7 +165,13 @@
         event.author_handle = event.author_handle || window.userHandle || '';
         event.author_name = event.author_name || window.userDisplayName || '';
         if (container) {
-            if (addNoteToFeed(event)) highlightFreshNoteCard(String(event.id));
+            if (useApiRenderer) {
+                // API renderer preserves structured fields (poll options, replies)
+                // that the optimistic relay renderer does not carry.
+                appendNoteToFeed(event, container, null, 'top');
+            } else if (addNoteToFeed(event)) {
+                highlightFreshNoteCard(String(event.id));
+            }
             var emptyState = document.getElementById('feed-empty-state');
             if (emptyState) { emptyState.classList.add('hidden'); emptyState.style.display = 'none'; }
             var circleEmpty = document.getElementById('circle-empty-state');
@@ -2980,9 +3008,12 @@
         }
         if (!selectedValue) return;
 
-        var pk;
-        try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast(e.message, true); return; }
+        var isManagedVote = isManagedCustodialAccount();
+        var pk = isManagedVote ? String(window.userPubkey || '') : '';
+        if (!isManagedVote) {
+            try { pk = await bridgeClient.getEffectivePubkey(); }
+            catch (e) { showToast(e.message, true); return; }
+        }
 
         var pubkey = card.getAttribute("data-poll-pubkey") || (form && form.getAttribute("data-poll-pubkey")) || "";
         var dtag = card.getAttribute("data-poll-dtag") || (form && form.getAttribute("data-poll-dtag")) || "";
@@ -3023,28 +3054,36 @@
         var timestamp = Math.floor(Date.now() / 1000);
 
         // 3. Request inner signature via bridgeClient.omniSignRequest
+        // Managed accounts have no enclave: the custodial Schnorr signature on
+        // the outer Kind 1112 event is their authoritative proof.
         var innerResult = null;
-        try {
-            if (typeof bridgeClient.omniSignRequest === "function") {
-                innerResult = await bridgeClient.omniSignRequest({
-                    protocol: "POLY_V2",
-                    poll_id: pollId,
-                    option_id: selectedValue,
-                    timestamp: timestamp,
-                    profile_id: targetProfileId
-                });
+        if (!isManagedVote) {
+            try {
+                if (typeof bridgeClient.omniSignRequest === "function") {
+                    innerResult = await bridgeClient.omniSignRequest({
+                        protocol: "POLY_V2",
+                        poll_id: pollId,
+                        option_id: selectedValue,
+                        timestamp: timestamp,
+                        profile_id: targetProfileId
+                    });
+                }
+            } catch (signErr) {
+                console.warn("[Poll] OmniSign request failed, falling back to local DID:", signErr);
             }
-        } catch (signErr) {
-            console.warn("[Poll] OmniSign request failed, falling back to local DID:", signErr);
         }
 
         var activeDid = (typeof window !== "undefined" && window.activeProfile && window.activeProfile.did) || (typeof window !== "undefined" ? window.CURRENT_SESSION_DID : "") || "";
-        var innerDid = (innerResult && innerResult.voter_did) ? innerResult.voter_did : activeDid;
-        var innerSig = (innerResult && innerResult.signature) ? innerResult.signature : "";
+        var innerDid = isManagedVote
+            ? (window.USER_DID || activeDid)
+            : ((innerResult && innerResult.voter_did) ? innerResult.voter_did : activeDid);
+        var innerSig = isManagedVote
+            ? ""
+            : ((innerResult && innerResult.signature) ? innerResult.signature : "");
 
         // 4. If fidelity >= 2, call bridgeClient.polyCredentialRequest to obtain credential_proof
         var credentialProof = null;
-        if (fidelityMin >= 2 && typeof bridgeClient.polyCredentialRequest === "function") {
+        if (!isManagedVote && fidelityMin >= 2 && typeof bridgeClient.polyCredentialRequest === "function") {
             try {
                 credentialProof = await bridgeClient.polyCredentialRequest({
                     scope: scopeAttr,
@@ -3089,6 +3128,39 @@
         };
 
         // 7. Sign outer event via bridgeClient.signEvent(event) (BIP-340 Schnorr)
+        if (isManagedVote) {
+            if (btn) { btn.disabled = true; btn.textContent = "Voting..."; }
+            await custodialInteract(1112, JSON.stringify(innerPayload), tags, async function (signedEvent) {
+                try {
+                    var voteResponse = await fetch('/api/vote/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'X-CSRFToken': getCsrfToken() },
+                        body: JSON.stringify({
+                            voter_did: innerDid,
+                            signature: signedEvent.sig,
+                            vote_envelope: innerPayload
+                        })
+                    });
+                    var voteData = await voteResponse.json().catch(function () { return {}; });
+                    if (!voteResponse.ok || voteData.valid === false) {
+                        throw new Error(voteData.error || 'Vote submission failed');
+                    }
+                    if (btn) {
+                        btn.textContent = "Vote Cast";
+                        btn.classList.remove("bg-amber-600", "hover:bg-amber-700");
+                        btn.classList.add("bg-green-500", "cursor-default");
+                    }
+                    if (form) form.querySelectorAll("input").forEach(function (input) { input.disabled = true; });
+                    window.showToast('Governance vote broadcast to iyou network');
+                } catch (err) {
+                    window.showToast(err.message || 'Vote submission failed', 'error');
+                }
+            }, function () {
+                if (btn && btn.textContent === "Voting...") btn.textContent = "Vote";
+            });
+            return;
+        }
+
         pendingVote = { pollId: pollId, selection: selectedValue, timestamp: timestamp, form: form, btn: btn };
         bridgeClient.signEvent(event);
     }
@@ -3129,9 +3201,12 @@
     }
 
     async function createPoll() {
-        var pk;
-        try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast(e.message, true); return; }
+        var isManaged = isManagedCustodialAccount();
+        var pk = isManaged ? String(window.userPubkey || '') : '';
+        if (!isManaged) {
+            try { pk = await bridgeClient.getEffectivePubkey(); }
+            catch (e) { showToast(e.message, true); return; }
+        }
         var title = document.getElementById("pollTitle").value.trim();
         var description = document.getElementById("pollDescription").value.trim();
         var scope = document.getElementById("pollScope").value;
@@ -3170,6 +3245,39 @@
             tags: tags
         };
 
+        if (isManaged) {
+            var pollBtn = document.getElementById("publishPollBtn");
+            var pollBtnLabel = pollBtn ? pollBtn.textContent : "";
+            if (pollBtn) { pollBtn.disabled = true; pollBtn.textContent = "Publishing..."; }
+            var dTag = tags.some(function (t) { return t[0] === "d"; })
+                ? (tags.find(function (t) { return t[0] === "d"; })[1] || "") : "";
+            event.poll_options = options.slice();
+            event.poll_d_tag = dTag;
+            event.title = title;
+            await publishManagedNote({
+                content: event.content,
+                kind: 30023,
+                tags: tags,
+                geo_scope: window.GEOGRAPHIC_SCOPE || ''
+            }, function (signedEvent) {
+                // The signed event from the API has no client-only poll fields.
+                signedEvent.poll_options = options.slice();
+                signedEvent.poll_d_tag = dTag;
+                signedEvent.title = title;
+                renderManagedOwnNote(signedEvent, true);
+                closePollModal();
+                ["pollTitle", "pollDescription", "pollFidelity"].forEach(function (id) {
+                    var input = document.getElementById(id);
+                    if (input) input.value = id === "pollFidelity" ? "1" : "";
+                });
+                document.querySelectorAll(".poll-option").forEach(function (input) { input.value = ""; });
+                window.showToast('Poll published to iyou network');
+            }, function () {
+                if (pollBtn) { pollBtn.disabled = false; pollBtn.textContent = pollBtnLabel; }
+            });
+            return;
+        }
+
         bridgeClient.isProcessing = true;
         pendingPoll = true;
         document.getElementById("publishPollBtn").disabled = true;
@@ -3179,12 +3287,7 @@
 
     // ---------- Reactions, Reposts & Kebab Actions ----------
 
-    async function likeNote(noteId, authorPubkey) {
-        if (!noteId) return;
-        var pk;
-        try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast(e.message || "Sign in with a sovereign key to like notes.", "error"); return; }
-
+    function applyLikeVisual(noteId) {
         var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-like, [data-note-id="' + noteId + '"] .action-btn-like');
         var countLabel = btn ? btn.querySelector(".like-count-label") : null;
         if (btn) {
@@ -3199,16 +3302,33 @@
             var curr = parseInt(countLabel.textContent, 10);
             countLabel.textContent = isNaN(curr) ? "1" : String(curr + 1);
         }
+    }
+
+    async function likeNote(noteId, authorPubkey) {
+        if (!noteId) return;
+        var tags = [["e", noteId, "wss://relay.iyou.me"]];
+        if (authorPubkey && /^[0-9a-fA-F]{64}$/.test(authorPubkey)) {
+            tags.push(["p", authorPubkey.toLowerCase(), "wss://relay.iyou.me"]);
+        }
+        if (isManagedCustodialAccount()) {
+            await custodialInteract(7, "+", tags, function () {
+                applyLikeVisual(noteId);
+                window.showToast('Reaction published to iyou network');
+            });
+            return;
+        }
+        var pk;
+        try { pk = await bridgeClient.getEffectivePubkey(); }
+        catch (e) { showToast(e.message || "Sign in with a sovereign key to like notes.", "error"); return; }
+
+        applyLikeVisual(noteId);
 
         var event = {
             kind: 7,
             content: "+",
             pubkey: pk,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                ["e", noteId, "wss://relay.iyou.me"],
-                ["p", authorPubkey || "", "wss://relay.iyou.me"]
-            ]
+            tags: tags
         };
 
         pendingReaction = { noteId: noteId };
@@ -3216,24 +3336,42 @@
         bridgeClient.signEvent(event);
     }
 
+    function applyRepostVisual(noteId) {
+        var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-repost, [data-note-id="' + noteId + '"] .action-btn-repost');
+        if (!btn) return;
+        btn.classList.add("text-emerald-600", "dark:text-emerald-400", "font-bold");
+        var countLabel = btn.querySelector(".repost-count-label");
+        if (countLabel) {
+            var current = parseInt(countLabel.textContent, 10);
+            countLabel.textContent = isNaN(current) ? "1" : String(current + 1);
+        }
+    }
+
     async function repostNote(noteId, authorPubkey) {
         if (!noteId) return;
+        var tags = [["e", noteId, "wss://relay.iyou.me"]];
+        if (authorPubkey && /^[0-9a-fA-F]{64}$/.test(authorPubkey)) {
+            tags.push(["p", authorPubkey.toLowerCase(), "wss://relay.iyou.me"]);
+        }
+        if (isManagedCustodialAccount()) {
+            await custodialInteract(6, "", tags, function () {
+                applyRepostVisual(noteId);
+                window.showToast('Note reposted to iyou network');
+            });
+            return;
+        }
         var pk;
         try { pk = await bridgeClient.getEffectivePubkey(); }
         catch (e) { showToast(e.message || "Sign in with a sovereign key to repost notes.", "error"); return; }
 
-        var btn = document.querySelector('[data-note-card-id="' + noteId + '"] .action-btn-repost, [data-note-id="' + noteId + '"] .action-btn-repost');
-        if (btn) btn.classList.add("text-emerald-600", "dark:text-emerald-400", "font-bold");
+        applyRepostVisual(noteId);
 
         var event = {
             kind: 6,
             content: "",
             pubkey: pk,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                ["e", noteId, "wss://relay.iyou.me"],
-                ["p", authorPubkey || "", "wss://relay.iyou.me"]
-            ]
+            tags: tags
         };
 
         pendingRepost = { noteId: noteId };
@@ -3392,15 +3530,21 @@
 
     async function submitReport(noteId, pubkey, reason) {
         if (!noteId) return;
-        var pk;
-        try { pk = await bridgeClient.getEffectivePubkey(); }
-        catch (e) { showToast(e.message || "Sign in with a sovereign key to report notes.", true); return; }
+        var isManaged = isManagedCustodialAccount();
+        var pk = isManaged ? String(window.userPubkey || '') : '';
+        if (!isManaged) {
+            try { pk = await bridgeClient.getEffectivePubkey(); }
+            catch (e) { showToast(e.message || "Sign in with a sovereign key to report notes.", true); return; }
+        }
 
         closeReportModal();
 
-        var card = document.querySelector('[data-note-card-id="' + noteId + '"], [data-note-id="' + noteId + '"]');
-        var wrapper = card ? (card.closest(".feed-note-card") || card) : null;
-        if (wrapper) wrapper.remove();
+        function removeFlaggedCard() {
+            var card = document.querySelector('[data-note-card-id="' + noteId + '"], [data-note-id="' + noteId + '"]');
+            var wrapper = card ? (card.closest(".feed-note-card") || card) : null;
+            if (wrapper) wrapper.remove();
+        }
+        if (!isManaged) removeFlaggedCard();
 
         // 1. Post to local progressive friction API
         fetch("/api/moderation/flag/", {
@@ -3419,15 +3563,23 @@
         });
 
         // 2. Broadcast Kind 1984 event to mesh
+        var reportTags = [["e", noteId, "wss://relay.iyou.me", reason]];
+        if (pubkey && /^[0-9a-fA-F]{64}$/.test(pubkey)) {
+            reportTags.push(["p", pubkey.toLowerCase(), "wss://relay.iyou.me"]);
+        }
+        if (isManaged) {
+            await custodialInteract(1984, "Report: " + reason, reportTags, function () {
+                removeFlaggedCard();
+                window.showToast('Report recorded locally and broadcast to mesh', 'success');
+            });
+            return;
+        }
         var event = {
             kind: 1984,
             content: "Report: " + reason,
             pubkey: pk,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                ["e", noteId, "wss://relay.iyou.me", reason],
-                ["p", pubkey || "", "wss://relay.iyou.me"]
-            ]
+            tags: reportTags
         };
 
         pendingReport = { noteId: noteId, pubkey: pubkey, reason: reason };
@@ -3970,6 +4122,26 @@
     window.muteAuthor = muteAuthor;
     window.blockAuthor = blockAuthor;
     window.createPoll = createPoll;
+
+    // Mobile dock "+" compose action: route to the feed with ?compose=1 when
+    // off-feed, otherwise focus the composer in place.
+    function focusComposer() {
+        var editor = document.getElementById("note-content") || document.getElementById("postContent");
+        if (!editor) return false;
+        try { editor.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) {}
+        try { editor.focus({ preventScroll: true }); } catch (e) { editor.focus(); }
+        return true;
+    }
+    window.focusComposer = focusComposer;
+    window.handleMobileCompose = function () {
+        var path = String(window.location.pathname || "").replace(/\/+$/, "");
+        if (path !== "" && path !== "/feed") {
+            window.location.assign("/feed?compose=1");
+            return;
+        }
+        focusComposer();
+    };
+
     window.translateNote = translateNote;
     window.toggleOriginalNote = toggleOriginalNote;
 
@@ -4223,6 +4395,10 @@
         // an empty shell (marked data-hydrate), kick off the background stream
         // fetch immediately on DOMContentLoaded for fast perceived load.
         fetchInitialFeedStream();
+
+        if (new URLSearchParams(window.location.search).get("compose") === "1") {
+            setTimeout(focusComposer, 150);
+        }
 
         initBookmarkIdsMirror();
 

@@ -39,7 +39,7 @@ urlpatterns = [
     path('api/profile/<str:identifier>/notes/', views.api_profile_notes, name='api_profile_notes'),
     path('api/search/', views.api_search, name='api_search'),
     path('api/translate/', views.api_translate, name='api_translate'),
-    path('api/contacts/follow/', views.api_contacts_follow, name='api_contacts_follow'),
+    path('api/contacts/follow/', views.api_toggle_follow, name='api_contacts_follow'),
     path('api/profile/save/', views.api_save_profile, name='api_save_profile'),
     re_path(r"^api/vote/?$", views.api_cast_vote, name="api_cast_vote"),
     path("api/moderation/flag/", views.api_report_flag, name="api_report_flag"),
@@ -55,6 +55,8 @@ urlpatterns = [
     path('api/auth/persona-switch/', views.api_persona_switch, name='api_persona_switch'),
     path('api/auth/sync-keys/', views.api_sync_keys, name='api_sync_keys'),
     path('api/notes/publish/', views.api_publish_note, name='api_publish_note'),
+    path('api/notes/interact/', views.api_interact_note, name='api_interact_note'),
+    path('api/contacts/', views.api_get_contacts, name='api_get_contacts'),
     path('.well-known/nostr.json', views.nip05_well_known, name='nip05_well_known'),
 ]
 

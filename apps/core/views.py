@@ -455,14 +455,19 @@ def api_publish_note(request):
         return JsonResponse(
             {"ok": False, "error": "content must be a non-empty string"}, status=400
         )
-    content = content.strip()[:10000]
-
     try:
         kind = int(payload.get("kind", 1))
     except (TypeError, ValueError):
         return JsonResponse({"ok": False, "error": "Invalid kind"}, status=400)
-    if kind not in (1, 1111):
+    if kind not in (1, 1063, 1111, 30023):
         return JsonResponse({"ok": False, "error": "Unsupported note kind"}, status=400)
+
+    content = content.strip()
+    max_content = 10000 if kind == 30023 else 2500
+    if len(content) > max_content:
+        return JsonResponse(
+            {"ok": False, "error": f"content exceeds {max_content} characters"}, status=400
+        )
 
     raw_tags = payload.get("tags") or []
     if not isinstance(raw_tags, list) or len(raw_tags) > 200:
@@ -512,6 +517,228 @@ def api_publish_note(request):
     return JsonResponse(
         {
             "ok": True,
+            "event": signed_event,
+            "relays_published": relays_published,
+        }
+    )
+
+
+def _validated_nostr_tags(raw_tags):
+    """Return (tags, error) for a bounded list-of-string-lists NIP-01 tag set."""
+    if raw_tags is None:
+        return [], None
+    if not isinstance(raw_tags, list) or len(raw_tags) > 200:
+        return None, "tags must be a bounded list"
+    tags = []
+    for tag in raw_tags:
+        if not isinstance(tag, (list, tuple)) or not tag or len(tag) > 16:
+            return None, "Invalid tag"
+        if not all(isinstance(value, str) for value in tag):
+            return None, "Tag values must be strings"
+        tags.append([value[:1000] for value in tag])
+    return tags, None
+
+
+def _validated_ref_tags(tags):
+    """Validate NIP-10/NIP-56 e/p references are 64-char hex pubkeys/ids."""
+    for tag in tags:
+        if tag and tag[0] in ("e", "p"):
+            if len(tag) < 2 or not re.fullmatch(r"[0-9a-fA-F]{64}", tag[1]):
+                return False
+            tag[1] = tag[1].lower()
+    return True
+
+
+@login_required
+@require_POST
+def api_interact_note(request):
+    """Sign a social/protocol interaction event with the custodial key.
+
+    Kinds: 6 (repost), 7 (reaction), 1112 (governance vote envelope),
+    1984 (NIP-56 content report).
+    """
+    from .custodial_keys import is_custodial_user, sign_as_managed
+
+    if not is_custodial_user(request.user, request):
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Sovereign accounts must sign via local enclave or NIP-07",
+            },
+            status=403,
+        )
+
+    try:
+        payload = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
+    if not isinstance(payload, dict):
+        return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
+
+    try:
+        kind = int(payload.get("kind", 7))
+    except (TypeError, ValueError):
+        return JsonResponse({"ok": False, "error": "Invalid kind"}, status=400)
+    if kind not in (6, 7, 1112, 1984):
+        return JsonResponse({"ok": False, "error": "Unsupported interaction kind"}, status=400)
+
+    content = payload.get("content", "")
+    if content is None:
+        content = ""
+    if not isinstance(content, str):
+        return JsonResponse({"ok": False, "error": "content must be a string"}, status=400)
+    if kind == 7 and not content:
+        content = "+"
+    max_content = 32 if kind == 7 else 10000
+    if len(content) > max_content:
+        return JsonResponse(
+            {"ok": False, "error": f"content exceeds {max_content} characters"}, status=400
+        )
+
+    tags, error = _validated_nostr_tags(payload.get("tags") or [])
+    if error:
+        return JsonResponse({"ok": False, "error": error}, status=400)
+    if not _validated_ref_tags(tags):
+        return JsonResponse(
+            {"ok": False, "error": "e/p tag values must be 64-char hex"}, status=400
+        )
+
+    unsigned_event = {
+        "created_at": int(time.time()),
+        "kind": kind,
+        "tags": tags,
+        "content": content,
+    }
+    try:
+        signed_event = sign_as_managed(request.user, unsigned_event)
+    except Exception:
+        logger.exception("Managed interaction signing failed")
+        return JsonResponse({"ok": False, "error": "Unable to sign interaction"}, status=500)
+
+    relays_published = _broadcast_signed_event(signed_event)
+    return JsonResponse(
+        {
+            "ok": True,
+            "event": signed_event,
+            "relays_published": relays_published,
+        }
+    )
+
+
+@login_required
+def api_get_contacts(request):
+    """Return the server-maintained NIP-02 roster for a managed account."""
+    from .custodial_keys import is_custodial_user
+
+    if not is_custodial_user(request.user, request):
+        return JsonResponse(
+            {
+                "ok": False,
+                "error": "Sovereign accounts must sign via local enclave or NIP-07",
+            },
+            status=403,
+        )
+    deck = UserLinkDeck.objects.filter(user=request.user).first()
+    contacts = list(deck.custodial_contacts or []) if deck else []
+    return JsonResponse(
+        {
+            "ok": True,
+            "following": [entry.get("pubkey") for entry in contacts if entry.get("pubkey")],
+            "contacts": contacts,
+        }
+    )
+
+
+@login_required
+@require_POST
+def api_toggle_follow(request):
+    """Custodial follow/unfollow with a non-destructive, server-signed Kind 3.
+
+    Sovereign sessions keep the legacy unsigned-event preparation flow in
+    ``api_contacts_follow`` so their local enclave/NIP-07 path is untouched.
+    """
+    from .custodial_keys import (
+        get_custodial_pubkey,
+        is_custodial_user,
+        sign_as_managed,
+    )
+
+    if not is_custodial_user(request.user, request):
+        return api_contacts_follow(request)
+
+    try:
+        data = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"ok": False, "error": "Invalid JSON body"}, status=400)
+
+    target_pubkey = str(data.get("target_pubkey") or "").strip().lower()
+    action = str(data.get("action") or "").strip().lower()
+    petname = str(data.get("petname") or data.get("target_name") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{64}", target_pubkey):
+        return JsonResponse(
+            {"ok": False, "error": "target_pubkey must be 64-char lowercase hex"}, status=400
+        )
+    if action not in ("follow", "unfollow"):
+        return JsonResponse({"ok": False, "error": "action must be follow/unfollow"}, status=400)
+    if target_pubkey == get_custodial_pubkey(request.user):
+        return JsonResponse({"ok": False, "error": "Cannot follow your own profile."}, status=400)
+
+    from .custodial_keys import ensure_deck
+
+    deck = ensure_deck(request.user)
+    with transaction.atomic():
+        current = UserLinkDeck.objects.select_for_update().get(pk=deck.pk)
+        contacts = [
+            entry
+            for entry in (current.custodial_contacts or [])
+            if isinstance(entry, dict)
+            and re.fullmatch(r"[0-9a-f]{64}", str(entry.get("pubkey") or ""))
+        ]
+        seen = set()
+        deduped = []
+        for entry in contacts:
+            if entry["pubkey"] in seen:
+                continue
+            seen.add(entry["pubkey"])
+            deduped.append(entry)
+
+        if action == "follow" and target_pubkey not in seen:
+            deduped.append(
+                {
+                    "pubkey": target_pubkey,
+                    "relay": "wss://relay.iyou.me",
+                    "petname": petname[:100],
+                }
+            )
+        elif action == "unfollow":
+            deduped = [entry for entry in deduped if entry["pubkey"] != target_pubkey]
+
+        current.custodial_contacts = deduped
+        current.save(update_fields=["custodial_contacts", "updated_at"])
+
+    tags = [
+        ["p", entry["pubkey"], entry.get("relay") or "wss://relay.iyou.me", entry.get("petname") or ""]
+        for entry in deduped
+    ]
+    try:
+        signed_event = sign_as_managed(
+            request.user,
+            {
+                "created_at": int(time.time()),
+                "kind": 3,
+                "tags": tags,
+                "content": "",
+            },
+        )
+    except Exception:
+        logger.exception("Managed contact-list signing failed")
+        return JsonResponse({"ok": False, "error": "Unable to sign contact list"}, status=500)
+    relays_published = _broadcast_signed_event(signed_event)
+    return JsonResponse(
+        {
+            "ok": True,
+            "following": action == "follow",
+            "count": len(deduped),
             "event": signed_event,
             "relays_published": relays_published,
         }
@@ -2084,10 +2311,41 @@ def api_save_profile(request):
     }
     request.session["user_profile_cache"] = profile_data
 
+    # Managed (Tier 1) accounts cannot sign via a local enclave, so broadcast a
+    # server-signed Kind 0 metadata event on their behalf.
+    kind0_event = None
+    from .custodial_keys import is_custodial_user, sign_as_managed
+
+    if is_custodial_user(request.user, request):
+        try:
+            nip05 = deck.nip05 or (f"{deck.handle}@iyou.me" if deck.handle else "")
+            metadata = {
+                "name": profile_data["name"],
+                "display_name": profile_data["display_name"],
+                "about": profile_data["about"],
+                "picture": profile_data["picture"],
+                "banner": profile_data["banner"],
+                "nip05": nip05,
+                "lud16": profile_data["lud16"],
+            }
+            kind0_event = sign_as_managed(
+                request.user,
+                {
+                    "created_at": int(time.time()),
+                    "kind": 0,
+                    "tags": [],
+                    "content": json.dumps(metadata, separators=(",", ":"), ensure_ascii=False),
+                },
+            )
+            _broadcast_signed_event(kind0_event)
+        except Exception:
+            logger.exception("Managed Kind 0 profile broadcast failed")
+
     return JsonResponse({
         "success": True,
         "message": "Profile saved successfully.",
         "profile": profile_data,
+        "kind0_event": kind0_event,
     })
 
 
@@ -4366,13 +4624,34 @@ def api_toggle_bookmark(request):
         Bookmark.objects.filter(user=request.user, event_id=event_id).delete()
         bookmarked = False
 
+    bookmark_event_ids = list(
+        Bookmark.objects.filter(user=request.user).values_list("event_id", flat=True)[:500]
+    )
+
+    # Best-effort NIP-51 Kind 10004 sync for managed accounts: a relay hiccup
+    # must never undo the database toggle or fail the HTTP response.
+    from .custodial_keys import is_custodial_user, sign_as_managed
+
+    if is_custodial_user(request.user, request):
+        try:
+            kind10004_event = sign_as_managed(
+                request.user,
+                {
+                    "created_at": int(time.time()),
+                    "kind": 10004,
+                    "tags": [["e", event_id] for event_id in bookmark_event_ids],
+                    "content": "",
+                },
+            )
+            _broadcast_signed_event(kind10004_event, ["wss://relay.iyou.me"], timeout=1.0)
+        except Exception:
+            logger.debug("Managed Kind 10004 bookmark sync skipped", exc_info=True)
+
     return JsonResponse(
         {
             "status": "ok",
             "bookmarked": bookmarked,
-            "event_ids": list(
-                Bookmark.objects.filter(user=request.user).values_list("event_id", flat=True)
-            ),
+            "event_ids": bookmark_event_ids,
         }
     )
 

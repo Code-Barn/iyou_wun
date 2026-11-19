@@ -56,7 +56,7 @@
     {# ---- 3 · Compose FAB (opens composer, centered) ---- #}
     <div class="flex items-center justify-center">
       <button id="mobile-compose-fab" type="button"
-              onclick="openPostComposer()"
+              onclick="if (window.handleMobileCompose) { window.handleMobileCompose(); } else { openPostComposer(); }"
               aria-label="Compose new note"
               title="New Note"
               class="flex items-center justify-center min-h-[44px] transition active:scale-95">
@@ -157,12 +157,29 @@
     }
 
     global.openPostComposer = global.openPostComposer || function () {
-      var content = document.getElementById("postContent");
+      var content = document.getElementById("note-content") || document.getElementById("postContent");
       if (content) {
         content.scrollIntoView({ behavior: "smooth", block: "center" });
         content.focus();
       } else {
-        global.location.assign("/feed#compose");
+        global.location.assign("/feed?compose=1");
+      }
+    };
+
+    // Same contract as feed_interactions.js handleMobileCompose; defined here so
+    // non-feed views (which do not load that controller) still route correctly.
+    global.handleMobileCompose = global.handleMobileCompose || function () {
+      var path = String(global.location.pathname || "").replace(/\/+$/, "");
+      if (path !== "" && path !== "/feed") {
+        global.location.assign("/feed?compose=1");
+        return;
+      }
+      var editor = document.getElementById("note-content") || document.getElementById("postContent");
+      if (editor) {
+        editor.scrollIntoView({ behavior: "smooth", block: "center" });
+        editor.focus();
+      } else {
+        global.openPostComposer();
       }
     };
   })(typeof window !== "undefined" ? window : globalThis);
