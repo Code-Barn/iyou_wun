@@ -1,0 +1,62 @@
+<!-- Local Link Deck curator: keeps an exhaustive list while letting the user
+     star a compact subset for their Profile & Wall business card. -->
+<div class="space-y-5" id="local-deck-manager">
+  <div class="flex items-center justify-between gap-2">
+    <div>
+      <h3 class="text-sm font-mono font-bold text-slate-900 dark:text-slate-100">Profile-Pinned Links</h3>
+      <p class="text-[11px] text-slate-500 dark:text-slate-400">Star items to embed them on your profile. All active links remain on your full deck.</p>
+    </div>
+    <span id="deckStatus" class="text-[11px] font-mono text-violet-600 dark:text-violet-400"></span>
+  </div>
+
+  <div class="grid gap-3 sm:grid-cols-2">
+    <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+      <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Claimed Handle</div>
+      <div id="deckHandleDisplay" class="text-sm font-mono text-slate-800 dark:text-slate-100">—</div>
+      <a id="deckCanonicalUrl" href="#" class="text-[11px] font-mono text-violet-600 dark:text-violet-400 hover:underline break-all"></a>
+      <div class="flex gap-2">
+        <input id="deckHandleInput" type="text" maxlength="32" placeholder="your-handle"
+               class="flex-1 min-w-0 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-violet-500" />
+        <button id="deckClaimBtn" type="button" onclick="claimDeckHandle(event)"
+                class="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold">Claim</button>
+      </div>
+    </div>
+
+    <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-2">
+      <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400">Headline / Bio</div>
+      <textarea id="deckHeadlineInput" rows="3" maxlength="160"
+                class="w-full px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-violet-500"></textarea>
+      <button type="button" onclick="saveDeckHeadline()"
+              class="px-3 py-1.5 rounded-lg bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-800 dark:text-slate-100 text-xs font-mono font-semibold">Save Headline</button>
+      <div class="flex items-center gap-2 text-[11px] font-mono">
+        <span id="deckVerifyBadge" class="hidden text-emerald-600 dark:text-emerald-400">✓ Verified</span>
+        <span id="deckVerifyPrompt" class="hidden text-amber-600 dark:text-amber-400">Verify ownership ↗</span>
+        <span id="deckVerifySource" class="hidden break-all text-slate-400"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-3 space-y-3">
+    <div class="text-[10px] uppercase font-bold tracking-wider text-slate-400">All Links</div>
+    <div id="deckItemsList" class="space-y-2"></div>
+    <form onsubmit="return addDeckItem(event)" class="grid gap-2 sm:grid-cols-[1fr_2fr_7rem_auto]">
+      <input id="deckItemTitle" type="text" maxlength="200" placeholder="Title"
+             class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-violet-500" />
+      <input id="deckItemUrl" type="text" maxlength="2048" placeholder="https:// or mailto:"
+             class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-violet-500" />
+      <select id="deckItemIcon"
+              class="px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-xs font-mono">
+        <option value="link">🔗 Link</option>
+        <option value="email">✉️ Email</option>
+        <option value="website">🌐 Website</option>
+        <option value="mesh">🧩 Mesh</option>
+      </select>
+      <button type="submit" class="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-mono font-semibold">Add Link</button>
+    </form>
+  </div>
+</div>
+<script>
+  document.addEventListener("DOMContentLoaded", function () {
+    if (typeof window.initDeckManager === "function") window.initDeckManager();
+  });
+</script>

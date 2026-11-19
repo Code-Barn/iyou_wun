@@ -73,6 +73,7 @@ from .models import (
     Bookmark,
     IssuedCredential,
     UserLinkDeck,
+    UserLinkItem,
 )
 
 logger = logging.getLogger(__name__)
@@ -451,7 +452,7 @@ def _broadcast_signed_event(signed_event, relay_urls=None, timeout=2.5):
 @require_POST
 def api_publish_note(request):
     """Sign and broadcast a note/reply with a managed Tier 1 custodial key."""
-    from .custodial_keys import is_managed_account, sign_as_managed
+    from .custodial_keys import ensure_custodial_keypair, is_managed_account, sign_as_managed
 
     if not is_managed_account(request.user, request):
         return JsonResponse(
@@ -461,6 +462,7 @@ def api_publish_note(request):
             },
             status=403,
         )
+    ensure_custodial_keypair(request.user)
 
     try:
         payload = json.loads(request.body or b"{}")
@@ -1112,6 +1114,9 @@ def home(request):
 @login_required
 @ensure_csrf_cookie
 def dashboard(request):
+    from .custodial_keys import ensure_custodial_keypair
+
+    ensure_custodial_keypair(request.user)
     user_pubkey = get_effective_user_pubkey(request)
     user_npub = did_to_npub(request.user.username)
     relays = get_relays_for_request(request)
@@ -2333,9 +2338,10 @@ def api_save_profile(request):
     # Managed (Tier 1) accounts cannot sign via a local enclave, so broadcast a
     # server-signed Kind 0 metadata event on their behalf.
     kind0_event = None
-    from .custodial_keys import is_custodial_user, sign_as_managed
+    from .custodial_keys import ensure_custodial_keypair, is_custodial_user, sign_as_managed
 
     if is_custodial_user(request.user, request):
+        ensure_custodial_keypair(request.user)
         try:
             nip05 = deck.nip05 or (f"{deck.handle}@iyou.me" if deck.handle else "")
             metadata = {
@@ -4851,6 +4857,13 @@ class ProfileView(TemplateView):
         context = super().get_context_data(**kwargs)
         identifier = kwargs.get("npub")
 
+        # Tier 1 self-heal: a legacy DID-hash in deck.nostr_pubkey would hide the
+        # user's own custodial-signed posts from their Profile & Wall.
+        if self.request.user.is_authenticated:
+            from .custodial_keys import ensure_custodial_keypair
+
+            ensure_custodial_keypair(self.request.user)
+
         # Post-login race guard: mirror the session's enclave-synced pubkey onto
         # the deck before resolving the profile so relay author queries are not
         # starved by a blank deck.nostr_pubkey.
@@ -4960,7 +4973,16 @@ class ProfileView(TemplateView):
             or UserLinkDeck.objects.filter(user__username=hex_pubkey).exists()
         )
         context["is_iyou_native"] = is_iyou_native
-        context["deck_items"] = []
+        deck_items = (
+            list(UserLinkItem.objects.filter(user=owner_deck.user, is_active=True))
+            if owner_deck
+            else []
+        )
+        featured_deck_items = [item for item in deck_items if item.is_featured]
+        if not featured_deck_items:
+            featured_deck_items = deck_items[:4]
+        context["deck_items"] = deck_items
+        context["featured_deck_items"] = featured_deck_items
         context["relays"] = get_relays_for_request(self.request)
         context["relay_count"] = len(context["relays"])
         context["profile_handle"] = owner_deck.handle if owner_deck else (profile.get("name") or "")
@@ -5083,11 +5105,26 @@ class LinkDeckView(TemplateView):
                 raise Http404("Unknown handle.")
             owner_did = target_deck.user.username
 
-        hex_pubkey = did_to_pubkey(owner_did)
+        # Prefer the deck's real secp256k1 key (custodial or enclave-synced) over
+        # the DID-derived placeholder so /@<handle> links to the same npub wall
+        # that the unified /profile/<npub>/ page resolves.
+        hex_pubkey = ""
+        if target_deck is not None and re.fullmatch(r"[0-9a-fA-F]{64}", (target_deck.nostr_pubkey or "")):
+            hex_pubkey = target_deck.nostr_pubkey.strip().lower()
+        if not hex_pubkey:
+            hex_pubkey = did_to_pubkey(owner_did)
         relays = request.session.get("relays", DEFAULT_RELAYS)
         profile = fetch_profile_data(hex_pubkey, relay_urls=relays) if hex_pubkey else {}
-
-        items = []
+        # Hybrid resolution: a claimed deck's locally stored display name and
+        # avatar are authoritative when a Kind 0 event is missing or partial.
+        if target_deck is not None:
+            profile["display_name"] = profile.get("display_name") or target_deck.display_name or target_deck.handle or ""
+            profile["name"] = profile.get("name") or profile["display_name"]
+            profile["picture"] = profile.get("picture") or target_deck.avatar_url or ""
+            profile["nip05"] = profile.get("nip05") or target_deck.nip05 or f"{target_deck.handle}@iyou.me"
+            items = list(UserLinkItem.objects.filter(user=target_deck.user, is_active=True))
+        else:
+            items = []
 
         if wants_json:
             target_npub = hex_to_npub(hex_pubkey) if hex_pubkey else owner_did
@@ -5103,7 +5140,7 @@ class LinkDeckView(TemplateView):
                 "headline": target_deck.headline or "",
                 "nip05": getattr(target_deck, "nip05", None) or f"{target_deck.handle}@iyou.me",
                 "profile": {
-                    "display_name": profile.get("display_name") or target_deck.handle,
+                    "display_name": profile.get("display_name") or getattr(target_deck, "display_name", "") or target_deck.handle,
                     "avatar": profile.get("picture") or "",
                     "pubkey_hex": hex_pubkey or "",
                     "npub": target_npub or "",
@@ -5127,9 +5164,15 @@ class LinkDeckView(TemplateView):
             "profile_did": owner_did,
             "profile_handle": target_deck.handle if target_deck else "",
             "npub": hex_to_npub(hex_pubkey) if hex_pubkey else owner_did,
+            "owner_npub": hex_to_npub(hex_pubkey) if hex_pubkey else owner_did,
             "profile": profile,
             "items": items,
-            "feed_url": f"/feed?author={hex_pubkey}" if hex_pubkey else "/feed",
+            # Social Feed always opens the owner's unified Profile & Wall.
+            "feed_url": (
+                f"/profile/{hex_to_npub(hex_pubkey)}/"
+                if hex_pubkey and hex_to_npub(hex_pubkey)
+                else (f"/profile/{owner_did}/" if owner_did else "/feed")
+            ),
             "user_pubkey": (
                 get_effective_user_pubkey(request)
                 if request.user.is_authenticated
@@ -5187,6 +5230,105 @@ def api_deck_handle(request):
         "canonical_url": deck.canonical_path,
         "headline": deck.headline,
     })
+
+
+def _serialize_deck_item(item):
+    return {
+        "id": item.pk,
+        "title": item.title,
+        "url": item.url,
+        "icon_emoji": item.icon_emoji,
+        "is_active": item.is_active,
+        "is_ecosystem_link": item.is_ecosystem_link,
+        "is_verified_claim": item.is_verified_claim,
+        "is_featured": item.is_featured,
+        "order": item.order,
+    }
+
+
+@login_required
+def api_deck_items(request):
+    """List or create the signed-in user's Link Deck items."""
+    if request.method == "GET":
+        items = UserLinkItem.objects.filter(user=request.user)
+        deck = UserLinkDeck.objects.filter(user=request.user).first()
+        return JsonResponse({
+            "handle": deck.handle if deck else "",
+            "display_handle": deck.display_handle if deck else "",
+            "headline": deck.headline if deck else "",
+            "is_verified": bool(deck and deck.is_verified),
+            "verified_source_url": deck.verified_source_url if deck else "",
+            "items": [_serialize_deck_item(item) for item in items],
+        })
+    if request.method != "POST":
+        return JsonResponse({"error": "GET/POST required"}, status=405)
+    try:
+        data = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+    title = str(data.get("title") or "").strip()[:200]
+    url = str(data.get("url") or "").strip()[:2048]
+    if not title or not url:
+        return JsonResponse({"error": "title and url are required"}, status=400)
+    next_order = UserLinkItem.objects.filter(user=request.user).aggregate(Max("order"))["order__max"] or 0
+    icon_map = {"link": "🔗", "email": "✉️", "website": "🌐", "mesh": "🧩"}
+    icon_emoji = str(data.get("icon_emoji") or "")[:16]
+    if not icon_emoji:
+        icon_emoji = icon_map.get(str(data.get("icon_category") or "link"), "🔗")
+    item = UserLinkItem.objects.create(
+        user=request.user,
+        title=title,
+        url=url,
+        icon_emoji=icon_emoji,
+        is_active=bool(data.get("is_active", True)),
+        is_ecosystem_link=bool(data.get("is_ecosystem_link", False)),
+        is_featured=bool(data.get("is_featured", True)),
+        order=next_order + 1,
+    )
+    return JsonResponse({"ok": True, "item": _serialize_deck_item(item)}, status=201)
+
+
+@login_required
+def api_deck_item_detail(request, pk):
+    """Patch or delete one of the signed-in user's Link Deck items."""
+    item = UserLinkItem.objects.filter(pk=pk, user=request.user).first()
+    if item is None:
+        return JsonResponse({"error": "Not found"}, status=404)
+    if request.method == "PATCH":
+        try:
+            data = json.loads(request.body or b"{}")
+        except (ValueError, TypeError):
+            return JsonResponse({"error": "invalid JSON body"}, status=400)
+        for field in ("title", "url", "icon_emoji"):
+            if field in data:
+                setattr(item, field, str(data[field])[:2048])
+        for field in ("is_active", "is_ecosystem_link", "is_featured"):
+            if field in data:
+                setattr(item, field, bool(data[field]))
+        item.save()
+        return JsonResponse({"ok": True, "item": _serialize_deck_item(item)})
+    if request.method == "DELETE":
+        item.delete()
+        return JsonResponse({"ok": True})
+    return JsonResponse({"error": "PATCH/DELETE required"}, status=405)
+
+
+@login_required
+def api_deck_reorder(request):
+    if request.method != "POST":
+        return JsonResponse({"error": "POST required"}, status=405)
+    try:
+        data = json.loads(request.body or b"{}")
+    except (ValueError, TypeError):
+        return JsonResponse({"error": "invalid JSON body"}, status=400)
+    item_ids = data.get("item_ids") or []
+    if not isinstance(item_ids, list):
+        return JsonResponse({"error": "item_ids must be a list"}, status=400)
+    for index, item_id in enumerate(item_ids):
+        UserLinkItem.objects.filter(pk=item_id, user=request.user).update(order=index + 1)
+    return JsonResponse({"ok": True, "items": [
+        _serialize_deck_item(item) for item in UserLinkItem.objects.filter(user=request.user)
+    ]})
 
 
 def hex_to_npub(hex_pubkey):

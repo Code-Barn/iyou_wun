@@ -169,4 +169,7 @@ class ShipReadinessTopologyAndAssetTests(TestCase):
         decorated = decorate_author_identity(note)
         self.assertEqual(decorated["author_display_name"], "David Byers")
         self.assertEqual(decorated["author_handle"], "dcbyers13")
-        self.assertEqual(decorated["author_url"], "/@dcbyers13/")
+        from apps.core.views import hex_to_npub
+
+        self.assertEqual(decorated["author_url"], f"/profile/{hex_to_npub(deck.nostr_pubkey)}/")
+        self.assertFalse(decorated["author_url"].startswith("/@"))

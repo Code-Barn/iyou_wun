@@ -87,6 +87,22 @@ def ensure_deck(user):
     return _ensure_deck(user)
 
 
+def ensure_custodial_keypair(user):
+    """Self-heal a managed account's public key mapping on any relevant request.
+
+    Returns the custodial x-only pubkey (or "" for sovereign accounts).
+    """
+    if not is_managed_account(user):
+        return ""
+    _secret_hex, pubkey_hex, _created = get_or_create_custodial_keypair(user)
+    deck = _ensure_deck(user)
+    if deck.nostr_pubkey != pubkey_hex:
+        deck.nostr_pubkey = pubkey_hex
+        deck.save(update_fields=["nostr_pubkey"])
+        _invalidate_identity_caches(pubkey_hex)
+    return pubkey_hex
+
+
 def get_or_create_custodial_keypair(user):
     """Return ``(secret_hex, pubkey_hex, created)`` for a managed user."""
     deck = _ensure_deck(user)
@@ -95,16 +111,26 @@ def get_or_create_custodial_keypair(user):
         if not nostr_signer.is_valid_hex32(secret_hex):
             raise ValueError("stored custodial secret is malformed")
         derived_pubkey = nostr_signer.pubkey_from_secret(secret_hex)
+        changed = []
         if deck.custodial_pubkey_hex != derived_pubkey:
             deck.custodial_pubkey_hex = derived_pubkey
-            deck.save(update_fields=["custodial_pubkey_hex", "updated_at"])
+            changed.append("custodial_pubkey_hex")
+        # A legacy SHA-256 DID hash can already occupy nostr_pubkey. It is NOT a
+        # signing key: always overwrite it with the actual secp256k1 key.
+        if deck.nostr_pubkey != derived_pubkey:
+            deck.nostr_pubkey = derived_pubkey
+            changed.append("nostr_pubkey")
+        if changed:
+            changed.append("updated_at")
+            deck.save(update_fields=changed)
+            _invalidate_identity_caches(derived_pubkey)
         return secret_hex, derived_pubkey, False
 
     secret_hex = nostr_signer.generate_secret()
     pubkey_hex = nostr_signer.pubkey_from_secret(secret_hex)
     deck.custodial_private_key_enc = encrypt_secret(secret_hex)
     deck.custodial_pubkey_hex = pubkey_hex
-    if not deck.nostr_pubkey:
+    if deck.nostr_pubkey != pubkey_hex:
         deck.nostr_pubkey = pubkey_hex
     deck.save(
         update_fields=[

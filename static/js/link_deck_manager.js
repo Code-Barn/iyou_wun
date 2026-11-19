@@ -142,6 +142,8 @@
             controls.appendChild(ctlButton("&uarr;", "Move up", function () { moveDeckItem(index, -1); }, "text-gray-600 hover:bg-gray-200 disabled:opacity-30"));
             controls.appendChild(ctlButton("&darr;", "Move down", function () { moveDeckItem(index, 1); }, "text-gray-600 hover:bg-gray-200 disabled:opacity-30"));
             controls.appendChild(ctlButton(item.is_active ? "Hide" : "Show", "Toggle visibility", function () { toggleDeckItem(item); }, "bg-gray-200 hover:bg-gray-300 text-gray-700"));
+            controls.appendChild(ctlButton(item.is_featured ? "★ Pinned" : "☆ Profile Pin", "Curate this link on your Profile & Wall", function () { toggleFeaturedDeckItem(item); },
+                item.is_featured ? "bg-amber-100 hover:bg-amber-200 text-amber-700" : "bg-gray-200 hover:bg-gray-300 text-gray-700"));
             controls.appendChild(ctlButton("Delete", "Delete link", function () { deleteDeckItem(item); }, "text-red-500 hover:text-red-700"));
 
             controls.querySelectorAll("button")[0].disabled = index === 0;
@@ -237,6 +239,16 @@
             .then(function () { showDeckStatus("Link added."); })
             .catch(function (err) { showDeckStatus(err.message, true); });
         return false;
+    }
+
+    function toggleFeaturedDeckItem(item) {
+        deckFetch("/api/deck/items/" + item.id, { method: "PATCH", body: JSON.stringify({ is_featured: !item.is_featured }) })
+            .then(function (data) {
+                if (data && data.item) item.is_featured = Boolean(data.item.is_featured);
+                renderDeckItems();
+                showDeckStatus(item.is_featured ? "Pinned to your profile." : "Removed from profile pins.");
+            })
+            .catch(function () { showDeckStatus("Could not update profile pin.", true); });
     }
 
     function toggleDeckItem(item) {

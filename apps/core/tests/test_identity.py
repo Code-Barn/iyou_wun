@@ -147,7 +147,9 @@ class DecorateAuthorIdentityTests(TestCase):
 
         self.assertEqual(note["author_display_name"], "primary_identity_9e7db757")
         self.assertEqual(note["author_handle"], "primary_identity_9e7db757")
-        self.assertEqual(note["author_url"], "/@primary_identity_9e7db757/")
+        # Handles are display sub-labels only; all author clicks go to the
+        # unified Profile & Wall at /profile/<npub>/.
+        self.assertEqual(note["author_url"], f"/profile/{hex_to_npub(DID_DERIVED_PUBKEY)}/")
         self.assertNotIn("npub1", note["author_display_name"])
 
     def test_unknown_author_falls_back_to_short_hex_not_npub(self):

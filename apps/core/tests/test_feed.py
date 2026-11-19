@@ -1979,7 +1979,10 @@ class StrictIyouCircleMembershipTests(TestCase):
         self.assertEqual(note["author_display_name"], "Deck Hero")
         self.assertEqual(note["author_handle"], "deckhero")
         self.assertTrue(note["is_ecosystem_member"])
-        self.assertEqual(note["author_url"], "/@deckhero/")
+        from apps.core.views import hex_to_npub
+
+        self.assertEqual(note["author_url"], f"/profile/{hex_to_npub(self.member_pk)}/")
+        self.assertFalse(note["author_url"].startswith("/@"))
 
         # FeedView SSR renders the real name and handle on the note card.
         with patch("apps.core.views.relay_req", return_value=relay_events):
@@ -1987,7 +1990,9 @@ class StrictIyouCircleMembershipTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Deck Hero")
         self.assertContains(response, "@deckhero")
-        self.assertContains(response, 'href="/@deckhero/"')
+        from apps.core.views import hex_to_npub
+
+        self.assertContains(response, f'href="/profile/{hex_to_npub(self.member_pk)}')
 
 
 class EcosystemEnvelopeTests(TestCase):

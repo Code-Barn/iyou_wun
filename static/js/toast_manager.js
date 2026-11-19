@@ -85,11 +85,11 @@
 
     const toast = document.createElement('div');
     toast.dataset.toastMessage = messageText;
-    toast.className = `pointer-events-auto flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border backdrop-blur-md shadow-2xl transition-all duration-300 transform translate-y-4 opacity-0 ${style}`;
+    toast.className = `pointer-events-auto flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border backdrop-blur-md shadow-2xl text-white transition-all duration-300 transform translate-y-4 opacity-0 ${style}`;
     toast.innerHTML = `
       <div class="flex items-center gap-2.5 min-w-0">
         <span class="text-sm shrink-0">${icon}</span>
-        <span class="truncate leading-snug">${escapeHtml(message)}</span>
+        <span class="truncate leading-snug text-white">${escapeHtml(message)}</span>
       </div>
       <button type="button" class="text-slate-400 hover:text-white shrink-0 ml-1 text-xs" onclick="this.parentElement.remove()">✕</button>
     `;

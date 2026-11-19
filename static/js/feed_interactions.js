@@ -83,6 +83,44 @@
     // Tier 1 (did:web / managed) accounts sign server-side with their custodial
     // secp256k1 key. Sovereign (did:key) accounts keep the local iyou_home /
     // NIP-07 bridge path untouched.
+    // Minimal bech32 npub encoder so client-rendered cards can always route to
+    // /profile/<npub>/ even when the server has not decorated the event.
+    function hexToNpub(hexPubkey) {
+        var hex = String(hexPubkey || "").trim().toLowerCase();
+        if (!/^[0-9a-f]{64}$/.test(hex)) return "";
+        var bytes = [];
+        for (var i = 0; i < 64; i += 2) bytes.push(parseInt(hex.slice(i, i + 2), 16));
+        var acc = 0, bits = 0, values = [];
+        for (var j = 0; j < bytes.length; j++) {
+            acc = (acc << 8) | bytes[j];
+            bits += 8;
+            while (bits >= 5) { bits -= 5; values.push((acc >> bits) & 31); }
+        }
+        if (bits > 0) values.push((acc << (5 - bits)) & 31);
+        var hrp = "npub";
+        var expanded = [].concat(
+            hrp.split("").map(function (c) { return c.charCodeAt(0) >> 5; }),
+            [0],
+            hrp.split("").map(function (c) { return c.charCodeAt(0) & 31; })
+        );
+        var polymodValues = [0x3b6a57b2, 0x26508e6d, 0x1ea119fa, 0x3d4233dd, 0x2a1462b3];
+        var checksumInput = expanded.concat(values, [0, 0, 0, 0, 0, 0]);
+        var chk = 1;
+        checksumInput.forEach(function (value) {
+            var top = chk >> 25;
+            chk = ((chk & 0x1ffffff) << 5) ^ value;
+            for (var k = 0; k < 5; k++) {
+                if ((top >> k) & 1) chk ^= polymodValues[k];
+            }
+        });
+        chk ^= 1;
+        var checksum = [];
+        for (var m = 0; m < 6; m++) checksum.push((chk >> (5 * (5 - m))) & 31);
+        var charset = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+        return hrp + "1" + values.concat(checksum).map(function (v) { return charset[v]; }).join("");
+    }
+    window.hexToNpub = hexToNpub;
+
     function isManagedCustodialAccount() {
         var tier = String(window.USER_ACCOUNT_TIER || '').toLowerCase();
         var did = String(window.USER_DID || window.CURRENT_SESSION_DID || '');
@@ -1247,14 +1285,17 @@
      * every payload that carries a truncated label, not just the ones missing it.
      */
     function resolveAuthorRouteId(note, pubkey, authorHandle) {
-        if (authorHandle && /^[a-z0-9_-]{3,32}$/i.test(authorHandle)) {
-            return { id: authorHandle, kind: "handle" };
+        // Handles are display sub-labels only: every author click resolves to
+        // /profile/<npub>/ via the canonical key.
+        var npub = (note && note.author_npub) || (note && note.npub) || "";
+        if (typeof npub === "string" && /^npub1[0-9a-z]+$/i.test(npub)) {
+            return { id: npub, kind: "npub" };
         }
-        if (note && typeof note.npub === "string" && /^npub1[0-9a-z]+$/i.test(note.npub)) {
-            return { id: note.npub, kind: "npub" };
-        }
-        if (typeof pubkey === "string" && /^[0-9a-fA-F]{64}$/.test(pubkey)) {
-            return { id: pubkey.toLowerCase(), kind: "hex" };
+        var hex = typeof pubkey === "string" && /^[0-9a-fA-F]{64}$/.test(pubkey)
+            ? pubkey.toLowerCase()
+            : "";
+        if (hex) {
+            return { id: hexToNpub(hex) || hex, kind: "npub" };
         }
         return { id: "", kind: "none" };
     }
@@ -1277,9 +1318,11 @@
         // or a full 64-char hex.
         var route = resolveAuthorRouteId(note, pubkey, authorHandle);
         var routingId = route.id;
-        var authorUrl = note.author_url || (route.kind === "handle"
-            ? "/@" + routingId + "/"
-            : (routingId ? "/profile/" + routingId + "/" : "#"));
+        var authorUrl = note.author_url || (routingId ? "/profile/" + encodeURIComponent(routingId) + "/" : "#");
+        // A stale /@<handle> author_url from an older payload must never win.
+        if (authorUrl.indexOf("/@") === 0) {
+            authorUrl = routingId ? "/profile/" + encodeURIComponent(routingId) + "/" : "#";
+        }
 
         // Display-only fallback. Never used for routing.
         var displayNpub = note.npub || (pubkey ? pubkey.substring(0, 12) + "..." : "Anonymous");
@@ -1716,7 +1759,11 @@
         activePk = String(activePk).toLowerCase();
         var isCurrentUser = !!(eventPubkey && activePk && eventPubkey === activePk);
 
-        var eventNpub = /^npub1[0-9a-z]+$/i.test(event.npub || "") ? event.npub : (isCurrentUser && window.userNpub ? window.userNpub : "");
+        var eventNpub = /^npub1[0-9a-z]+$/i.test(event.npub || "")
+            ? event.npub
+            : (/^npub1[0-9a-z]+$/i.test(event.author_npub || "")
+                ? event.author_npub
+                : (isCurrentUser && window.userNpub ? window.userNpub : hexToNpub(eventPubkey)));
         var eventNpubLabel = event.npub || (eventPubkey ? eventPubkey.substring(0, 12) + "..." : "");
 
         var activeProf = window.activeProfile || {};
@@ -1729,13 +1776,12 @@
         var fallbackAvatar = isCurrentUser ? (activeProf.avatar || activeProf.avatar_url || window.userAvatarUrl || "") : "";
         var eventAuthorAvatar = event.author_avatar || fallbackAvatar || "";
 
-        var fallbackUrl = "";
-        if (eventAuthorHandle) {
-            fallbackUrl = "/@" + String(eventAuthorHandle).replace(/^@/, "") + "/";
-        } else if (eventNpub) {
-            fallbackUrl = "/profile/" + eventNpub + "/";
-        }
+        // Author clicks always open the unified Profile + Wall. Handles are
+        // secondary labels only, never routing anchors.
+        var routeTarget = eventNpub || eventPubkey || "";
+        var fallbackUrl = routeTarget ? "/profile/" + encodeURIComponent(routeTarget) + "/" : "";
         var eventAuthorUrl = event.author_url || fallbackUrl || "";
+        if (eventAuthorUrl.indexOf("/@") === 0) eventAuthorUrl = fallbackUrl;
 
         // Membership is earned from the event envelope (iyou tag or first-party
         // relay origin) or a known author — never blanket-true from metadata.
@@ -1795,6 +1841,7 @@
             author_handle: eventAuthorHandle,
             author_url: eventAuthorUrl,
             npub: eventNpub,
+            author_npub: eventNpub,
             author_name: eventAuthorName,
             author_display_name: eventAuthorName,
             author_avatar: eventAuthorAvatar,

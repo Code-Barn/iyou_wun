@@ -68,5 +68,8 @@ urlpatterns += [
     ),
     path("u/<str:did_key>/", views.LinkDeckView.as_view(), name="link_deck_did"),
     path("api/deck/handle", views.api_deck_handle, name="api_deck_handle"),
+    re_path(r"^api/deck/items/?$", views.api_deck_items, name="api_deck_items"),
+    re_path(r"^api/deck/items/(?P<pk>\d+)/?$", views.api_deck_item_detail, name="api_deck_item_detail"),
+    path("api/deck/reorder", views.api_deck_reorder, name="api_deck_reorder"),
 ]
 

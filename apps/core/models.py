@@ -131,6 +131,38 @@ class UserLinkDeck(models.Model):
             pass
 
 
+class UserLinkItem(models.Model):
+    """A curated link/coordinate on a user's Sovereign Link Deck.
+
+    ``is_featured`` controls whether the item also appears in the compact card
+    embedded on the user's Profile & Wall; the full deck always lists every
+    active item.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="link_items",
+    )
+    title = models.CharField(max_length=200)
+    url = models.CharField(max_length=2048)
+    icon_emoji = models.CharField(max_length=16, blank=True, default="🔗")
+    is_active = models.BooleanField(default=True)
+    is_ecosystem_link = models.BooleanField(default=False)
+    is_verified_claim = models.BooleanField(default=False)
+    is_featured = models.BooleanField(
+        default=True,
+        help_text="Show this item in the curated mini-deck embedded on the user's profile",
+    )
+    order = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "id"]
+
+    def __str__(self):
+        return f"<UserLinkItem {self.title} -> {self.user.username}>"
+
+
 class Bookmark(models.Model):
     """A user's sovereign bookmark of a nostr note (event_id)."""
 

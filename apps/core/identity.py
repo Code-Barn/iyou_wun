@@ -207,9 +207,21 @@ def decorate_author_identity(note: dict) -> dict:
     note["author_handle"] = identity["handle"] or ""
     note["is_ecosystem_member"] = identity["is_member"]
     note["author_avatar"] = identity["avatar_url"] or note.get("author_avatar") or ""
-    if identity["handle"]:
-        note["author_url"] = f"/@{identity['handle']}/"
+
+    # Every author click opens the unified Profile + Wall at /profile/<npub>/.
+    # The handle remains a secondary display sub-label, never a route.
+    npub = note.get("npub") or note.get("author_npub") or ""
+    if not npub and pk:
+        try:
+            from .views import hex_to_npub
+
+            npub = hex_to_npub(pk) or ""
+        except Exception:
+            npub = ""
+    if npub:
+        note["npub"] = npub
+        note["author_npub"] = npub
+        note["author_url"] = f"/profile/{npub}/"
     else:
-        npub = note.get("npub") or ""
-        note["author_url"] = f"/profile/{npub}/" if npub else ""
+        note["author_url"] = ""
     return note
