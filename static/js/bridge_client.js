@@ -764,9 +764,9 @@
         }
         var container = document.getElementById("persona-list-container");
         if (container) {
-            container.innerHTML = '<div class="px-3 py-3 text-center">' +
-                '<div class="text-[11px] font-mono text-amber-500 font-semibold mb-1">⚠️ Enclave Offline</div>' +
-                '<p class="text-[10px] text-slate-400 leading-tight">Start iyou_home to enable contextual persona switching and local signing.</p>' +
+            container.innerHTML = '<div class="px-3 py-3 text-center" id="persona-bridge-offline-notice">' +
+                '<div class="text-[11px] font-mono text-amber-500 font-semibold mb-1">⚠️ Local Enclave Offline (Read-Only Session)</div>' +
+                '<p class="text-[10px] text-slate-400 leading-tight">Your browser session is authenticated, but no local signing enclave was detected on this device. Start iyou_home on desktop (or use iyou_mobile) to sign posts and votes.</p>' +
                 '</div>';
         }
         var pill = document.getElementById("persona-bridge-status");
