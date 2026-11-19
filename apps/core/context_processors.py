@@ -61,6 +61,7 @@ def user_identity(request):
         context["user_display_label"] = ""
         context["current_session_did"] = ""
         context["user_avatar_url"] = ""
+        context["account_tier"] = ""
         context["user_account_tier"] = ""
         context["user_did"] = ""
         context["user_pubkey"] = ""
@@ -100,6 +101,24 @@ def user_identity(request):
     else:
         display_name = ""
 
+    session_did = (
+        request.session.get("custodial_did")
+        if hasattr(request, "session")
+        else None
+    )
+    username = getattr(request.user, "username", "") or ""
+    user_did = session_did or username
+    is_did_key = str(user_did).startswith("did:key:") or str(username).startswith("did:key:")
+
+    account_tier = request.session.get("account_tier") if hasattr(request, "session") else None
+    if is_did_key:
+        if not account_tier or account_tier in ("managed_free", "none"):
+            account_tier = "sovereign"
+            if hasattr(request, "session"):
+                request.session["account_tier"] = "sovereign"
+                if hasattr(request.session, "modified"):
+                    request.session.modified = True
+
     from .custodial_keys import (
         get_custodial_pubkey,
         get_or_create_custodial_keypair,
@@ -108,7 +127,9 @@ def user_identity(request):
     from .views import get_effective_user_pubkey
 
     pubkey = get_effective_user_pubkey(request)
-    is_custodial = is_managed_account(request.user, request)
+    is_custodial = False if is_did_key else is_managed_account(request.user, request)
+    if not account_tier:
+        account_tier = "managed_free" if is_custodial else "sovereign"
     if is_custodial:
         # Tier 1 accounts have no enclave key. Provision lazily (idempotent) and
         # fall back to their custodial secp256k1 key when no enclave key exists.
@@ -144,8 +165,9 @@ def user_identity(request):
         active_persona_level=level,
         active_persona_name=persona_name,
         current_session_did=request.user.username,
+        account_tier=account_tier,
         user_account_tier="L1" if is_custodial else "L2",
-        user_did=request.session.get("custodial_did") or request.user.username,
+        user_did=user_did,
         user_pubkey=pubkey,
         is_custodial=is_custodial,
         user_pubkey_hex=pubkey,

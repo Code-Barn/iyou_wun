@@ -350,3 +350,96 @@ class PKCEOIDCAuthenticationCallbackViewTest(TestCase):
         self.assertEqual(view.success_url, "/thread/post-123")
 
 
+class DidKeySovereignFloorContextProcessorTest(TestCase):
+    def test_did_key_legacy_managed_free_resolves_sovereign_in_user_identity(self):
+        """A did:key: user with legacy 'managed_free' session resolves sovereign and non-custodial."""
+        from apps.core.context_processors import user_identity
+
+        user = User.objects.create_user(username="did:key:z6MkujsSdMm1j7QqUNaZo8U8kkcJNfFNikUQYJzmZX4wwgND")
+        request = RequestFactory().get("/feed")
+        request.user = user
+        request.session = {"account_tier": "managed_free"}
+
+        context = user_identity(request)
+
+        self.assertIs(context["is_custodial"], False)
+        self.assertEqual(context["account_tier"], "sovereign")
+        self.assertEqual(context["user_account_tier"], "L2")
+        self.assertEqual(request.session.get("account_tier"), "sovereign")
+
+    def test_did_key_none_session_resolves_sovereign_in_user_identity(self):
+        """A did:key: user with no account_tier in session resolves sovereign and non-custodial."""
+        from apps.core.context_processors import user_identity
+
+        user = User.objects.create_user(username="did:key:z6MkujsSdMm1j7QqUNaZo8U8kkcJNfFNikUQYJzmZX4wwgND")
+        request = RequestFactory().get("/feed")
+        request.user = user
+        request.session = {}
+
+        context = user_identity(request)
+
+        self.assertIs(context["is_custodial"], False)
+        self.assertEqual(context["account_tier"], "sovereign")
+        self.assertEqual(context["user_account_tier"], "L2")
+        self.assertEqual(request.session.get("account_tier"), "sovereign")
+
+    def test_did_key_custodial_did_legacy_managed_free_resolves_sovereign(self):
+        """If custodial_did in session starts with did:key:, coerce to sovereign."""
+        from apps.core.context_processors import user_identity
+
+        user = User.objects.create_user(username="legacy_account_name")
+        request = RequestFactory().get("/feed")
+        request.user = user
+        request.session = {
+            "custodial_did": "did:key:z6MkujsSdMm1j7QqUNaZo8U8kkcJNfFNikUQYJzmZX4wwgND",
+            "account_tier": "managed_free",
+        }
+
+        context = user_identity(request)
+
+        self.assertIs(context["is_custodial"], False)
+        self.assertEqual(context["account_tier"], "sovereign")
+        self.assertEqual(context["user_account_tier"], "L2")
+        self.assertEqual(request.session.get("account_tier"), "sovereign")
+
+    def test_did_web_managed_free_preserved_as_custodial(self):
+        """A did:web: user with managed_free is preserved as custodial."""
+        from apps.core.context_processors import user_identity
+
+        user = User.objects.create_user(username="did:web:iyou.me:user:alice")
+        request = RequestFactory().get("/feed")
+        request.user = user
+        request.session = {"account_tier": "managed_free"}
+
+        context = user_identity(request)
+
+        self.assertIs(context["is_custodial"], True)
+        self.assertEqual(context["account_tier"], "managed_free")
+        self.assertEqual(context["user_account_tier"], "L1")
+        self.assertEqual(request.session.get("account_tier"), "managed_free")
+
+    def test_pkce_login_success_persists_account_tier_from_id_token(self):
+        """login_success persists account_tier claim from oidc_id_token into session."""
+        from apps.core.auth_pkce import PKCEOIDCAuthenticationCallbackView
+        from django.contrib.sessions.middleware import SessionMiddleware
+
+        user = User.objects.create_user(username="did:key:z6MkujsSdMm1j7QqUNaZo8U8kkcJNfFNikUQYJzmZX4wwgND")
+        request = RequestFactory().get("/oidc/callback/")
+        middleware = SessionMiddleware(lambda r: None)
+        middleware.process_request(request)
+        request.user = user
+        request.session["oidc_id_token"] = {
+            "sub": user.username,
+            "account_tier": "sovereign",
+        }
+        request.session.save()
+
+        view = PKCEOIDCAuthenticationCallbackView()
+        view.request = request
+        view.user = user
+        view.login_success()
+
+        self.assertEqual(request.session.get("account_tier"), "sovereign")
+
+
+

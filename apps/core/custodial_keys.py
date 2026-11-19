@@ -64,6 +64,8 @@ def is_managed_account(user, request=None):
             or request.session.get("current_session_did")
             or username
         )
+    if did.startswith("did:key:") or username.startswith("did:key:"):
+        return False
     if tier in _MANAGED_TIERS:
         return True
     if tier in _SOVEREIGN_TIERS and not did.startswith("did:web:"):

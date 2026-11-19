@@ -58,6 +58,12 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         if isinstance(user_info, dict) and hasattr(self, "request") and self.request and hasattr(self.request, "session"):
             public_emails = user_info.get("public_emails", [])
             self.request.session["verified_public_emails"] = public_emails
+            if "account_tier" in user_info:
+                tier = user_info.get("account_tier")
+                sub = str(user_info.get("sub") or "")
+                if sub.startswith("did:key:") and (not tier or tier in {"managed_free", "none"}):
+                    tier = "sovereign"
+                self.request.session["account_tier"] = tier
         return user_info
 
     def get_or_create_user(self, access_token, id_token, payload):
@@ -106,6 +112,8 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
         subject = str(claims.get("sub") or getattr(user, "username", "") or "")
         is_web = subject.startswith("did:web:")
         tier = claims.get("account_tier") or ("managed_free" if is_web else "sovereign")
+        if subject.startswith("did:key:") and (not tier or tier in {"managed_free", "none"}):
+            tier = "sovereign"
         session["account_tier"] = tier
         session["did_method"] = claims.get("did_method") or ("web" if is_web else "key")
         custodial_did = claims.get("custodial_did") or (subject if is_web else "")

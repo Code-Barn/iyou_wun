@@ -115,21 +115,37 @@ class PKCEOIDCAuthenticationCallbackView(OIDCAuthenticationCallbackView):
             self.request.session.pop(SESSION_KEY_SSO_SILENT_INFLIGHT, None)
         if hasattr(self, "request") and self.request and hasattr(self.request, "session"):
             raw_id_token = self.request.session.get("oidc_id_token")
+            claims = {}
             if raw_id_token:
-                if "dependent_context" not in self.request.session:
+                from apps.core.context import decode_jwt_unverified
+                try:
+                    claims = decode_jwt_unverified(raw_id_token) if isinstance(raw_id_token, str) else raw_id_token
+                except Exception as exc:
+                    logger.debug(f"Could not parse claims from oidc_id_token: {exc}")
+                if not isinstance(claims, dict):
+                    claims = {}
+                if "dependent_context" not in self.request.session and "dep" in claims:
                     from apps.core.context import store_dependent_context
                     try:
-                        store_dependent_context(self.request.session, raw_id_token)
+                        store_dependent_context(self.request.session, claims)
                     except Exception as exc:
                         logger.debug(f"Could not parse dependent context from oidc_id_token: {exc}")
-                if "verified_public_emails" not in self.request.session:
-                    from apps.core.context import decode_jwt_unverified
-                    try:
-                        claims = decode_jwt_unverified(raw_id_token) if isinstance(raw_id_token, str) else raw_id_token
-                        if isinstance(claims, dict) and "public_emails" in claims:
-                            self.request.session["verified_public_emails"] = claims.get("public_emails", [])
-                    except Exception as exc:
-                        logger.debug(f"Could not parse public_emails from oidc_id_token: {exc}")
+                if "verified_public_emails" not in self.request.session and "public_emails" in claims:
+                    self.request.session["verified_public_emails"] = claims.get("public_emails", [])
+
+            tier = claims.get("account_tier") if isinstance(claims, dict) else None
+            subject = str(
+                (claims.get("sub") if isinstance(claims, dict) else None)
+                or self.request.session.get("custodial_did")
+                or getattr(getattr(self.request, "user", None), "username", "")
+                or ""
+            )
+            if subject.startswith("did:key:") and (not tier or tier in {"managed_free", "none"}):
+                tier = "sovereign"
+            if tier:
+                self.request.session["account_tier"] = tier
+                if hasattr(self.request.session, "modified"):
+                    self.request.session.modified = True
         return super().login_success()
 
     def login_failure(self):
