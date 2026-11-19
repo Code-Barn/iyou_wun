@@ -2,15 +2,15 @@
 <script>
 // Prevent script execution crashes if runtime tailwind variables are unresolved
 if (typeof tailwind !== 'undefined') {
-    tailwind.config = { 
-        theme: { 
-            extend: { 
-                colors: { 
+    tailwind.config = {
+        theme: {
+            extend: {
+                colors: {
                     // App accent color for dynamic theming
                     'accent': 'var(--color-accent)'
-                } 
-            } 
-        } 
+                }
+            }
+        }
     };
 }
 </script>
