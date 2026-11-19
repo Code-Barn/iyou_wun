@@ -1,4 +1,19 @@
 {% load static %}
+<style>
+  /* Mobile bottom nav owns the fixed bottom chrome. Hide the floating Map and
+     Messaging dock launchers only where that nav is rendered; desktop and views
+     without a bottom nav keep both overlays. Mirrors static/css/input.css. */
+  @media (max-width: 767px) {
+    body.has-mobile-bottom-nav #iyou-map-launcher,
+    body.has-mobile-bottom-nav #iyou-chat-dock,
+    body.has-mobile-bottom-nav [data-iyou-chat-dock],
+    body.has-mobile-bottom-nav .iyou-chat-dock,
+    body.has-mobile-bottom-nav #floating-chat-dock,
+    body.has-mobile-bottom-nav #floating-chat-root {
+      display: none !important;
+    }
+  }
+</style>
 <!-- Layer 0: Sovereign Ecosystem Bar (High-Contrast Inversion, id="layer-0-ecosystem-bar") -->
 <div id="sovereign-ecosystem-topbar"
      class="fixed top-0 left-0 right-0 z-[9999] transition-transform duration-300 ease-in-out -translate-y-[calc(100%-4px)] sm:hover:translate-y-0 bg-slate-900 text-slate-100 border-b border-slate-800 dark:bg-slate-100 dark:text-slate-900 dark:border-b-2 dark:border-violet-500 shadow-2xl">

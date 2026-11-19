@@ -98,12 +98,12 @@
     {% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
-<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-clip w-full max-w-full">
+<body class="min-h-screen flex flex-col transition-colors duration-200 bg-slate-50 text-slate-900 dark:bg-[#0B0F19] dark:text-gray-200 overflow-x-clip w-full max-w-full {% if user.is_authenticated or request.user.is_authenticated %}has-mobile-bottom-nav{% endif %}">
     {% include "includes/_ecosystem_bar.html" %}
     {% include "includes/_standard_header.html" %}
     {% include "_nav.html" %}
 
-    <main class="flex-1 w-full">
+    <main class="flex-1 w-full pb-20 md:pb-0">
         <div id="chassis-grid" class="max-w-7xl mx-auto px-4 sm:px-6 lg:grid lg:items-start lg:gap-6 lg:grid-cols-[48px_minmax(0,1fr)_300px] xl:grid-cols-[184px_minmax(0,1fr)_348px]">
             <aside id="left-rail" class="hidden lg:flex lg:col-span-1 min-w-0">
                 {% include "includes/_left_rail.html" %}
@@ -205,6 +205,28 @@
             window.open(chatOrigin + "/?peer=" + encodeURIComponent(peer), "_blank");
           }
         };
+
+        // dock_embed.js mounts the Messaging dock from iyou_chat and may use a
+        // legacy root id. Stamp the canonical marker on whichever root appears
+        // so the mobile suppression rule catches it deterministically.
+        (function () {
+          function markDock() {
+            ['iyou-chat-dock', 'floating-chat-dock', 'floating-chat-root'].forEach(function (id) {
+              var el = document.getElementById(id);
+              if (el && !el.hasAttribute('data-iyou-chat-dock')) {
+                el.setAttribute('data-iyou-chat-dock', '');
+              }
+            });
+          }
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', markDock);
+          } else {
+            markDock();
+          }
+          if (typeof MutationObserver !== 'undefined') {
+            new MutationObserver(markDock).observe(document.body, { childList: true, subtree: true });
+          }
+        })();
 
         window.addEventListener('message', function (event) {
           if (event.data && event.data.type === 'iyou:chat:unread_update') {

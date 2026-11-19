@@ -40,6 +40,21 @@ html, body {
   display: none;
 }
 
+/* --- Mobile bottom nav vs. floating dock coordination --- */
+/* The bottom dock owns fixed bottom chrome below the md breakpoint. Suppress
+   the Map launcher and the Messaging dock only on views that render that nav;
+   desktop and views without a bottom nav retain both overlays. */
+@media (max-width: 767px) {
+  body.has-mobile-bottom-nav #iyou-map-launcher,
+  body.has-mobile-bottom-nav #iyou-chat-dock,
+  body.has-mobile-bottom-nav [data-iyou-chat-dock],
+  body.has-mobile-bottom-nav .iyou-chat-dock,
+  body.has-mobile-bottom-nav #floating-chat-dock,
+  body.has-mobile-bottom-nav #floating-chat-root {
+    display: none !important;
+  }
+}
+
 /* --- Plyr Theme Overrides & Video Viewports --- */
 :root {
   --plyr-color-main: #7c3aed;

@@ -4,7 +4,7 @@
   Pattern: Damus tab bar (ATT-003, MIT 4a94f666) formalized to a 5-cell dock:
   Feed · Gallery · Chat · Notifications · Compose-FAB. Consumes AUDIT-002 §9
   locked decisions:
-    - h-14 (56px) + env(safe-area-inset-bottom); slat z-30 lg:hidden glass.
+    - h-14 (56px) + env(safe-area-inset-bottom); slat z-40 md:hidden glass.
     - dot-not-count for Feed/Gallery/Notifications; numeric rose pill for Chat ONLY.
     - Never jitters: static, no handleScrollHide; 24px icons + min-h-[44px] targets.
     - FAB cell (5th) opens composer via global openPostComposer().
@@ -12,20 +12,20 @@
   DOM contract:
     - Included in base.html AFTER _floating_chat_dock.html, gated on the
       authenticated-user check (see include guard below); visibility constrained
-      to <768px via lg:hidden (MD uses the L1 flyout rail variant instead,
+      to <768px via md:hidden (MD and up use the L1 flyout rail variant instead,
       AUDIT-005 §2.3).
     - Feed dot id rail-independent: mobile-feed-unread-dot. Chat pill id
       mobile-chat-unread-pill is hydrated from #floating-chat-unread-badge by
       the same mirroring window.__wunMobileDockBadgesBound guard used on the
       lock; notifications dot synced from #notification-unread-dot.
     - Compose FAB and rail CTA share the one global openPostComposer().
-    - Bottom-of-stream clearance: parents must apply pb-28 lg:pb-0 (companion
-      edits base/feed/gallery/notifications).
+    - Bottom-of-stream clearance: <main> applies pb-20 md:pb-0 so the last card
+      and pagination controls never sit under this bar.
 -->
 {% load static %}
 {% if user.is_authenticated or request.user.is_authenticated %}
 <nav id="mobile-bottom-dock" aria-label="Primary"
-     class="fixed inset-x-0 bottom-0 z-30 lg:hidden border-t border-slate-200
+     class="fixed bottom-0 inset-x-0 z-40 md:hidden border-t border-slate-200
             dark:border-gray-800/80 bg-white/85 dark:bg-[#0B0F19]/85 backdrop-blur-md font-mono">
   <div class="mx-auto grid max-w-screen-sm grid-cols-5 items-stretch h-14 pb-[env(safe-area-inset-bottom)]">
 
