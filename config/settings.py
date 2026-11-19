@@ -154,6 +154,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "apps.core.auth_pkce.SilentSSOMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -280,6 +281,10 @@ AUTHENTICATION_BACKENDS = [
 # IDP base URLs for endpoint construction
 IDP_BASE_INTERNAL_URL = env.str("IDP_BASE_INTERNAL_URL", default="http://127.0.0.1:8000")
 IDP_BASE_PUBLIC_URL = env.str("IDP_BASE_PUBLIC_URL", default="https://iyou.me")
+# Where the IdP returns after federated logout, and whether returning visitors
+# get one loop-safe prompt=none silent re-auth attempt.
+IDP_LOGOUT_RETURN_URL = env.str("IDP_LOGOUT_RETURN_URL", default="/")
+SSO_SILENT_ENABLED = env.bool("SSO_SILENT_ENABLED", default=True)
 
 # OIDC Relying Party — defaults match ecosystem PKCE public client standard
 OIDC_RP_CLIENT_ID = env.str("OIDC_RP_CLIENT_ID", default="iyou-wun-satellite-client")

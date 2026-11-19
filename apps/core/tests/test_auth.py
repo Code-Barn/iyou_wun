@@ -13,9 +13,11 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-from django.test import TestCase
-from django.contrib.auth.models import User
 from django.conf import settings
+from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.messages import get_messages
+from django.http import HttpResponse
+from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from ..auth import MyOIDCAuthenticationBackend
@@ -149,21 +151,40 @@ class OIDCBackendEnforcementTest(TestCase):
 
 
 class OIDCLogoutViewTest(TestCase):
-    def test_logout_get_flushes_session_and_redirects(self):
+    EXPECTED_LOGOUT_URL = "https://iyou.me/auth/logout/?next=%2F"
+
+    def _prime_session(self):
+        session = self.client.session
+        session["dependent_context"] = {"is_dependent": True, "bracket": "U14"}
+        session.save()
+
+    def test_logout_get_flushes_session_and_chains_to_idp(self):
         user = User.objects.create_user(username="did:key:z6Mklogoutget")
         self.client.force_login(user)
+        self._prime_session()
+        self.client.cookies["iyou_sso_hint"] = "1"
         response = self.client.get(reverse("oidc_logout"))
         self.assertEqual(response.status_code, 302)
-        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertRedirects(
+            response, self.EXPECTED_LOGOUT_URL, fetch_redirect_response=False
+        )
         self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertNotIn("dependent_context", self.client.session)
+        self.assertEqual(response.cookies["iyou_sso_hint"].value, "")
 
-    def test_logout_post_flushes_session_and_redirects(self):
+    def test_logout_post_flushes_session_and_chains_to_idp(self):
         user = User.objects.create_user(username="did:key:z6Mklogoutpost")
         self.client.force_login(user)
+        self._prime_session()
+        self.client.cookies["iyou_sso_hint"] = "1"
         response = self.client.post(reverse("oidc_logout"))
         self.assertEqual(response.status_code, 302)
-        self.assertRedirects(response, "/", fetch_redirect_response=False)
+        self.assertRedirects(
+            response, self.EXPECTED_LOGOUT_URL, fetch_redirect_response=False
+        )
         self.assertNotIn("_auth_user_id", self.client.session)
+        self.assertNotIn("dependent_context", self.client.session)
+        self.assertEqual(response.cookies["iyou_sso_hint"].value, "")
 
     def test_logout_aliases(self):
         user = User.objects.create_user(username="did:key:z6Mklogoutalias")
@@ -176,6 +197,111 @@ class OIDCLogoutViewTest(TestCase):
         response = self.client.get("/logout/")
         self.assertEqual(response.status_code, 302)
         self.assertNotIn("_auth_user_id", self.client.session)
+
+
+class SilentSSOMiddlewareTest(TestCase):
+    class FakeSession(dict):
+        def save(self):
+            pass
+
+    def _middleware(self):
+        from apps.core.auth_pkce import SilentSSOMiddleware
+
+        return SilentSSOMiddleware(lambda request: HttpResponse("ok"))
+
+    def _request(self, path="/feed", method="GET", user=None, hint=True, session=None):
+        request = getattr(RequestFactory(), method.lower())(path)
+        request.user = user if user is not None else AnonymousUser()
+        if session is None:
+            request.session = self.FakeSession()
+        elif isinstance(session, self.FakeSession):
+            request.session = session
+        else:
+            request.session = self.FakeSession(session)
+        request.COOKIES = {"iyou_sso_hint": "1"} if hint else {}
+        return request
+
+    @override_settings(SSO_SILENT_ENABLED=True)
+    def test_anonymous_with_hint_latches_inflight_and_redirects_once(self):
+        middleware = self._middleware()
+        session = self.FakeSession()
+        request = self._request(session=session)
+        response = middleware(request)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, reverse("oidc_authentication_init"))
+        self.assertTrue(session["sso_silent_inflight"])
+        self.assertEqual(session["oidc_login_next"], "/feed")
+        # A second pass while inflight is latched does not re-probe.
+        self.assertEqual(middleware(self._request(session=session)).content, b"ok")
+
+    @override_settings(SSO_SILENT_ENABLED=True)
+    def test_exempt_paths_authenticated_and_attempted_do_not_redirect(self):
+        middleware = self._middleware()
+        for path in ("/oidc/authenticate/", "/oidc/callback/", "/oidc/logout/",
+                     "/admin/", "/static/app.css", "/health"):
+            self.assertEqual(
+                middleware(self._request(path=path)).content,
+                b"ok",
+                msg=f"{path} should be exempt",
+            )
+        user = User.objects.create_user(username="did:key:z6Mksilentuser")
+        self.assertEqual(middleware(self._request(user=user)).content, b"ok")
+        self.assertEqual(
+            middleware(self._request(session={"sso_silent_attempted": True})).content,
+            b"ok",
+        )
+        self.assertEqual(middleware(self._request(hint=False)).content, b"ok")
+        self.assertEqual(middleware(self._request(method="POST")).content, b"ok")
+
+    @override_settings(SSO_SILENT_ENABLED=True)
+    def test_silent_probe_adds_prompt_none_but_interactive_click_does_not(self):
+        session = self.FakeSession({"sso_silent_inflight": True})
+        request = self._request(session=session)
+        from apps.core.auth_pkce import PKCEOIDCAuthenticationRequestView
+
+        view = PKCEOIDCAuthenticationRequestView()
+        view.request = request
+        params = view.get_extra_params(request)
+        self.assertEqual(params.get("prompt"), "none")
+        self.assertNotIn("sso_silent_inflight", session)
+
+        interactive = self._request(session={})
+        self.assertNotIn("prompt", view.get_extra_params(interactive))
+
+        # End-to-end outbound authorize URL check.
+        session = self.client.session
+        session["sso_silent_inflight"] = True
+        session.save()
+        response = self.client.get(reverse("oidc_authentication_init"))
+        from urllib.parse import parse_qs, urlparse
+
+        self.assertEqual(
+            parse_qs(urlparse(response.url).query).get("prompt"), ["none"]
+        )
+
+        # An interactive click has no inflight latch and no prompt=none.
+        response = self.client.get(reverse("oidc_authentication_init"))
+        self.assertNotIn(
+            "prompt", parse_qs(urlparse(response.url).query)
+        )
+
+    @override_settings(SSO_SILENT_ENABLED=True)
+    def test_callback_error_during_silent_attempt_redirects_without_banner(self):
+        session = self.client.session
+        session["sso_silent_inflight"] = True
+        session["oidc_login_next"] = "/feed?circle=global"
+        session.save()
+        self.client.cookies["iyou_sso_hint"] = "1"
+        response = self.client.get(
+            reverse("oidc_authentication_callback"), {"error": "login_required"}
+        )
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, "/feed?circle=global")
+        self.assertTrue(self.client.session["sso_silent_attempted"])
+        self.assertEqual(list(get_messages(response.wsgi_request)), [])
+
+        # The attempted latch prevents any further automatic probe.
+        self.assertEqual(self.client.get("/feed").status_code, 200)
 
 
 class PKCEOIDCAuthenticationCallbackViewTest(TestCase):
