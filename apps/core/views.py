@@ -382,6 +382,17 @@ def api_sync_keys(request):
     })
 
 
+@login_required
+@require_POST
+def api_graduation_ack(request):
+    """Clear the one-shot sovereign graph re-signing queue after the client
+    has broadcast its Kind 3 / Kind 10004 lists under the graduated DID."""
+    if hasattr(request, "session"):
+        request.session.pop("pending_sovereign_graph_migration", None)
+        request.session.modified = True
+    return JsonResponse({"ok": True})
+
+
 def _broadcast_signed_event(signed_event, relay_urls=None, timeout=2.5):
     """Send ``["EVENT", event]`` to first-party relays; return acking URLs.
 

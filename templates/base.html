@@ -24,7 +24,19 @@
       // sovereign (did:key) sessions keep the local iyou_home bridge path.
       window.USER_ACCOUNT_TIER = "{{ user_account_tier|default:''|escapejs }}";
       window.USER_DID = "{{ user_did|default:''|escapejs }}";
+      window.PENDING_SOVEREIGN_MIGRATION = null;
     </script>
+    {% if request.session.pending_sovereign_graph_migration %}
+    {{ request.session.pending_sovereign_graph_migration|json_script:"pending-sovereign-migration-data" }}
+    <script>
+      (function () {
+        var node = document.getElementById("pending-sovereign-migration-data");
+        if (!node) return;
+        try { window.PENDING_SOVEREIGN_MIGRATION = JSON.parse(node.textContent); }
+        catch (e) { window.PENDING_SOVEREIGN_MIGRATION = null; }
+      })();
+    </script>
+    {% endif %}
     <style>
       :root {
         --l1-height: 64px;

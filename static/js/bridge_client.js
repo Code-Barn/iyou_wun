@@ -910,6 +910,11 @@
                     }
 
                     this.updateActivePersonaUI(prof);
+                    // A graduated did:web account still carries a one-shot queue
+                    // of contacts/bookmarks that must be re-signed by the enclave.
+                    if (window.PENDING_SOVEREIGN_MIGRATION && String(window.USER_DID || "").indexOf("did:key:") === 0) {
+                        this._runPendingSovereignMigration();
+                    }
                     var isManual = !!(this._manualPersonaSwitch || message.type === "SET_ACTIVE_PERSONA_RESPONSE");
                     this._manualPersonaSwitch = false;
                     this.handlePersonaChanged(prof, isManual);
@@ -1479,6 +1484,73 @@
                 done();
             }
         });
+    };
+
+    /**
+     * Re-sign the social graph inherited from a graduated did:web account.
+     * Runs once, only on a sovereign did:key session with an enclave bridge,
+     * and clears the server-side queue via /api/account/graduation-ack/.
+     */
+    TauriBridgeClient.prototype._runPendingSovereignMigration = async function () {
+        var pending = window.PENDING_SOVEREIGN_MIGRATION;
+        var did = String(window.USER_DID || window.CURRENT_SESSION_DID || "");
+        if (!pending || this._sovereignMigrationStarted || did.indexOf("did:key:") !== 0) {
+            return;
+        }
+        var contacts = Array.isArray(pending.contacts) ? pending.contacts : [];
+        var bookmarks = Array.isArray(pending.bookmarks) ? pending.bookmarks : [];
+        if (!contacts.length && !bookmarks.length) {
+            window.PENDING_SOVEREIGN_MIGRATION = null;
+            return;
+        }
+        this._sovereignMigrationStarted = true;
+        var self = this;
+        try {
+            var templates = [];
+            if (contacts.length) {
+                templates.push({
+                    kind: 3,
+                    content: "",
+                    tags: contacts
+                        .filter(function (c) { return c && /^[0-9a-fA-F]{64}$/.test(c.pubkey || ""); })
+                        .map(function (c) {
+                            return ["p", c.pubkey.toLowerCase(), c.relay || "wss://relay.iyou.me", c.petname || ""];
+                        })
+                });
+            }
+            if (bookmarks.length) {
+                templates.push({
+                    kind: 10004,
+                    content: "",
+                    tags: bookmarks
+                        .filter(function (id) { return /^[0-9a-fA-F]{64}$/.test(id || ""); })
+                        .map(function (id) { return ["e", id.toLowerCase()]; })
+                });
+            }
+            for (var i = 0; i < templates.length; i++) {
+                var template = templates[i];
+                template.created_at = Math.floor(Date.now() / 1000);
+                var signed = await self.signEvent(template);
+                if (signed && signed.id) {
+                    await self.broadcastToRelays(signed);
+                }
+            }
+            await fetch("/api/account/graduation-ack/", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": getCsrfToken()
+                },
+                credentials: "same-origin"
+            });
+            window.PENDING_SOVEREIGN_MIGRATION = null;
+            if (typeof showToast === "function") {
+                showToast("Sovereign social graph restored", "success");
+            }
+        } catch (err) {
+            console.warn("[Bridge] Sovereign graph migration deferred:", err);
+            self._sovereignMigrationStarted = false;
+        }
     };
 
     TauriBridgeClient.prototype.showFallbackModal = function () {

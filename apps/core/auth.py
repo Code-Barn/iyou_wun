@@ -17,6 +17,8 @@ import logging
 import re
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import transaction
+from django.db.models import Q
 from mozilla_django_oidc.auth import OIDCAuthenticationBackend
 
 logger = logging.getLogger(__name__)
@@ -135,6 +137,10 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 except Exception as e:
                     logger.debug(f"Failed to store dependent context in create_user: {e}")
         try:
+            self._consolidate_graduated_account(user, claims)
+        except Exception as e:
+            logger.exception(f"Graduation consolidation failed in create_user: {e}")
+        try:
             self._sync_user_deck(user, claims)
         except Exception as e:
             logger.debug(f"Failed to sync user deck in create_user: {e}")
@@ -152,11 +158,142 @@ class MyOIDCAuthenticationBackend(OIDCAuthenticationBackend):
                 except Exception as e:
                     logger.debug(f"Failed to store dependent context in update_user: {e}")
         try:
+            self._consolidate_graduated_account(user, claims)
+        except Exception as e:
+            logger.exception(f"Graduation consolidation failed in update_user: {e}")
+        try:
             self._sync_user_deck(user, claims)
         except Exception as e:
             logger.debug(f"Failed to sync user deck in update_user: {e}")
         self._sync_account_tier(user, claims)
         return self._evaluate_admin_elevation(user, claims)
+
+    @staticmethod
+    def _graduation_nostr_pubkey(sub, claims):
+        """Secp256k1 pubkey derivable from a graduation claim, else "".
+
+        A ``did:key:z6Mk...`` encodes an Ed25519 key; it must NEVER be mistaken
+        for a Nostr secp256k1 x-only pubkey. The enclave will populate the real
+        key via ``profile_sync`` later.
+        """
+        candidate = str(
+            (claims or {}).get("nostr_pubkey_hex") or (claims or {}).get("nostr_pubkey") or ""
+        ).strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", candidate):
+            return candidate
+        subject = str(sub or "").strip()
+        if re.fullmatch(r"[0-9a-fA-F]{64}", subject):
+            return subject.lower()
+        if subject.startswith("did:iyou:0x"):
+            hex_part = subject.split("did:iyou:0x", 1)[1].strip()
+            if re.fullmatch(r"[0-9a-fA-F]{64}", hex_part):
+                return hex_part.lower()
+        return ""
+
+    @staticmethod
+    def _is_placeholder_deck(deck):
+        """True when a deck is just an auto-created empty shell for a new DID."""
+        if deck is None:
+            return False
+        populated = any(
+            (
+                deck.display_name,
+                deck.headline,
+                deck.avatar_url,
+                deck.banner_url,
+                deck.nostr_pubkey,
+                deck.custodial_private_key_enc,
+                deck.custodial_pubkey_hex,
+                deck.custodial_contacts,
+                deck.lud16,
+            )
+        )
+        if populated:
+            return False
+        from .models import UserLinkItem
+
+        return not UserLinkItem.objects.filter(user=deck.user).exists()
+
+    def _consolidate_graduated_account(self, user, claims=None):
+        """Atomically move a Tier 1 did:web identity onto its sovereign did:key.
+
+        WUN is a relying party: iyou_idp owns the graduation decision and emits
+        ``graduated_from_did``. We only consolidate when that claim is present
+        and internally consistent.
+        """
+        claims = claims if isinstance(claims, dict) else {}
+        graduated_from = str(claims.get("graduated_from_did") or "").strip()
+        sub = str(claims.get("sub") or getattr(user, "username", "") or "").strip()
+        if not (
+            graduated_from.startswith("did:web:")
+            and sub.startswith("did:key:")
+            and graduated_from != sub
+        ):
+            return
+
+        from .models import Bookmark, UserLinkDeck, UserLinkItem
+
+        legacy_user = UserModel.objects.filter(username=graduated_from).first()
+        if legacy_user is not None and not legacy_user.is_active:
+            # Already consolidated on an earlier login.
+            return
+
+        deck_query = Q(did=graduated_from)
+        if legacy_user is not None:
+            deck_query = deck_query | Q(user=legacy_user)
+        legacy_deck = UserLinkDeck.objects.filter(deck_query).first()
+
+        pending_contacts = []
+        pending_bookmarks = []
+        with transaction.atomic():
+            if legacy_deck is not None:
+                pending_contacts = list(legacy_deck.custodial_contacts or [])
+                new_deck = UserLinkDeck.objects.filter(user=user).exclude(pk=legacy_deck.pk).first()
+                if new_deck is not None:
+                    if self._is_placeholder_deck(new_deck):
+                        new_deck.delete()
+                    else:
+                        logger.warning(
+                            "Graduation: new %s already owns a populated deck; "
+                            "keeping it and skipping deck reassignment",
+                            sub,
+                        )
+                        legacy_deck = None
+                if legacy_deck is not None:
+                    legacy_deck.user = user
+                    legacy_deck.did = sub
+                    legacy_deck.custodial_private_key_enc = None
+                    legacy_deck.custodial_pubkey_hex = ""
+                    legacy_deck.nostr_pubkey = self._graduation_nostr_pubkey(sub, claims)
+                    legacy_deck.save()
+
+            if legacy_user is not None and legacy_user.pk != user.pk:
+                UserLinkItem.objects.filter(user=legacy_user).update(user=user)
+                existing_ids = set(
+                    Bookmark.objects.filter(user=user).values_list("event_id", flat=True)
+                )
+                for bookmark in Bookmark.objects.filter(user=legacy_user):
+                    if bookmark.event_id in existing_ids:
+                        bookmark.delete()
+                    else:
+                        bookmark.user = user
+                        bookmark.save(update_fields=["user"])
+                        existing_ids.add(bookmark.event_id)
+                legacy_user.is_active = False
+                legacy_user.set_unusable_password()
+                legacy_user.save(update_fields=["is_active", "password"])
+
+            pending_bookmarks = list(
+                Bookmark.objects.filter(user=user).values_list("event_id", flat=True)
+            )
+
+        session = getattr(getattr(self, "request", None), "session", None)
+        if session is not None and (pending_contacts or pending_bookmarks):
+            session["pending_sovereign_graph_migration"] = {
+                "contacts": pending_contacts,
+                "bookmarks": pending_bookmarks,
+            }
+            session.modified = True
 
     def _sync_user_deck(self, user, claims=None):
         if not user or user.is_anonymous:

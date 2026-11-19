@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/backup/import/', views.api_backup_import, name='api_backup_import'),
     path('api/auth/persona-switch/', views.api_persona_switch, name='api_persona_switch'),
     path('api/auth/sync-keys/', views.api_sync_keys, name='api_sync_keys'),
+    path('api/account/graduation-ack/', views.api_graduation_ack, name='api_graduation_ack'),
     path('api/notes/publish/', views.api_publish_note, name='api_publish_note'),
     path('api/notes/interact/', views.api_interact_note, name='api_interact_note'),
     path('api/contacts/', views.api_get_contacts, name='api_get_contacts'),
