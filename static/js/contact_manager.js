@@ -122,10 +122,10 @@
     }
 
 
-    async function getCurrentUserPubkey() {
+    async function getCurrentUserPubkey(options) {
         if (global.bridgeClient && typeof global.bridgeClient.getEffectivePubkey === "function") {
             try {
-                const pk = await global.bridgeClient.getEffectivePubkey();
+                const pk = await global.bridgeClient.getEffectivePubkey(options || {});
                 if (pk) return normalizePubkey(pk);
             } catch (e) {
                 // fall through to window globals
@@ -388,7 +388,7 @@
 
         initPromise = (async () => {
             try {
-                const myPubkey = await getCurrentUserPubkey();
+                const myPubkey = await getCurrentUserPubkey({ silent: true });
                 if (myPubkey) {
                     const event = await queryKind3FromRelays(myPubkey);
                     if (event && Array.isArray(event.tags)) {
@@ -414,10 +414,10 @@
      * - 'follower': target follows current user
      * - 'mutual': mutual follows (Level 1 Peer / Mutual Friend)
      */
-    async function checkRelationship(targetPubkeyHex) {
+    async function checkRelationship(targetPubkeyHex, options) {
         if (!targetPubkeyHex) return "none";
         const cleanTarget = normalizePubkey(targetPubkeyHex);
-        const myPubkey = await getCurrentUserPubkey();
+        const myPubkey = await getCurrentUserPubkey(options || {});
 
         if (!myPubkey) return "none";
         if (cleanTarget === myPubkey) return "self";
@@ -721,7 +721,7 @@
             const btnTarget = normalizePubkey(btn.getAttribute("data-follow-target"));
             if (btnTarget !== cleanTarget) continue;
 
-            const state = await checkRelationship(cleanTarget);
+            const state = await checkRelationship(cleanTarget, { silent: true });
             applyButtonState(btn, state);
         }
     }
@@ -788,7 +788,7 @@
             if (!target) return;
 
             // Asynchronously resolve and render current relationship state
-            checkRelationship(target).then((state) => {
+            checkRelationship(target, { silent: true }).then((state) => {
                 applyButtonState(btn, state);
                 btn.dataset.following = (state === "following" || state === "mutual") ? "true" : "false";
             });

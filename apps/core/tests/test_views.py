@@ -1307,7 +1307,39 @@ class BackupGraphTest(TestCase):
         self.assertIn("_replaySubscriptions", src)
         self.assertIn("ensureConnection", src)
         self.assertIn("onReconnect", src)
-        self.assertIn("reloadFeedForCircle", src)
+        # Time Map: a recovered socket emits a staging signal; it must never
+        # reload or wipe the currently rendered timeline.
+        self.assertIn("relayPoolReconnected", src)
+        self.assertNotIn("window.reloadFeedForCircle", src)
+
+    def test_phase1_time_map_contracts(self):
+        """Phase 1: deterministic snapshots, staged new posts, quiet identity probes."""
+        js_dir = settings.BASE_DIR / "static" / "js"
+
+        feed = (js_dir / "feed_interactions.js").read_text()
+        self.assertIn("window.wunFeedTimeMap", feed)
+        self.assertIn("new-posts-pill", feed)
+        self.assertIn("lockTimeMapSnapshot", feed)
+        self.assertIn("stageNewPostCandidate", feed)
+        self.assertIn("flushStagedPosts", feed)
+        self.assertIn("isEcosystemEnvelope", feed)
+        self.assertIn("'&since='", feed)
+        self.assertIn("appendNoteToFeed(note, container, repliesMap, isReset ? null : 'bottom')", feed)
+
+        pool = (js_dir / "relay_pool.js").read_text()
+        self.assertIn("options.allowDisabled === true", pool)
+        self.assertIn("options.onEose", pool)
+        # NIP-65 discoveries are cataloged but never auto-enabled.
+        ingest = pool.split("ingestNip65Tags = function", 1)[-1]
+        self.assertIn("enabled: false", ingest)
+
+        bridge = (js_dir / "bridge_client.js").read_text()
+        self.assertIn("getEffectivePubkey = async function (options)", bridge)
+        self.assertIn("opts.silent === true", bridge)
+        self.assertIn("window.IS_AUTHENTICATED", bridge)
+
+        toast = (js_dir / "toast_manager.js").read_text()
+        self.assertIn("dataset.toastMessage", toast)
 
     def test_feed_interactions_carries_signature_timeout_contract(self):
         src = (settings.BASE_DIR / "static" / "js" / "feed_interactions.js").read_text()

@@ -297,6 +297,15 @@
           {% endfor %}
         </div>
         {% endif %}
+        <!-- X-style new-posts staging pill: incoming events are buffered, never
+             injected into the timeline until the reader opts in by clicking. -->
+        <div id="new-posts-pill-wrapper" class="sticky top-16 z-30 flex justify-center pointer-events-none h-0 overflow-visible">
+          <button id="new-posts-pill" type="button"
+                  class="hidden pointer-events-auto mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-full bg-violet-600 hover:bg-violet-700 text-white font-mono text-xs font-semibold shadow-lg border border-violet-400/30 transition-all duration-200 cursor-pointer">
+            <span aria-hidden="true">↑</span>
+            <span id="new-posts-pill-label">Show 1 new post</span>
+          </button>
+        </div>
         <div id="feed-container" class="space-y-3" {% if not notes %}data-hydrate="true"{% endif %}>
           {% for note in notes %}
           <div class="feed-note-card bg-white dark:bg-slate-900 rounded-xl p-4 border {% if note.filter_status and note.filter_status.status == 'BLOCKED' %}border-2 border-dashed border-rose-400/80 dark:border-rose-500/60 bg-rose-50/10{% else %}border-slate-200 dark:border-slate-800{% endif %}"

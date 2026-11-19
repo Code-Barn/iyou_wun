@@ -33,6 +33,17 @@
       .replace(/'/g, '&#039;');
   }
 
+  function dismissToast(toast) {
+    if (!toast || !toast.parentElement) return;
+    toast.classList.add('opacity-0', 'translate-y-2');
+    if (toast._fadeTimer) clearTimeout(toast._fadeTimer);
+    toast._fadeTimer = setTimeout(() => {
+      if (toast.parentElement) {
+        toast.parentElement.removeChild(toast);
+      }
+    }, 300);
+  }
+
   function showToast(message, type, duration) {
     if (typeof type === 'boolean') {
       type = type ? 'error' : 'success';
@@ -50,10 +61,26 @@
       return;
     }
 
+    const messageText = String(message);
+
+    // Identical toasts collapse into one live node. A repeated signal (e.g. four
+    // passive identity probes on page load) refreshes the dismiss timer instead
+    // of stacking four visually identical notifications.
+    const existing = Array.prototype.slice.call(container.children).find(
+      (node) => node && node.dataset && node.dataset.toastMessage === messageText
+    );
+    if (existing) {
+      if (existing._dismissTimer) clearTimeout(existing._dismissTimer);
+      if (existing._fadeTimer) clearTimeout(existing._fadeTimer);
+      existing._dismissTimer = setTimeout(() => dismissToast(existing), duration);
+      return;
+    }
+
     const icon = TOAST_ICONS[type] || TOAST_ICONS.info;
     const style = TOAST_STYLES[type] || TOAST_STYLES.info;
 
     const toast = document.createElement('div');
+    toast.dataset.toastMessage = messageText;
     toast.className = `pointer-events-auto flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border backdrop-blur-md shadow-2xl transition-all duration-300 transform translate-y-4 opacity-0 ${style}`;
     toast.innerHTML = `
       <div class="flex items-center gap-2.5 min-w-0">
@@ -71,14 +98,7 @@
     });
 
     // Auto Dismiss
-    setTimeout(() => {
-      toast.classList.add('opacity-0', 'translate-y-2');
-      setTimeout(() => {
-        if (toast.parentElement) {
-          toast.parentElement.removeChild(toast);
-        }
-      }, 300);
-    }, duration);
+    toast._dismissTimer = setTimeout(() => dismissToast(toast), duration);
   }
 
   window.showToast = showToast;

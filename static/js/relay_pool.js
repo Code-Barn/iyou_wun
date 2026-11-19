@@ -406,12 +406,20 @@
      * managed pool connections. Returns a cancel() function; all sockets are
      * closed after `timeoutMs` (default 4s) or on EOSE.
      */
-    RelayPool.prototype.requestEvents = function (filter, onEvent, relayUrls, timeoutMs) {
+    RelayPool.prototype.requestEvents = function (filter, onEvent, relayUrls, timeoutMs, options) {
         var self = this;
         if (!self.relays || self.relays.size === 0) return null;
-        var targets = (Array.isArray(relayUrls) && relayUrls.length > 0)
+        var allowDisabled = !!(options && options.allowDisabled === true);
+        var requested = (Array.isArray(relayUrls) && relayUrls.length > 0)
             ? relayUrls
             : (self.getReadRelays().length > 0 ? self.getReadRelays() : self.getRelays());
+        // An explicit relay list is an override of the *selection* strategy, not
+        // of the user's Switchboard preferences: a disabled relay never reaches
+        // the wire unless a caller explicitly opts in for diagnostics.
+        var targets = requested.filter(function (url) {
+            var record = self.relays.get(normalizeUrl(url));
+            return allowDisabled || !record || record.enabled !== false;
+        });
         var timeout = (typeof timeoutMs === "number" && timeoutMs > 0) ? timeoutMs : 4000;
         var subId = "wun_hydrate_" + Date.now().toString(36) + "_" + Math.floor(Math.random() * 1e9).toString(36);
         var sockets = [];
@@ -465,6 +473,10 @@
                     try {
                         if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(["CLOSE", subId]));
                     } catch (e) { /* ignore */ }
+                    // Let batch callers know the one-shot snapshot has settled.
+                    if (options && typeof options.onEose === "function") {
+                        try { options.onEose(url); } catch (e) { /* ignore */ }
+                    }
                 }
             };
 
@@ -1226,21 +1238,23 @@
                 existing.read = existing.read || read;
                 existing.write = existing.write || write;
             } else {
+                // A peer's Kind 10002 list is a *discovery hint*, not a consent
+                // signal. Catalog the relay for the Switchboard but keep it
+                // disabled until the user explicitly opts in; never probe or
+                // fan out reads to it automatically.
                 self.relays.set(norm, {
                     url: url,
                     read: read,
                     write: write,
-                    enabled: true,
+                    enabled: false,
                     isLocal: norm.indexOf("127.0.0.1") !== -1 || norm.indexOf("localhost") !== -1,
                     primary: false,
-                    status: "unknown",
+                    status: "offline",
                     latencyMs: null,
                     lastProbe: null,
                     failCount: 0
                 });
                 added++;
-                // Probe newly discovered relay
-                self.probeRelay(url);
             }
         });
 
@@ -1645,30 +1659,22 @@
         return null;
     };
 
-    // Auto re-subscribe any active feed filters when a managed pool socket
-    // recovers (no full page refresh needed). Safe to no-op when the feed
-    // controller has not been loaded yet.
-    //
-    // Multiple relays completing their handshake in the same tick must settle
-    // into exactly ONE feed reload: coalesce with a 300ms trailing debounce
-    // keyed to the active circle so the storm collapses to a single request.
-    var _reconnectReloadTimer = null;
-    var _reconnectReloadCircle = null;
-    poolInstance.onReconnect(function () {
-        if (typeof window === "undefined" || typeof window.reloadFeedForCircle !== "function") return;
-        var circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === "function")
-            ? window.circleFeedFilter.getActiveCircle()
-            : "iyou";
-        _reconnectReloadCircle = circle;
-        if (_reconnectReloadTimer) {
-            clearTimeout(_reconnectReloadTimer);
-        }
-        _reconnectReloadTimer = setTimeout(function () {
-            _reconnectReloadTimer = null;
-            var reloadCircle = _reconnectReloadCircle;
-            _reconnectReloadCircle = null;
-            try { window.reloadFeedForCircle(reloadCircle); } catch (e) { /* ignore */ }
-        }, 300);
+    // A managed socket recovering must NEVER wipe or reload an active timeline.
+    // Signal the feed controller instead: its background monitor resumes a quiet
+    // "newer-than-snapshot" watch and stages candidates behind the new-posts
+    // pill, leaving every rendered card untouched.
+    poolInstance.onReconnect(function (url) {
+        if (typeof window === "undefined") return;
+        try {
+            window.dispatchEvent(new CustomEvent("relayPoolReconnected", {
+                detail: {
+                    url: url || "",
+                    circle: (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === "function")
+                        ? window.circleFeedFilter.getActiveCircle()
+                        : "iyou"
+                }
+            }));
+        } catch (e) { /* ignore */ }
     });
 
     if (typeof module !== "undefined" && module.exports) {

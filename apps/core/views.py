@@ -1326,9 +1326,22 @@ def api_feed(request):
         except (ValueError, TypeError):
             until_ts = None
 
+    # Forward cursor for the Time Map's background "new posts" monitor. The
+    # client passes an already-incremented boundary (snapshotMaxTs + 1), so the
+    # value is used verbatim; no backward pagination semantics are involved.
+    since_ts = None
+    since = request.GET.get("since")
+    if since:
+        try:
+            since_ts = int(since)
+        except (ValueError, TypeError):
+            since_ts = None
+
     filter_obj = {"kinds": [1, 1063, 1111, 1112, 30023], "limit": limit}
     if until_ts is not None:
         filter_obj["until"] = until_ts - 1
+    if since_ts is not None:
+        filter_obj["since"] = since_ts
 
     if tag:
         clean_tag = tag.lstrip("#")

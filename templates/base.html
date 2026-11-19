@@ -17,6 +17,9 @@
           document.documentElement.classList.remove('dark');
         }
       })();
+      // Global auth signal for client identity guards (quiet passive probes vs.
+      // explicit "unlock iyou_home" prompts).
+      window.IS_AUTHENTICATED = {% if request.user.is_authenticated or user.is_authenticated %}true{% else %}false{% endif %};
     </script>
     <style>
       :root {

@@ -31,6 +31,248 @@
 
     window.pendingReply = null;
 
+    // ---------- Time Map / Circle Isolation Helpers ----------
+    // Browser-side mirror of IYOU_PLATFORM_RELAYS in apps/core/nip10.py. Only
+    // these endpoints may contribute events to the iyou circle from the client.
+    var SOVEREIGN_RELAYS = ["ws://127.0.0.1:9003", "wss://relay.iyou.me"];
+
+    // One deterministic snapshot per load/circle-switch. New network events are
+    // staged in `stagedMap` and never touch the DOM until the reader opts in.
+    window.wunFeedTimeMap = {
+        snapshotMaxTs: 0,
+        renderedIds: new Set(),
+        stagedMap: new Map(),
+        circle: 'iyou'
+    };
+
+    function activeFeedCircle() {
+        if (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === 'function') {
+            return window.circleFeedFilter.getActiveCircle();
+        }
+        return new URLSearchParams(window.location.search).get('circle') || 'iyou';
+    }
+
+    function getEventTs(event) {
+        return parseInt(event && (event.created_at_epoch || event.created_at), 10) || 0;
+    }
+
+    // Mirrors is_ecosystem_envelope() in apps/core/nip10.py: #iyou / iyou_* /
+    // omni_social* tags OR a first-party relay origin.
+    function isEcosystemEnvelope(event) {
+        if (!event) return false;
+        var tags = Array.isArray(event.tags) ? event.tags : [];
+        for (var i = 0; i < tags.length; i++) {
+            var t = tags[i];
+            if (!Array.isArray(t) || t.length < 2) continue;
+            var key = String(t[0]).trim().toLowerCase();
+            var val = String(t[1]).trim().toLowerCase();
+            if (key === 't' && val === 'iyou') return true;
+            if (key === 'client' && (val === 'iyou' || val.indexOf('iyou_') === 0 || val.indexOf('omni_social') === 0)) return true;
+        }
+        var sources = [];
+        var primary = event._primary_relay || event.primary_relay || event._relay_url || event.relay_url || '';
+        if (primary) sources.push(primary);
+        if (Array.isArray(event._relay_sources)) sources = sources.concat(event._relay_sources);
+        if (Array.isArray(event.relay_sources)) sources = sources.concat(event.relay_sources);
+        for (var j = 0; j < sources.length; j++) {
+            if (SOVEREIGN_RELAYS.indexOf(String(sources[j] || '').trim().toLowerCase()) !== -1) return true;
+        }
+        return false;
+    }
+
+    function isKnownIyouAuthor(event) {
+        if (!event) return false;
+        var pk = String(event.pubkey_hex || event.pubkey || '').toLowerCase();
+        var did = String(event.author_did || '').toLowerCase();
+        var keys = (Array.isArray(window.IYOU_ECOSYSTEM_KEYS) ? window.IYOU_ECOSYSTEM_KEYS : [])
+            .map(function (k) { return String(k).toLowerCase(); });
+        if ((pk && keys.indexOf(pk) !== -1) || (did && keys.indexOf(did) !== -1)) return true;
+        var active = window.activeProfile || {};
+        var ap = String(active.nostr_pubkey_hex || active.pubkey_hex || active.pubkey || window.userPubkey || '').toLowerCase();
+        if (pk && ap && pk === ap) return true;
+        var ownDids = [window.userDid, window.CURRENT_SESSION_DID].filter(Boolean)
+            .map(function (d) { return String(d).toLowerCase(); });
+        return !!(did && ownDids.indexOf(did) !== -1);
+    }
+
+    function isRootFeedEvent(event) {
+        if (!event) return false;
+        if ([1, 1063, 30023].indexOf(Number(event.kind)) === -1) return false;
+        if (event.parent_id || event.reply_to || event.parentId) return false;
+        var tags = Array.isArray(event.tags) ? event.tags : [];
+        for (var i = 0; i < tags.length; i++) {
+            var t = tags[i];
+            if (Array.isArray(t) && t[0] === 'e' && t[3] && (t[3] === 'reply' || t[3] === 'root')) return false;
+        }
+        return true;
+    }
+
+    // Explicit relay sets always pass through the pool's enabled/health filters.
+    // The iyou circle is additionally pinned to the sovereign endpoints so a
+    // NIP-65 hint can never widen an empty [ ⚡ iyou ] feed into the WAN mesh.
+    function availableRelaysForCircle(circle) {
+        if (!window.relayPool || typeof window.relayPool.getReadRelays !== 'function') return [];
+        var isHttps = window.location.protocol === 'https:';
+        return window.relayPool.getReadRelays().filter(function (url) {
+            if (isHttps && String(url).indexOf('ws://') === 0) return false;
+            return circle !== 'iyou' || SOVEREIGN_RELAYS.indexOf(url) !== -1;
+        });
+    }
+
+    // ---------- Time Map State Controller ----------
+
+    var _newPostMonitorTimer = null;
+    var _newPostPollInFlight = false;
+
+    function updateNewPostsPill() {
+        var tm = window.wunFeedTimeMap;
+        var pill = document.getElementById('new-posts-pill');
+        var label = document.getElementById('new-posts-pill-label');
+        if (!tm || !pill) return;
+        var count = tm.stagedMap.size;
+        if (label) {
+            label.textContent = 'Show ' + count + ' new post' + (count === 1 ? '' : 's');
+        }
+        if (count > 0) pill.classList.remove('hidden');
+        else pill.classList.add('hidden');
+    }
+
+    function resetTimeMapForCircle(circle) {
+        var tm = window.wunFeedTimeMap;
+        if (!tm) return;
+        tm.circle = circle || activeFeedCircle();
+        tm.snapshotMaxTs = 0;
+        tm.renderedIds.clear();
+        tm.stagedMap.clear();
+        updateNewPostsPill();
+    }
+
+    function lockTimeMapSnapshot(container, circle) {
+        if (!container) return;
+        var tm = window.wunFeedTimeMap;
+        if (!tm) return;
+        tm.circle = circle || activeFeedCircle();
+        tm.renderedIds.clear();
+        tm.stagedMap.clear();
+        var maxTs = 0;
+        var cards = container.querySelectorAll('.feed-note-card');
+        for (var i = 0; i < cards.length; i++) {
+            var id = cards[i].getAttribute('data-note-card-id') || cards[i].getAttribute('data-note-id');
+            if (id) tm.renderedIds.add(id);
+            var ts = parseInt(cards[i].getAttribute('data-created-at'), 10) || 0;
+            if (ts > maxTs) maxTs = ts;
+        }
+        // An empty feed locks to "now" so only genuinely newer posts get staged.
+        tm.snapshotMaxTs = maxTs > 0 ? maxTs : Math.floor(Date.now() / 1000);
+        updateNewPostsPill();
+    }
+
+    function stageNewPostCandidate(event, relayUrl, circle) {
+        var tm = window.wunFeedTimeMap;
+        if (!tm || !event || !event.id) return;
+        if (tm.renderedIds.has(event.id) || tm.stagedMap.has(event.id)) return;
+        if (!isRootFeedEvent(event)) return;
+        if (relayUrl && !event._relay_url) event._relay_url = relayUrl;
+        var ts = getEventTs(event);
+        if (!ts || ts <= tm.snapshotMaxTs) return;
+        var scope = circle || tm.circle || activeFeedCircle();
+        if (scope === 'iyou' && !isEcosystemEnvelope(event) && !isKnownIyouAuthor(event)) return;
+        tm.stagedMap.set(event.id, event);
+        updateNewPostsPill();
+    }
+
+    function stageNewPostsOnce() {
+        var tm = window.wunFeedTimeMap;
+        var container = document.getElementById('feed-container');
+        if (!tm || !tm.snapshotMaxTs || !container || _newPostPollInFlight) return;
+        if (_isLoadingFeedNotes || _hydratingInitialFeed || _feedAbortController || _relayHydrating) return;
+        _newPostPollInFlight = true;
+        var circle = tm.circle || activeFeedCircle();
+        var since = tm.snapshotMaxTs + 1;
+        try {
+            var relays = availableRelaysForCircle(circle);
+            if (relays.length && window.relayPool && typeof window.relayPool.requestEvents === 'function') {
+                window.relayPool.requestEvents(
+                    { kinds: [1, 1063, 30023], since: since, limit: 25 },
+                    function (event, relayUrl) { stageNewPostCandidate(event, relayUrl, circle); },
+                    relays, 4000
+                );
+            }
+            var urlParams = new URLSearchParams(window.location.search);
+            var mode = urlParams.get('mode') || (circle === 'global' ? 'global' : 'network');
+            var apiUrl = '/api/feed?circle=' + encodeURIComponent(circle) +
+                '&mode=' + encodeURIComponent(mode) +
+                '&since=' + encodeURIComponent(since) + '&limit=25';
+            var activeRelays = getActiveRelays();
+            if (activeRelays && activeRelays.length) {
+                apiUrl += '&relays=' + encodeURIComponent(JSON.stringify(activeRelays));
+            }
+            fetch(apiUrl)
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var notes = data.notes || [];
+                    notes.forEach(function (note) {
+                        stageNewPostCandidate(note, note.primary_relay || note._primary_relay || '', circle);
+                    });
+                })
+                .catch(function (err) { console.debug('New-post poll skipped:', err && err.message); })
+                .finally(function () { _newPostPollInFlight = false; });
+        } catch (err) {
+            _newPostPollInFlight = false;
+        }
+    }
+
+    function flushStagedPosts() {
+        var tm = window.wunFeedTimeMap;
+        var container = document.getElementById('feed-container');
+        if (!tm || !container || tm.stagedMap.size === 0) return;
+        var sorted = Array.from(tm.stagedMap.values()).sort(function (a, b) {
+            return getEventTs(b) - getEventTs(a);
+        });
+        var firstCard = container.querySelector('.feed-note-card');
+        // Reverse order keeps the newest card at the very top after each insert.
+        sorted.slice().reverse().forEach(function (note) {
+            appendNoteToFeed(note, container, null, 'top', firstCard);
+            tm.renderedIds.add(note.id);
+        });
+        tm.snapshotMaxTs = sorted.reduce(function (max, note) {
+            return Math.max(max, getEventTs(note));
+        }, tm.snapshotMaxTs);
+        tm.stagedMap.clear();
+        updateNewPostsPill();
+
+        var empty = document.getElementById('feed-empty-state');
+        if (empty) { empty.classList.add('hidden'); empty.style.display = 'none'; }
+        container.removeAttribute('data-hydrate');
+        if (window.TrustLens && typeof window.TrustLens.scanDOM === 'function') window.TrustLens.scanDOM();
+        else if (window.trustLens && typeof window.trustLens.scan === 'function') window.trustLens.scan(container);
+        if (window.circleFeedFilter && typeof window.circleFeedFilter.applyFilters === 'function') {
+            window.circleFeedFilter.applyFilters();
+        }
+        hydrateLocalTimestamps(document);
+        checkAndApplyClamping(document);
+        var feedTop = container.getBoundingClientRect().top + window.pageYOffset - 80;
+        window.scrollTo({ top: Math.max(0, feedTop), behavior: 'smooth' });
+    }
+
+    function startNewPostMonitor() {
+        var pill = document.getElementById('new-posts-pill');
+        if (pill && !pill.dataset.wunMonitorBound) {
+            pill.addEventListener('click', flushStagedPosts);
+            pill.dataset.wunMonitorBound = '1';
+        }
+        if (_newPostMonitorTimer) return;
+        window.addEventListener('relayPoolReconnected', function () {
+            if (document.visibilityState === 'visible') stageNewPostsOnce();
+        });
+        document.addEventListener('visibilitychange', function () {
+            if (document.visibilityState === 'visible') stageNewPostsOnce();
+        });
+        _newPostMonitorTimer = setInterval(function () {
+            if (document.visibilityState === 'visible') stageNewPostsOnce();
+        }, 25000);
+    }
+
     // ---------- Renderability Check ----------
 
     function isRenderableNote(note) {
@@ -1280,6 +1522,10 @@
         var container = document.getElementById("feed-container") || document.getElementById("feedContainer") || document.getElementById("tab-posts");
         if (!container || !event) return false;
 
+        // Strict circle isolation: an external WAN event has no business
+        // entering [ ⚡ iyou ] just because the relay pool happened to see it.
+        if (activeFeedCircle() === 'iyou' && !isEcosystemEnvelope(event) && !isKnownIyouAuthor(event)) return false;
+
         if (event.id) {
             var existing = document.querySelector('[data-note-card-id="' + event.id + '"]') || document.querySelector('.feed-note-card[data-note-id="' + event.id + '"]');
             if (existing) return false;
@@ -1315,14 +1561,13 @@
         }
         var eventAuthorUrl = event.author_url || fallbackUrl || "";
 
-        // Sovereign only when the event itself carries verified iyou metadata or
-        // the author pubkey is a known ecosystem member — never blanket-true.
-        var isSovereign = !!(
-            event.is_sovereign ||
+        // Membership is earned from the event envelope (iyou tag or first-party
+        // relay origin) or a known author — never blanket-true from metadata.
+        var isIyou = !!(
+            isEcosystemEnvelope(event) ||
+            isKnownIyouAuthor(event) ||
             event.is_iyou_native ||
-            event.author_did ||
-            isCurrentUser ||
-            (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(eventPubkey))
+            isCurrentUser
         );
 
         var isBlocked = event._filter_status && event._filter_status.status === 'BLOCKED';
@@ -1345,7 +1590,7 @@
             wrapper.setAttribute("data-lang", event.lang);
         }
         wrapper.setAttribute("data-created-at", Math.floor(event.created_at || (Date.now() / 1000)));
-        wrapper.setAttribute("data-is-iyou", isSovereign ? "true" : "false");
+        wrapper.setAttribute("data-is-iyou", isIyou ? "true" : "false");
         if (isBlocked) {
             wrapper.setAttribute("data-is-blocked", "true");
         }
@@ -1384,8 +1629,8 @@
             media_attachments: mediaAttachments,
             media_url: mediaUrl,
             mime_type: mimeType,
-            is_sovereign: isSovereign,
-            is_iyou_native: !!(event.is_iyou_native || isSovereign),
+            is_sovereign: isIyou,
+            is_iyou_native: !!(event.is_iyou_native || isIyou),
             reactions: [],
             reply_count: 0
         };
@@ -1439,19 +1684,17 @@
 
     // ---------- Append Note from JSON API ----------
 
-    function appendNoteToFeed(note, container, repliesMap) {
+    function appendNoteToFeed(note, container, repliesMap, placement, placementAnchor) {
         if (!container || !note) return;
 
-        const activeCircle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === 'function')
-            ? window.circleFeedFilter.getActiveCircle()
-            : ((window.CircleFilter && window.CircleFilter.activeCircle)
-            || new URLSearchParams(window.location.search).get('circle')
-            || 'iyou');
+        const activeCircle = activeFeedCircle();
 
         const isDevMode = new URLSearchParams(window.location.search).get("dev") === "1" || window.DEV_DIAGNOSTIC_MODE;
         const hasIyouTag = Array.isArray(note.tags) && note.tags.some(t => t[0] === "t" && (t[1] || "").toLowerCase() === "iyou");
         const isIyouClient = Array.isArray(note.tags) && note.tags.some(t => t[0] === "client" && (t[1] || "").toLowerCase() === "iyou");
-        const isEcosystem = note.is_iyou_native || note.is_sovereign || note.author_did || note.is_iyou_circle || (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(note.pubkey_hex));
+        const isEcosystem = note.is_iyou_native || note.is_sovereign || note.author_did || note.is_iyou_circle ||
+            isEcosystemEnvelope(note) || isKnownIyouAuthor(note) ||
+            (window.IYOU_ECOSYSTEM_KEYS && window.IYOU_ECOSYSTEM_KEYS.includes(note.pubkey_hex));
 
         const matchesIyou = hasIyouTag || isIyouClient || isEcosystem;
 
@@ -1534,10 +1777,21 @@
                 wrapper.appendChild(repliesDiv);
             }
 
-            insertCardSortedByTimestamp(container, wrapper);
+            if (placement === 'bottom') {
+                // Older history is appended strictly below the reader's viewport
+                // anchor: a Time Map page never reshuffles what is already shown.
+                container.appendChild(wrapper);
+            } else if (placement === 'top') {
+                var anchor = (placementAnchor && placementAnchor.parentElement === container)
+                    ? placementAnchor
+                    : container.querySelector('.feed-note-card');
+                container.insertBefore(wrapper, anchor || null);
+            } else {
+                insertCardSortedByTimestamp(container, wrapper);
+            }
             checkAndApplyClamping(wrapper);
             hydrateLocalTimestamps(wrapper);
-            
+
             // Hide canonical empty state and remove legacy circle-empty-state
             var feedEmptyState = document.getElementById("feed-empty-state");
             var circleEmptyState = document.getElementById("circle-empty-state");
@@ -1679,6 +1933,9 @@
                     hydrateFromRelayPool();
                 }
 
+                // The batch has settled: freeze the one sorted snapshot before
+                // any background monitor starts staging newer events.
+                lockTimeMapSnapshot(container, circle);
                 container.removeAttribute("data-hydrate");
 
                 if (window.TrustLens && typeof window.TrustLens.scanDOM === "function") {
@@ -1695,6 +1952,7 @@
                 var skeleton = document.getElementById("feed-skeleton-container");
                 if (skeleton) skeleton.remove();
                 container.removeAttribute("data-hydrate");
+                lockTimeMapSnapshot(container, circle);
                 // Batch failed: release the hydration guard so the relay-pool
                 // fallback is allowed to try recovering the shell.
                 _hydratingInitialFeed = false;
@@ -1728,6 +1986,7 @@
         if (!syncing && !empty) return;
         if (!window.relayPool || typeof window.relayPool.requestEvents !== "function") return;
 
+        var activeCircle = activeFeedCircle();
         var isBookmarks = !!syncing;
         var filter;
         if (isBookmarks) {
@@ -1740,15 +1999,35 @@
             filter = { "kinds": [1, 1063, 30023], "limit": 25 };
         }
 
-        _relayHydrating = true;
+        // iyou is pinned to first-party relays. If none is available we leave
+        // the honest empty state alone rather than widening into the WAN pool.
+        var relays = null;
+        if (activeCircle === 'iyou') {
+            relays = availableRelaysForCircle('iyou');
+            if (!relays.length) return;
+        }
 
-        window.relayPool.requestEvents(filter, function (event, relayUrl) {
-            if (!event || !event.id) return;
-            var kind = Number(event.kind);
-            if (kind !== 1 && kind !== 1063 && kind !== 30023) return;
-            if (document.querySelector('[data-note-card-id="' + event.id + '"]')) return;
-            try {
-                addNoteToFeed(event);
+        // Buffer the whole fan-out: the snapshot is rendered exactly once, on
+        // EOSE (or the timeout ceiling), sorted newest-first with no mid-flight
+        // DOM shuffling and no unfiltered injections.
+        var buffer = {};
+        var flushed = false;
+        function renderSnapshot() {
+            if (flushed) return;
+            flushed = true;
+            var events = Object.keys(buffer).map(function (id) { return buffer[id]; });
+            events.sort(function (a, b) { return getEventTs(b) - getEventTs(a); });
+            var rendered = 0;
+            events.forEach(function (event) {
+                if (!isRootFeedEvent(event)) return;
+                if (activeCircle === 'iyou' && !isEcosystemEnvelope(event) && !isKnownIyouAuthor(event)) return;
+                try {
+                    if (addNoteToFeed(event)) rendered++;
+                } catch (err) {
+                    console.warn("Relay-pool hydration render failed for " + event.id + ":", err);
+                }
+            });
+            if (rendered > 0) {
                 var syncingEl = document.getElementById("bookmarks-syncing-state");
                 if (syncingEl && syncingEl.parentNode) {
                     syncingEl.parentNode.removeChild(syncingEl);
@@ -1767,15 +2046,27 @@
                 }
                 hydrateLocalTimestamps(document);
                 checkAndApplyClamping(document);
-            } catch (err) {
-                console.warn("Relay-pool hydration render failed for " + event.id + ":", err);
             }
-        }, null, 2500);
+            // Lock the snapshot even when nothing arrived, so the background
+            // monitor starts watching from a deterministic boundary.
+            lockTimeMapSnapshot(container, activeCircle);
+        }
 
-        // Bound the fallback window: if the mesh answered with nothing, reset
-        // the guard and leave the syncing/empty state in place so the user
-        // keeps the honest "still waiting" spinner + retry affordance.
+        _relayHydrating = true;
+        window.relayPool.requestEvents(filter, function (event, relayUrl) {
+            if (!event || !event.id) return;
+            var kind = Number(event.kind);
+            if (kind !== 1 && kind !== 1063 && kind !== 30023) return;
+            if (document.querySelector('[data-note-card-id="' + event.id + '"]')) return;
+            if (activeCircle === 'iyou' && !isEcosystemEnvelope(event) && !isKnownIyouAuthor(event)) return;
+            if (relayUrl && !event._relay_url) event._relay_url = relayUrl;
+            if (!buffer[event.id]) buffer[event.id] = event;
+        }, relays, 2500, { onEose: renderSnapshot });
+
+        // EOSE flushes the batch; this is the hard ceiling for relays that
+        // never signal end-of-stored-events.
         setTimeout(function () {
+            renderSnapshot();
             _relayHydrating = false;
         }, 2800);
     }
@@ -1879,11 +2170,8 @@
         if (spinner) spinner.classList.remove("hidden");
         if (endMsg) endMsg.classList.add("hidden");
 
-        const circle = (window.circleFeedFilter && typeof window.circleFeedFilter.getActiveCircle === 'function')
-            ? window.circleFeedFilter.getActiveCircle()
-            : ((window.CircleFilter && window.CircleFilter.activeCircle)
-            || new URLSearchParams(window.location.search).get('circle')
-            || 'iyou');
+        const circle = activeFeedCircle();
+        if (isReset) resetTimeMapForCircle(circle);
 
         var urlParams = new URLSearchParams(window.location.search);
         var mode = urlParams.get("mode") || (circle === "global" ? "global" : "network");
@@ -1938,7 +2226,9 @@
                     }
 
                     notes.forEach(function (note) {
-                        appendNoteToFeed(note, container, repliesMap);
+                        // Older pages append below the anchor only; the Time Map
+                        // never re-sorts the slice the reader is looking at.
+                        appendNoteToFeed(note, container, repliesMap, isReset ? null : 'bottom');
                     });
 
                     if (data.oldest_timestamp && sentinel) {
@@ -1976,6 +2266,9 @@
                     } else if (window.CircleFilter && typeof window.CircleFilter.applyFilters === "function") {
                         window.CircleFilter.applyFilters();
                     }
+                    // Only a circle reset freezes a new snapshot; older pages
+                    // must not clear posts staged behind the new-posts pill.
+                    if (isReset) lockTimeMapSnapshot(container, circle);
                 } else {
                     _hasMoreFeedNotes = false;
                     if (window.feedObserver && sentinel) {
@@ -2019,6 +2312,7 @@
                         if (endMsg) endMsg.classList.add("hidden");
                         renderTimelineEndMarker(container);
                     }
+                    if (isReset) lockTimeMapSnapshot(container, circle);
                 }
             })
             .catch(function (err) {
@@ -2045,6 +2339,9 @@
         var sentinel = document.getElementById('feed-pagination-sentinel');
         if (!container) return;
 
+        // Circle switch starts a brand-new Time Map: staged posts from the
+        // previous scope are discarded immediately.
+        resetTimeMapForCircle(circleMode);
         _hasMoreFeedNotes = true;
         _stallTriggerCount = 0;
         _lastObservedCardCount = -1;
@@ -3798,6 +4095,16 @@
         // rendered zero cards (server relay latency/outage), ask the browser
         // relay pool to recover the feed/bookmarks directly from the mesh.
         hydrateFromRelayPool();
+
+        // SSR-rendered timelines (no progressive hydration pending) are locked
+        // here; the async shell locks itself once its /api/feed batch settles.
+        var initialFeed = document.getElementById("feed-container");
+        if (initialFeed && initialFeed.getAttribute("data-hydrate") !== "true") {
+            lockTimeMapSnapshot(initialFeed, activeFeedCircle());
+        }
+        // Bind the staging pill and the quiet 25s / visibility / reconnect
+        // monitor. No timer here ever mutates the rendered timeline.
+        startNewPostMonitor();
 
         // Apply "Read More" clamping to server-rendered note bodies
         checkAndApplyClamping(document);

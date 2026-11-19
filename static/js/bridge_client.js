@@ -1348,7 +1348,12 @@
         });
     };
 
-    TauriBridgeClient.prototype.getEffectivePubkey = async function () {
+    TauriBridgeClient.prototype.getEffectivePubkey = async function (options) {
+        var opts = options || {};
+        // Passive load-time probes (contact buttons, relationship scans) must
+        // never surface the "unlock" prompt; only an explicit user action does.
+        var isPassive = opts.silent === true;
+        var hasSession = !!(window.IS_AUTHENTICATED || window.userPubkey || window.userNpub);
         var isValidHex = function (val) {
             return typeof val === "string" && val.length === 64 && /^[a-fA-F0-9]{64}$/.test(val);
         };
@@ -1371,8 +1376,9 @@
         var key = resolveKey();
         if (key) return key;
 
-        // If not found yet and bridge is open or connecting, query active profile and wait up to 1500ms
-        if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+        // Passive probes never wait on the enclave: fall straight through to
+        // window globals so page-load scans stay fast and silent.
+        if (!isPassive && this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
             try {
                 if (this.socket.readyState === WebSocket.OPEN) {
                     this.socket.send(JSON.stringify({ type: "get_profile" }));
@@ -1387,7 +1393,16 @@
             }
         }
 
+        if (isPassive) {
+            // No prompt, no throw: callers fall back to window globals.
+            return null;
+        }
         var msg = "Unlock iyou_home to sync your Nostr key";
+        if (!hasSession) {
+            // Anonymous visitors have no enclave to unlock — reject quietly so
+            // interactive callers still short-circuit without spawning a toast.
+            throw new Error(msg);
+        }
         if (typeof window.showToast === "function") {
             window.showToast(msg, true);
         }
