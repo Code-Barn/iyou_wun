@@ -1138,10 +1138,16 @@ def dashboard(request):
     profile = fetch_profile_data(user_pubkey, relay_urls=relays) if user_pubkey else {}
     deck = UserLinkDeck.objects.filter(user=request.user).first()
     active_frictions = get_author_active_frictions(request.user.username)
+    from .custodial_keys import is_custodial_user
+
+    is_custodial = is_custodial_user(request.user, request)
     return render(request, "dashboard.html", {
         "user_pubkey": user_pubkey,
         "user_npub": user_npub,
         "user_did": request.user.username,
+        "idp_base_url": getattr(settings, "IDP_BASE_PUBLIC_URL", "https://iyou.me").rstrip("/"),
+        "is_custodial": is_custodial,
+        "user_account_tier": "L1" if is_custodial else "L2",
         "profile": profile,
         "relays": relays,
         "relay_objs": relay_objs,
@@ -5233,9 +5239,38 @@ def api_deck_handle(request):
         deck.headline = headline.strip()[:160]
         deck.save(update_fields=["headline", "updated_at"])
 
+    # UserLinkDeck.save() derives nip05 from handle/discriminator; make the
+    # freshly computed value available to the dashboard immediately.
+    from .custodial_keys import is_custodial_user, sign_as_managed
+
+    if is_custodial_user(request.user, request):
+        try:
+            metadata = {
+                "name": deck.display_name or deck.handle or "",
+                "display_name": deck.display_name or deck.handle or "",
+                "about": deck.headline or "",
+                "picture": deck.avatar_url or "",
+                "banner": deck.banner_url or "",
+                "nip05": deck.nip05 or f"{deck.handle}@iyou.me",
+                "lud16": deck.lud16 or "",
+            }
+            kind0_event = sign_as_managed(
+                request.user,
+                {
+                    "created_at": int(time.time()),
+                    "kind": 0,
+                    "tags": [],
+                    "content": json.dumps(metadata, separators=(",", ":"), ensure_ascii=False),
+                },
+            )
+            _broadcast_signed_event(kind0_event)
+        except Exception:
+            logger.debug("Handle-change Kind 0 broadcast skipped", exc_info=True)
+
     return JsonResponse({
         "ok": True,
         "handle": deck.handle,
+        "nip05": deck.nip05 or f"{deck.handle}@iyou.me",
         "discriminator": deck.discriminator,
         "display_handle": deck.display_handle,
         "canonical_url": deck.canonical_path,
