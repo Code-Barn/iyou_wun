@@ -210,6 +210,7 @@
       <script 
         src="{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}/static/js/dock_embed.js" 
         data-chat-origin="{% if IYOU_CHAT_ORIGIN %}{{ IYOU_CHAT_ORIGIN }}{% elif request.is_secure %}https://chat.iyou.me{% else %}http://127.0.0.1:8017{% endif %}"
+        data-mobile-bottom-offset="64px"
         defer>
       </script>
       <script>
@@ -244,17 +245,73 @@
           }
         })();
 
+        function handleChatState(open) {
+          var isOpen = Boolean(open);
+          if (isOpen) {
+            if (typeof window.closeNotificationDrawer === 'function') {
+              window.closeNotificationDrawer();
+            } else if (window.wunNotifications && typeof window.wunNotifications.closeDrawer === 'function') {
+              window.wunNotifications.closeDrawer();
+            }
+            var notifDrawer = document.getElementById('notification-drawer');
+            var notifBackdrop = document.getElementById('notification-drawer-backdrop');
+            if (notifDrawer) {
+              notifDrawer.classList.add('translate-x-full');
+              notifDrawer.setAttribute('aria-hidden', 'true');
+            }
+            if (notifBackdrop) {
+              notifBackdrop.classList.add('hidden');
+            }
+            if (window.wunNotifications) {
+              window.wunNotifications.drawerOpen = false;
+            }
+          }
+          var chatBtn = document.getElementById('mobile-nav-chat-btn');
+          if (chatBtn) {
+            var isCurrent = chatBtn.getAttribute('aria-current') === 'page';
+            if (isOpen) {
+              chatBtn.classList.add('text-violet-600', 'dark:text-violet-400', 'active');
+              chatBtn.classList.remove('text-slate-500', 'dark:text-slate-400');
+            } else if (!isCurrent) {
+              chatBtn.classList.remove('text-violet-600', 'dark:text-violet-400', 'active');
+              chatBtn.classList.add('text-slate-500', 'dark:text-slate-400');
+            }
+          }
+        }
+
+        window.addEventListener('iyou:chat:state', function (event) {
+          var detail = event ? (event.detail || event) : {};
+          handleChatState(detail && typeof detail.open !== 'undefined' ? detail.open : false);
+        });
+
+        window.addEventListener('message', function (event) {
+          if (event.data && event.data.type === 'iyou:chat:state') {
+            var detail = event.data.detail || event.data;
+            handleChatState(detail && typeof detail.open !== 'undefined' ? detail.open : false);
+          }
+        });
+
+        function handleChatUnread(count) {
+          var n = typeof count === 'number' ? count : (parseInt(count, 10) || 0);
+          var displayCount = n > 99 ? '99+' : (n > 0 ? n : '');
+          ['rail-chat-unread-pill', 'nav-chat-unread-pill', 'mobile-chat-unread-pill'].forEach(function (id) {
+            var pill = document.getElementById(id);
+            if (pill) {
+              pill.textContent = displayCount;
+              pill.classList.toggle('hidden', n === 0);
+            }
+          });
+        }
+
+        window.addEventListener('iyou:chat:unread_update', function (event) {
+          var count = (event && event.detail && typeof event.detail.count !== 'undefined') ? event.detail.count : (event ? event.count : 0);
+          handleChatUnread(count);
+        });
+
         window.addEventListener('message', function (event) {
           if (event.data && event.data.type === 'iyou:chat:unread_update') {
-            const count = event.data.count || 0;
-            const displayCount = count > 99 ? '99+' : (count > 0 ? count : '');
-            ['rail-chat-unread-pill', 'nav-chat-unread-pill', 'mobile-chat-unread-pill'].forEach(function (id) {
-              const pill = document.getElementById(id);
-              if (pill) {
-                pill.textContent = displayCount;
-                pill.classList.toggle('hidden', count === 0);
-              }
-            });
+            var count = (event.data.detail && typeof event.data.detail.count !== 'undefined') ? event.data.detail.count : (event.data.count || 0);
+            handleChatUnread(count);
           }
         });
       </script>

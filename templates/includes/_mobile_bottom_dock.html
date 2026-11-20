@@ -66,8 +66,9 @@
     </div>
 
     {# ---- 4 · Chat / DMs (NUMERIC pill — iyou:chat:unread_update) ---- #}
-    <a href="{% url 'chat' %}"
-       onclick="if (!(window.innerWidth < 768 || document.body.classList.contains('has-mobile-bottom-nav'))) { if (window.IyouChatDock) { event.preventDefault(); window.IyouChatDock.toggle(); } }"
+    <a id="mobile-nav-chat-btn"
+       href="https://chat.iyou.me"
+       onclick="if (!event.metaKey && !event.ctrlKey && event.button === 0) { if (window.IyouChatDock && typeof window.IyouChatDock.toggle === 'function') { event.preventDefault(); window.IyouChatDock.toggle(); } }"
        {% if request.resolver_match.url_name == 'chat' %}aria-current="page"{% endif %}
        aria-label="{% if request.resolver_match.url_name == 'chat' %}Chat, current page{% else %}Chat{% endif %}"
        title="Chat &amp; Direct Messages"
@@ -149,17 +150,27 @@
     if (global.__wunMobileDockBadgesBound) return;
     global.__wunMobileDockBadgesBound = true;
 
+    function updateChatUnread(count) {
+      var n = typeof count === 'number' ? count : (parseInt(count, 10) || 0);
+      var displayCount = n > 99 ? '99+' : (n > 0 ? n : '');
+      ['rail-chat-unread-pill', 'nav-chat-unread-pill', 'mobile-chat-unread-pill'].forEach(function (id) {
+        var pill = document.getElementById(id);
+        if (pill) {
+          pill.textContent = displayCount;
+          pill.classList.toggle('hidden', n === 0);
+        }
+      });
+    }
+
+    window.addEventListener('iyou:chat:unread_update', function (event) {
+      var count = (event && event.detail && typeof event.detail.count !== 'undefined') ? event.detail.count : (event ? event.count : 0);
+      updateChatUnread(count);
+    });
+
     window.addEventListener('message', function (event) {
       if (event.data && event.data.type === 'iyou:chat:unread_update') {
-        var count = event.data.count || 0;
-        var displayCount = count > 99 ? '99+' : (count > 0 ? count : '');
-        ['rail-chat-unread-pill', 'nav-chat-unread-pill', 'mobile-chat-unread-pill'].forEach(function (id) {
-          var pill = document.getElementById(id);
-          if (pill) {
-            pill.textContent = displayCount;
-            pill.classList.toggle('hidden', count === 0);
-          }
-        });
+        var count = (event.data.detail && typeof event.data.detail.count !== 'undefined') ? event.data.detail.count : (event.data.count || 0);
+        updateChatUnread(count);
       }
     });
 

@@ -112,8 +112,8 @@ class MobileChromeTemplateTests(TestCase):
 
     def test_mobile_dock_chat_route_and_scroll_autohide(self):
         src = (settings.BASE_DIR / "templates" / "includes" / "_mobile_bottom_dock.html").read_text()
-        self.assertIn("window.innerWidth < 768", src)
-        self.assertIn("has-mobile-bottom-nav", src)
+        self.assertIn("mobile-nav-chat-btn", src)
+        self.assertIn("window.IyouChatDock.toggle", src)
         self.assertIn("DELTA_THRESHOLD = 12", src)
         self.assertIn("translate-y-full", src)
         self.assertIn("requestAnimationFrame", src)

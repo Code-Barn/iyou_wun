@@ -446,6 +446,9 @@
     NotificationManager.prototype.openDrawer = function () {
         var drawer = document.getElementById(DRAWER_ID);
         if (!drawer) return;
+        if (window.IyouChatDock && typeof window.IyouChatDock.close === 'function') {
+            window.IyouChatDock.close();
+        }
         var backdrop = document.getElementById(BACKDROP_ID);
         drawer.classList.remove("translate-x-full");
         drawer.setAttribute("aria-hidden", "false");
